@@ -514,30 +514,38 @@ RECORD_TEMPLATE = {
 
 def check_schema():
     """Check that the Companies table has all required columns before starting."""
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    cols = ",".join(RECORD_TEMPLATE.keys())
     try:
+        # SELECT all required columns with limit=0 — fast, works with anon key.
+        # Returns 200 (even if table is empty) if all columns exist, 400 if any are missing.
         response = requests.get(
-            f"{SUPABASE_URL}/rest/v1/",
-            headers={
-                "apikey": SUPABASE_KEY,
-                "Authorization": f"Bearer {SUPABASE_KEY}",
-                "Accept": "application/openapi+json",
-            },
+            f"{SUPABASE_URL}/rest/v1/Companies?select={cols}&limit=0",
+            headers=headers,
             timeout=10,
         )
-        spec = response.json()
-        properties = spec.get("definitions", {}).get("Companies", {}).get("properties", {})
-        if not properties:
-            print("  [Schema check] Could not read Companies table schema from Supabase.")
-            return False
-        existing = set(properties.keys())
-        missing = [col for col in RECORD_TEMPLATE if col not in existing]
+        if response.status_code == 200:
+            print(f"  [Schema check OK] All {len(RECORD_TEMPLATE)} required columns present.")
+            return True
+
+        # Find exactly which columns are missing by checking one at a time
+        missing = []
+        for col in RECORD_TEMPLATE:
+            r = requests.get(
+                f"{SUPABASE_URL}/rest/v1/Companies?select={col}&limit=0",
+                headers=headers,
+                timeout=10,
+            )
+            if r.status_code != 200:
+                missing.append(col)
+
         if missing:
             print(f"  [Schema check FAILED] Missing columns in Companies table:")
             for col in missing:
                 print(f"    - {col}")
-            return False
-        print(f"  [Schema check OK] All {len(RECORD_TEMPLATE)} required columns present.")
-        return True
+        else:
+            print(f"  [Schema check FAILED] {response.json().get('message', response.text[:200])}")
+        return False
     except Exception as e:
         print(f"  [Schema check error] {e}")
         return False
