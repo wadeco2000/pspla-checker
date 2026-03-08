@@ -147,7 +147,13 @@ def scrape_website(url):
             if m:
                 scraped_email = m.group(1).lower()
 
-        text = soup.get_text(separator=" ", strip=True)[:3000]
+        # Remove chrome (nav/header/footer/sidebar) before capping so actual content isn't crowded out
+        for tag in soup.find_all(["nav", "header", "footer",
+                                   "script", "style", "noscript"]):
+            tag.decompose()
+        for tag in soup.find_all(True, {"role": ["navigation", "banner", "contentinfo"]}):
+            tag.decompose()
+        text = " ".join(soup.get_text(separator=" ", strip=True).split())[:5000]
         return text, scraped_email
     except Exception as e:
         print(f"  [Scrape error] {url}: {e}")
@@ -374,6 +380,43 @@ def check_pspla(company_name, website_region=None):
         return {"licensed": None, "matched_name": None, "license_type": None, "match_method": "error", "pspla_address": None}
 
 
+def _co_fetch_directors(company_number, co_headers):
+    """Fetch director names from a Companies Office company detail page."""
+    import re as _re
+    try:
+        detail_url = f"https://app.companiesoffice.govt.nz/companies/app/ui/pages/companies/{company_number}"
+        resp = requests.get(detail_url, headers=co_headers, timeout=15)
+        soup = BeautifulSoup(resp.text, "html.parser")
+        text = soup.get_text(separator="\n", strip=True)
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+        directors = []
+        i = 0
+        while i < len(lines):
+            # Trigger: "Showing N of N directors"
+            if _re.search(r"Showing \d+ of \d+ director", lines[i], _re.IGNORECASE):
+                # Names follow immediately — collect until we hit an address/section boundary
+                for j in range(i + 1, min(i + 30, len(lines))):
+                    line = lines[j]
+                    # Stop at known section headers or address lines
+                    if any(kw in line for kw in ["Shareholding", "Documents", "PPSR",
+                                                  "Company record link", "Trading Name",
+                                                  "Phone Number", "Email Address"]):
+                        break
+                    # Director name: all letters+spaces, 5-60 chars, no digits
+                    clean = line.replace(" ", "").replace("-", "").replace("'", "")
+                    if (5 < len(line) < 60
+                            and not any(c.isdigit() for c in line)
+                            and clean.isalpha()):
+                        name = " ".join(line.split())  # collapse multiple spaces
+                        name = name.title()
+                        if name not in directors:
+                            directors.append(name)
+            i += 1
+        return directors
+    except Exception:
+        return []
+
+
 def check_companies_office(company_name, pspla_address=None):
     try:
         # If we have a full registered name from PSPLA, search by first 2 words for specificity
@@ -391,54 +434,77 @@ def check_companies_office(company_name, pspla_address=None):
             "advancedPanel": "true",
             "mode": "advanced"
         }
-        headers = {
+        co_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/145.0.0.0 Safari/537.36"
         }
-        response = requests.get(url, params=params, headers=headers, timeout=15)
+        response = requests.get(url, params=params, headers=co_headers, timeout=15)
         soup = BeautifulSoup(response.text, "html.parser")
         text = soup.get_text(separator="\n", strip=True)
 
         # Find company names in results - they appear in ALL CAPS
+        # Also capture the company number which appears on the next line as "(NNNNNNN)"
         lines = [l.strip() for l in text.split("\n") if l.strip()]
         company_name_upper = company_name.upper()
+        import re as _re
 
-        # Look for exact or close match
-        for i, line in enumerate(lines):
-            if company_name_upper in line:
-                # Try to get a real address (contains street/road/avenue etc, not just numbers)
-                address = None
-                address_words = ["road", "street", "avenue", "drive", "place", "lane", "way", "rd ", "st ", "ave "]
-                for j in range(i+1, min(i+6, len(lines))):
-                    l = lines[j].lower()
-                    if any(w in l for w in address_words) and len(lines[j]) > 10:
-                        address = lines[j]
-                        break
-                return {"name": line.title(), "address": address}
+        def _find_match(lines, name_upper):
+            address_words = ["road", "street", "avenue", "drive", "place", "lane", "way", "rd ", "st ", "ave "]
+            for i, line in enumerate(lines):
+                if name_upper in line:
+                    address = None
+                    company_number = None
+                    for j in range(i + 1, min(i + 8, len(lines))):
+                        lj = lines[j]
+                        # Company number looks like "(9364441)" or "(9364441) (NZBN:...)"
+                        m = _re.match(r"\((\d{6,8})\)", lj)
+                        if m and not company_number:
+                            company_number = m.group(1)
+                        if any(w in lj.lower() for w in address_words) and len(lj) > 10 and not address:
+                            address = lj
+                        if address and company_number:
+                            break
+                    return {"name": line.title(), "address": address, "company_number": company_number}
+            return None
 
-        # If no exact match, use Claude to find best match
-        candidates = [l for l in lines if l.isupper() and len(l) > 5][:20]
-        if candidates and pspla_address:
-            prompt = f"""From this list of NZ Companies Office results, which company best matches "{company_name}" with address near "{pspla_address}"?
+        result = _find_match(lines, company_name_upper)
+
+        # If no exact match, try Claude
+        if result is None:
+            candidates = [l for l in lines if l.isupper() and len(l) > 5][:20]
+            if candidates and pspla_address:
+                prompt = f"""From this list of NZ Companies Office results, which company best matches "{company_name}" with address near "{pspla_address}"?
 
 Companies found:
 {chr(10).join(candidates)}
 
 Return ONLY JSON: {{"name": "best match or null", "address": null}}"""
-            message = client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=100,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            text = message.content[0].text.strip()
-            if "```" in text:
-                text = text.split("```")[1]
-                if text.startswith("json"):
-                    text = text[4:]
-            return json.loads(text.strip())
+                message = client.messages.create(
+                    model="claude-sonnet-4-6",
+                    max_tokens=100,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                raw = message.content[0].text.strip()
+                if "```" in raw:
+                    raw = raw.split("```")[1]
+                    if raw.startswith("json"):
+                        raw = raw[4:]
+                result = json.loads(raw.strip())
+
+        if result is None:
+            return {"name": None, "address": None, "directors": []}
+
+        # Fetch directors from the detail page if we have a company number
+        directors = []
+        if result.get("company_number"):
+            directors = _co_fetch_directors(result["company_number"], co_headers)
+            if directors:
+                print(f"  [Companies Office directors] {directors}")
+
+        return {"name": result.get("name"), "address": result.get("address"), "directors": directors}
 
     except Exception as e:
         print(f"  [Companies Office error] {e}")
-    return {"name": None, "address": None}
+    return {"name": None, "address": None, "directors": []}
 
 
 def save_to_supabase(record):
@@ -859,7 +925,25 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
     if not isinstance(licensed_val, bool):
         licensed_val = None
 
-    directors = info.get("director_names") or []
+    # Merge directors from website + Companies Office (deduplicated)
+    directors = list(info.get("director_names") or [])
+    co_directors = co_result.get("directors") or []
+    for d in co_directors:
+        if d and not any(d.lower() == x.lower() for x in directors):
+            directors.append(d)
+
+    # If CO found directors that the website didn't, check their individual PSPLA licences now
+    if co_directors and not individual_license_found and not licensed_val:
+        for director in co_directors:
+            if any(director.lower() == x.lower() for x in (info.get("director_names") or [])):
+                continue  # already checked above
+            print(f"  [Checking CO director individual license] {director}")
+            ind = check_pspla_individual(director)
+            if ind.get("found"):
+                individual_license_found = director
+                licensed_val = True
+                break
+
     reason_parts = []
     if info.get("_fb_snippet"):
         reason_parts.append(f"Facebook description: \"{info['_fb_snippet']}\"")
@@ -928,7 +1012,7 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         "companies_office_name": co_result.get("name"),
         "companies_office_address": co_result.get("address"),
         "individual_license": individual_license_found,
-        "director_name": ", ".join(info.get("director_names") or []),
+        "director_name": ", ".join(directors),
         "root_domain": root_domain,
         "source_url": info.get("_fb_url") or website_url,
         "last_checked": datetime.now(timezone.utc).isoformat(),
