@@ -1447,7 +1447,7 @@ def _search_process_alive():
     if _search_proc is not None and _search_proc.poll() is None:
         return True
     _search_proc = None
-    # Fallback: trust RUNNING_FLAG if it exists and is less than 8 hours old
+    # Fallback 1: RUNNING_FLAG exists and is less than 8 hours old
     if os.path.exists(RUNNING_FLAG):
         age = _time.time() - os.path.getmtime(RUNNING_FLAG)
         if age < 28800:
@@ -1458,6 +1458,12 @@ def _search_process_alive():
                 os.remove(path)
             except FileNotFoundError:
                 pass
+    # Fallback 2: search_status.json was written within the last 90 seconds
+    # (the search scripts write it on every region+term iteration — reliable heartbeat)
+    if os.path.exists(STATUS_FILE):
+        age = _time.time() - os.path.getmtime(STATUS_FILE)
+        if age < 90:
+            return True
     return False
 
 
