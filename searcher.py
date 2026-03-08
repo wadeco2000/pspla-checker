@@ -271,18 +271,40 @@ def find_facebook_url(company_name, page_text=""):
             if r2 and r2 is not SERPAPI_EXHAUSTED:
                 all_candidates += _extract_fb_candidates(r2)
 
-        # Dedupe by URL, keeping the best (word_score + nz_bonus) for each
-        best_per_url = {}
+        # Dedupe by URL, track score and NZ signal separately
+        best_per_url = {}  # url -> (total_score, has_nz_signal)
         for url, snippet, title in all_candidates:
-            score = _word_score(url, snippet, name_words) + _nz_bonus(url, snippet, title)
-            if url not in best_per_url or score > best_per_url[url]:
-                best_per_url[url] = score
+            ws = _word_score(url, snippet, name_words)
+            nz = _nz_bonus(url, snippet, title)
+            total = ws + nz
+            has_nz = nz > 0
+            if url not in best_per_url or total > best_per_url[url][0]:
+                best_per_url[url] = (total, has_nz)
 
         if not best_per_url:
             return None
 
-        ranked = sorted(best_per_url.items(), key=lambda x: -x[1])
-        return ranked[0][0]
+        ranked = sorted(best_per_url.items(), key=lambda x: -x[1][0])
+
+        # Strongly prefer results with a NZ signal — only return non-NZ as last
+        # resort after an explicit NZ-targeted search also finds nothing
+        nz_results = [(url, data) for url, data in ranked if data[1]]
+        if nz_results:
+            return nz_results[0][0]
+
+        # No NZ signal found — try one targeted search before giving up
+        r_nz = google_search(f'site:facebook.com "{company_name}" "New Zealand"', num_results=3)
+        if r_nz and r_nz is not SERPAPI_EXHAUSTED:
+            nz_extra = _extract_fb_candidates(r_nz)
+            nz_extra_signal = [(u, s, t) for u, s, t in nz_extra if _nz_bonus(u, s, t) > 0]
+            if nz_extra_signal:
+                best = sorted(nz_extra_signal,
+                               key=lambda x: -(_word_score(x[0], x[1], name_words)
+                                               + _nz_bonus(x[0], x[1], x[2])))
+                return best[0][0]
+
+        # Nothing with NZ signal — return None rather than a wrong-country page
+        return None
 
     except Exception:
         pass
