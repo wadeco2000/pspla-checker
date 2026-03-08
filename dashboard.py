@@ -1,7 +1,9 @@
 import os
+import csv
+import io
 import subprocess
 import requests
-from flask import Flask, render_template_string, redirect, url_for, request
+from flask import Flask, render_template_string, redirect, url_for, request, Response
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -87,6 +89,7 @@ HTML_TEMPLATE = """
             <form method="POST" action="/clear-db" onsubmit="return confirm('Delete ALL entries from the database? This cannot be undone.')">
                 <button class="btn" style="background:#e74c3c; color:white;">&#x1F5D1; Clear Database</button>
             </form>
+            <a href="/export.csv" class="btn btn-dark" style="text-decoration:none;">&#x2B07; Export CSV</a>
             <a href="/history" class="btn btn-dark" style="text-decoration:none;">&#x1F4DC; Version History</a>
         </div>
     </div>
@@ -454,6 +457,29 @@ def clear_db():
         return redirect(url_for("index", message=f"Error: {e}", type="error"))
 
 
+@app.route("/export.csv")
+def export_csv():
+    companies = get_companies()
+    fields = [
+        "company_name", "website", "region", "phone", "email", "address",
+        "pspla_licensed", "pspla_name", "pspla_address", "pspla_license_number",
+        "pspla_license_status", "pspla_license_expiry", "license_type",
+        "match_method", "match_reason", "individual_license", "director_name",
+        "companies_office_name", "companies_office_address", "last_checked", "notes"
+    ]
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    for c in companies:
+        writer.writerow({f: c.get(f, "") or "" for f in fields})
+    csv_data = output.getvalue()
+    return Response(
+        csv_data,
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=pspla_companies.csv"}
+    )
+
+
 @app.route("/pause-search", methods=["POST"])
 def pause_search():
     open(PAUSE_FLAG, "w").close()
@@ -469,4 +495,5 @@ def resume_search():
 
 if __name__ == "__main__":
     print("Dashboard running at http://localhost:5000")
-    app.run(debug=False)
+    print("Also accessible on your local network — find your IP with: ipconfig")
+    app.run(host="0.0.0.0", port=5000, debug=False)
