@@ -87,7 +87,38 @@ SKIP_DOMAINS = [
     # Aggregator / listicle sites
     "angi.com", "hipages.com.au", "bark.com",
     "houzz.com", "homestars.com",
+    # NZ local/city guide listicle sites
+    "explorehamilton.co.nz", "exploreauckland.co.nz",
+    "explorewellington.co.nz", "explorechristchurch.co.nz",
+    "exploredunedin.co.nz", "exploretauranga.co.nz",
+    "nzlocal.co.nz", "localguide.co.nz",
 ]
+
+# URL path patterns that indicate a listing/directory page rather than a
+# company's own website.  Matched against the URL path (case-insensitive).
+_LISTING_PATH_PATTERNS = [
+    "/best-", "/top-", "/best_", "/top_",
+    "/directory/", "/listings/", "/list-of-",
+    "/find-a-", "/find-an-", "/hire-a-", "/hire-an-",
+    "/local-", "/compare-", "/reviews/",
+    "-in-auckland", "-in-hamilton", "-in-wellington",
+    "-in-christchurch", "-in-tauranga", "-in-dunedin",
+    "-in-new-zealand", "-in-nz",
+]
+
+
+def is_directory_listing_url(url):
+    """Return True if the URL looks like a listing/guide page on someone else's site."""
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        path = parsed.path.lower()
+        for pat in _LISTING_PATH_PATTERNS:
+            if pat in path:
+                return True
+    except Exception:
+        pass
+    return False
 
 
 SERPAPI_EXHAUSTED = "SERPAPI_EXHAUSTED"
@@ -1637,6 +1668,10 @@ def run_search(triggered_by="manual"):
                     found_urls.add(url)
 
                     if any(domain in url for domain in SKIP_DOMAINS):
+                        continue
+
+                    if is_directory_listing_url(url):
+                        print(f"  [Skipped] Directory/listing page: {url}")
                         continue
 
                     if company_exists(url):

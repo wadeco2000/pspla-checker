@@ -761,6 +761,9 @@ HTML_TEMPLATE = """
                 </td>
                 <td>
                     <button class="expand-btn" onclick="toggleDetail({{ loop.index }})">▼ more</button>
+                    <button onclick="deleteCompany({{ c.id }}, '{{ (c.company_name or '') | replace("'", "\\'") }}')"
+                            style="margin-left:4px; padding:1px 7px; font-size:11px; background:#c0392b; color:white; border:none; border-radius:3px; cursor:pointer;"
+                            title="Delete this record">✕</button>
                 </td>
             </tr>
             <tr class="detail-row" id="detail-{{ loop.index }}">
@@ -910,6 +913,28 @@ HTML_TEMPLATE = """
                 btn.textContent = 'Re-check';
                 btn.disabled = false;
             });
+        }
+
+        function deleteCompany(id, name) {
+            if (!confirm('Delete "' + name + '"?\nThis cannot be undone.')) return;
+            fetch('/delete-company', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.ok) {
+                    // Hide the main row and detail row
+                    var mainRow = document.querySelector('.company-row[data-id="' + id + '"]');
+                    var detailRow = document.querySelector('#detail-' + id);
+                    if (mainRow) mainRow.remove();
+                    if (detailRow) detailRow.remove();
+                } else {
+                    alert('Delete failed: ' + (d.error || 'unknown error'));
+                }
+            })
+            .catch(function() { alert('Delete request failed.'); });
         }
 
         function toggleDetail(id) {
@@ -1644,6 +1669,30 @@ def recheck_pspla_for_company():
             "licensed": licensed,
             "pspla_name": pspla_name,
         })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/delete-company", methods=["POST"])
+def delete_company():
+    """Delete a single company record by ID."""
+    from flask import jsonify
+    company_id = request.json.get("id")
+    if not company_id:
+        return jsonify({"error": "No id provided"}), 400
+    try:
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Prefer": "return=minimal",
+        }
+        resp = requests.delete(
+            f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
+            headers=headers,
+        )
+        if resp.status_code in (200, 204):
+            return jsonify({"ok": True})
+        return jsonify({"error": f"Supabase returned {resp.status_code}"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

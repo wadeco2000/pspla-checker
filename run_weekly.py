@@ -18,6 +18,7 @@ from searcher import (
     company_exists, process_and_save_company, check_schema,
     write_status, clear_status, append_history, check_pause,
     RUNNING_FLAG, PAUSE_FLAG, SKIP_DOMAINS, NZ_REGIONS, SERPAPI_EXHAUSTED,
+    is_directory_listing_url,
 )
 
 WEEKLY_TERMS = [
@@ -85,6 +86,9 @@ def run_weekly(triggered_by="manual"):
                     found_urls.add(url)
 
                     if any(domain in url for domain in SKIP_DOMAINS):
+                        continue
+                    if is_directory_listing_url(url):
+                        print(f"  [Skipped] Directory/listing page: {url}")
                         continue
                     if company_exists(url):
                         continue
