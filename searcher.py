@@ -48,6 +48,9 @@ SKIP_DOMAINS = [
 ]
 
 
+SERPAPI_EXHAUSTED = "SERPAPI_EXHAUSTED"
+
+
 def google_search(query, num_results=10):
     url = "https://serpapi.com/search"
     params = {
@@ -70,7 +73,10 @@ def google_search(query, num_results=10):
                     "snippet": item.get("snippet", "")
                 })
         elif "error" in data:
-            print(f"  [SerpAPI error] {data['error']}")
+            error_msg = data["error"]
+            print(f"  [SerpAPI error] {error_msg}")
+            if "run out" in error_msg.lower() or "limit" in error_msg.lower() or "credits" in error_msg.lower():
+                return SERPAPI_EXHAUSTED
         return results
     except Exception as e:
         print(f"  [Search error] {e}")
@@ -475,6 +481,66 @@ def check_pspla_individual(name):
 
 PAUSE_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pause.flag")
 RUNNING_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "running.flag")
+PROGRESS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "search_progress.json")
+
+# Single source of truth for all columns saved to the Companies table.
+# Add new fields here and they are automatically included in the schema check.
+RECORD_TEMPLATE = {
+    "company_name": None,
+    "website": None,
+    "phone": None,
+    "email": None,
+    "address": None,
+    "region": None,
+    "pspla_licensed": None,
+    "pspla_name": None,
+    "pspla_address": None,
+    "pspla_license_number": None,
+    "pspla_license_status": None,
+    "pspla_license_expiry": None,
+    "license_type": None,
+    "match_method": None,
+    "match_reason": None,
+    "companies_office_name": None,
+    "companies_office_address": None,
+    "individual_license": None,
+    "director_name": None,
+    "root_domain": None,
+    "source_url": None,
+    "last_checked": None,
+    "notes": None,
+}
+
+
+def check_schema():
+    """Check that the Companies table has all required columns before starting."""
+    try:
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/",
+            headers={
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "Accept": "application/openapi+json",
+            },
+            timeout=10,
+        )
+        spec = response.json()
+        properties = spec.get("definitions", {}).get("Companies", {}).get("properties", {})
+        if not properties:
+            print("  [Schema check] Could not read Companies table schema from Supabase.")
+            return False
+        existing = set(properties.keys())
+        missing = [col for col in RECORD_TEMPLATE if col not in existing]
+        if missing:
+            print(f"  [Schema check FAILED] Missing columns in Companies table:")
+            for col in missing:
+                print(f"    - {col}")
+            return False
+        print(f"  [Schema check OK] All {len(RECORD_TEMPLATE)} required columns present.")
+        return True
+    except Exception as e:
+        print(f"  [Schema check error] {e}")
+        return False
 
 
 def check_pause():
@@ -486,19 +552,52 @@ def check_pause():
         print("  [RESUMED]")
 
 
+def load_progress():
+    if os.path.exists(PROGRESS_FILE):
+        with open(PROGRESS_FILE) as f:
+            return json.load(f)
+    return {"completed_regions": [], "total_found": 0, "total_new": 0}
+
+
+def save_progress(completed_regions, total_found, total_new):
+    with open(PROGRESS_FILE, "w") as f:
+        json.dump({"completed_regions": completed_regions, "total_found": total_found, "total_new": total_new}, f)
+
+
+def clear_progress():
+    if os.path.exists(PROGRESS_FILE):
+        os.remove(PROGRESS_FILE)
+
+
 def run_search():
     print("=" * 60)
     print("  PSPLA Security Camera Company Checker")
     print("=" * 60)
 
+    # Sanity check — abort if the database is missing any required columns
+    print("  Checking database schema...")
+    if not check_schema():
+        print("  Aborting. Add the missing columns to the Companies table in Supabase, then re-run.")
+        return
+
     # Write running flag so dashboard knows search is active
     open(RUNNING_FLAG, "w").close()
 
-    total_found = 0
-    total_new = 0
+    # Load previous progress if resuming
+    progress = load_progress()
+    completed_regions = progress["completed_regions"]
+    total_found = progress["total_found"]
+    total_new = progress["total_new"]
+
+    if completed_regions:
+        print(f"  Resuming — {len(completed_regions)} regions already done: {', '.join(completed_regions)}")
 
     try:
         for region in NZ_REGIONS:
+            if region in completed_regions:
+                print(f"\n[Skipping] {region} — already completed")
+                continue
+
             print(f"\nSearching region: {region}")
 
             found_urls = set()
@@ -511,188 +610,230 @@ def run_search():
                 results = google_search(query)
                 time.sleep(1)
 
+                if results is SERPAPI_EXHAUSTED:
+                    print("\n  [STOPPED] SerpAPI searches exhausted.")
+                    print(f"  Progress saved — completed regions: {', '.join(completed_regions) or 'none'}")
+                    print("  Upgrade your SerpAPI plan or wait for next month, then re-run to resume.")
+                    save_progress(completed_regions, total_found, total_new)
+                    return
+
                 for result in results:
                     check_pause()
                     url = result["link"]
 
                     if url in found_urls:
-                    continue
-                found_urls.add(url)
+                        continue
+                    found_urls.add(url)
 
-                if any(domain in url for domain in SKIP_DOMAINS):
-                    continue
+                    if any(domain in url for domain in SKIP_DOMAINS):
+                        continue
 
-                if company_exists(url):
-                    print(f"  [Already in DB] {url}")
-                    continue
+                    if company_exists(url):
+                        print(f"  [Already in DB] {url}")
+                        continue
 
-                # Check if we already have this domain (national company branch pages)
-                root_domain = get_root_domain(url)
-                existing = get_domain_record(root_domain)
-                if existing and existing.get("pspla_licensed") == "true":
-                    print(f"  [Domain already licensed] {root_domain} - saving branch entry")
-                    branch_record = {
-                        "company_name": existing["company_name"],
+                    # Check if we already have this domain (national company branch pages)
+                    root_domain = get_root_domain(url)
+                    existing = get_domain_record(root_domain)
+                    if existing and existing.get("pspla_licensed") == "true":
+                        print(f"  [Domain already licensed] {root_domain} - saving branch entry")
+                        branch_record = {
+                            "company_name": existing["company_name"],
+                            "website": url,
+                            "region": region,
+                            "pspla_licensed": existing["pspla_licensed"],
+                            "pspla_name": existing["pspla_name"],
+                            "pspla_address": existing["pspla_address"],
+                            "pspla_license_number": existing["pspla_license_number"],
+                            "pspla_license_status": existing["pspla_license_status"],
+                            "pspla_license_expiry": existing["pspla_license_expiry"],
+                            "license_type": existing["license_type"],
+                            "match_method": "inherited from parent domain",
+                            "root_domain": root_domain,
+                            "source_url": url,
+                            "last_checked": datetime.utcnow().isoformat(),
+                            "notes": f"Branch of {root_domain}"
+                        }
+                        save_to_supabase(branch_record)
+                        continue
+
+                    print(f"  [Found] {url}")
+                    total_found += 1
+
+                    page_text = scrape_website(url)
+                    time.sleep(1)
+
+                    info = extract_company_info(url, page_text, result["snippet"])
+                    if not info or not info.get("company_name"):
+                        print("  [Skipped] Could not extract company name")
+                        continue
+
+                    company_name = info["company_name"]
+                    website_region = info.get("region") or region
+                    print(f"  [Company] {company_name}")
+
+                    # Build list of all names to try on PSPLA
+                    names_to_try = []
+                    if company_name:
+                        names_to_try.append(company_name)
+                    if info.get("legal_name") and info["legal_name"] not in names_to_try:
+                        names_to_try.append(info["legal_name"])
+                    for other in (info.get("other_names") or []):
+                        if other and other not in names_to_try:
+                            names_to_try.append(other)
+
+                    # Try each name on PSPLA until we find a match
+                    pspla_result = None
+                    for name in names_to_try:
+                        print(f"  [Checking PSPLA] {name}")
+                        res = check_pspla(name, website_region=website_region)
+                        if res.get("licensed") and res.get("matched_name"):
+                            # Always verify the PSPLA result against the PRIMARY company name.
+                            # This catches cases where e.g. "Livewire" matches "Livewire Electrical Wellington"
+                            # even though the actual company is "Addz Livewire" — a different business.
+                            matched = res["matched_name"]
+                            needs_verify = company_name.lower() not in matched.lower() and matched.lower() not in company_name.lower()
+                            if needs_verify:
+                                verification = verify_pspla_match(
+                                    company_name, matched, website_region, res.get("pspla_address")
+                                )
+                                if not verification.get("match"):
+                                    print(f"  [Verify rejected] {company_name} vs {matched} - {verification.get('reason')}")
+                                    if pspla_result is None:
+                                        pspla_result = {"licensed": False, "matched_name": None, "license_type": None,
+                                                        "match_method": f"rejected: {verification.get('reason')}",
+                                                        "pspla_address": None, "pspla_license_number": None,
+                                                        "pspla_license_status": None, "pspla_license_expiry": None}
+                                    continue
+                            if name != company_name:
+                                print(f"  [Matched via] {name}")
+                            pspla_result = res
+                            break
+                        elif pspla_result is None:
+                            pspla_result = res
+
+                    # If still no company license, check for individual license using director names
+                    individual_license_found = None
+                    if not pspla_result.get("licensed"):
+                        directors = info.get("director_names") or []
+                        for director in directors:
+                            print(f"  [Checking individual license] {director}")
+                            ind = check_pspla_individual(director)
+                            if ind.get("found"):
+                                individual_license_found = ind["name"]
+                                print(f"  [Individual license found] {individual_license_found}")
+                                break
+                        time.sleep(1)
+
+                    # Companies Office lookup
+                    co_search_name = pspla_result.get("matched_name") or company_name
+                    co_result = check_companies_office(co_search_name, pspla_address=pspla_result.get("pspla_address"))
+                    time.sleep(2)
+
+                    # Ensure pspla_licensed is always bool or None
+                    licensed_val = pspla_result.get("licensed")
+                    if not isinstance(licensed_val, bool):
+                        licensed_val = None
+
+                    # Build plain-English match reason
+                    directors = info.get("director_names") or []
+                    reason_parts = []
+
+                    # Always start with what names were searched on PSPLA
+                    reason_parts.append(f"Searched PSPLA for: {', '.join(names_to_try)}.")
+
+                    if licensed_val is True:
+                        reason_parts.append(f"Active company license found for '{pspla_result.get('matched_name')}' (match method: {pspla_result.get('match_method')}).")
+                        if pspla_result.get("pspla_license_number"):
+                            reason_parts.append(f"License #{pspla_result.get('pspla_license_number')}, status: {pspla_result.get('pspla_license_status') or 'active'}, expires {pspla_result.get('pspla_license_expiry') or 'unknown'}.")
+                        if pspla_result.get("pspla_address"):
+                            reason_parts.append(f"PSPLA registered address: {pspla_result.get('pspla_address')}.")
+                        if directors:
+                            reason_parts.append(f"Director/owner names found on website: {', '.join(directors)} (individual license check not needed).")
+                        else:
+                            reason_parts.append("No director/owner names found on website.")
+                    elif individual_license_found:
+                        reason_parts.append("No active company license found on PSPLA.")
+                        if directors:
+                            reason_parts.append(f"Director/owner names found on website: {', '.join(directors)}.")
+                            reason_parts.append(f"Checked individual PSPLA licenses for each — active individual license found under '{individual_license_found}'.")
+                        else:
+                            reason_parts.append(f"Individual PSPLA license found under '{individual_license_found}'.")
+                    elif (pspla_result.get("pspla_license_status") or "").lower() == "expired":
+                        reason_parts.append(f"Found PSPLA entry for '{pspla_result.get('matched_name')}' but license status is EXPIRED (match method: {pspla_result.get('match_method')}).")
+                        if directors:
+                            reason_parts.append(f"Director/owner names found on website: {', '.join(directors)}.")
+                            reason_parts.append("Checked individual PSPLA licenses for each — " + (f"active individual license found under '{individual_license_found}'." if individual_license_found else "no active individual license found."))
+                        else:
+                            reason_parts.append("No director/owner names found on website to check for individual licenses.")
+                    elif "rejected" in (pspla_result.get("match_method") or ""):
+                        reason_parts.append(f"A potential PSPLA match was found but rejected as a different company: {pspla_result.get('match_method')}.")
+                        if directors:
+                            reason_parts.append(f"Director/owner names found on website: {', '.join(directors)}.")
+                            reason_parts.append("Checked individual PSPLA licenses for each — " + (f"active individual license found under '{individual_license_found}'." if individual_license_found else "no active individual license found."))
+                        else:
+                            reason_parts.append("No director/owner names found on website to check for individual licenses.")
+                    else:
+                        reason_parts.append("No match found on PSPLA.")
+                        if directors:
+                            reason_parts.append(f"Director/owner names found on website: {', '.join(directors)}.")
+                            reason_parts.append("Checked individual PSPLA licenses for each — " + (f"active individual license found under '{individual_license_found}'." if individual_license_found else "no active individual license found."))
+                        else:
+                            reason_parts.append("No director/owner names found on website to check for individual licenses.")
+
+                    # Companies Office result
+                    if co_result.get("name"):
+                        reason_parts.append(f"Companies Office search for '{co_search_name}' found: {co_result['name']}" + (f" at {co_result['address']}." if co_result.get("address") else "."))
+                    else:
+                        reason_parts.append(f"Companies Office search for '{co_search_name}' returned no match.")
+
+                    match_reason = " ".join(reason_parts)
+
+                    record = {
+                        "company_name": company_name,
                         "website": url,
-                        "region": region,
-                        "pspla_licensed": existing["pspla_licensed"],
-                        "pspla_name": existing["pspla_name"],
-                        "pspla_address": existing["pspla_address"],
-                        "pspla_license_number": existing["pspla_license_number"],
-                        "pspla_license_status": existing["pspla_license_status"],
-                        "pspla_license_expiry": existing["pspla_license_expiry"],
-                        "license_type": existing["license_type"],
-                        "match_method": "inherited from parent domain",
+                        "phone": info.get("phone"),
+                        "email": info.get("email"),
+                        "address": info.get("address"),
+                        "region": website_region,
+                        "pspla_licensed": licensed_val,
+                        "pspla_name": pspla_result.get("matched_name"),
+                        "pspla_address": pspla_result.get("pspla_address"),
+                        "pspla_license_number": pspla_result.get("pspla_license_number"),
+                        "pspla_license_status": pspla_result.get("pspla_license_status"),
+                        "pspla_license_expiry": pspla_result.get("pspla_license_expiry"),
+                        "license_type": pspla_result.get("license_type"),
+                        "match_method": pspla_result.get("match_method"),
+                        "match_reason": match_reason,
+                        "companies_office_name": co_result.get("name"),
+                        "companies_office_address": co_result.get("address"),
+                        "individual_license": individual_license_found,
+                        "director_name": ", ".join(info.get("director_names") or []),
                         "root_domain": root_domain,
                         "source_url": url,
                         "last_checked": datetime.utcnow().isoformat(),
-                        "notes": f"Branch of {root_domain}"
+                        "notes": f"Found via: {term} {region}"
                     }
-                    save_to_supabase(branch_record)
-                    continue
 
-                print(f"  [Found] {url}")
-                total_found += 1
-
-                page_text = scrape_website(url)
-                time.sleep(1)
-
-                info = extract_company_info(url, page_text, result["snippet"])
-                if not info or not info.get("company_name"):
-                    print("  [Skipped] Could not extract company name")
-                    continue
-
-                company_name = info["company_name"]
-                website_region = info.get("region") or region
-                print(f"  [Company] {company_name}")
-
-                # Build list of all names to try on PSPLA
-                names_to_try = []
-                if company_name:
-                    names_to_try.append(company_name)
-                if info.get("legal_name") and info["legal_name"] not in names_to_try:
-                    names_to_try.append(info["legal_name"])
-                for other in (info.get("other_names") or []):
-                    if other and other not in names_to_try:
-                        names_to_try.append(other)
-
-                # Try each name on PSPLA until we find a match
-                pspla_result = None
-                for name in names_to_try:
-                    print(f"  [Checking PSPLA] {name}")
-                    res = check_pspla(name, website_region=website_region)
-                    if res.get("licensed") and res.get("matched_name"):
-                        # Always verify the PSPLA result against the PRIMARY company name.
-                        # This catches cases where e.g. "Livewire" matches "Livewire Electrical Wellington"
-                        # even though the actual company is "Addz Livewire" — a different business.
-                        matched = res["matched_name"]
-                        needs_verify = company_name.lower() not in matched.lower() and matched.lower() not in company_name.lower()
-                        if needs_verify:
-                            verification = verify_pspla_match(
-                                company_name, matched, website_region, res.get("pspla_address")
-                            )
-                            if not verification.get("match"):
-                                print(f"  [Verify rejected] {company_name} vs {matched} - {verification.get('reason')}")
-                                if pspla_result is None:
-                                    pspla_result = {"licensed": False, "matched_name": None, "license_type": None,
-                                                    "match_method": f"rejected: {verification.get('reason')}",
-                                                    "pspla_address": None, "pspla_license_number": None,
-                                                    "pspla_license_status": None, "pspla_license_expiry": None}
-                                continue
-                        if name != company_name:
-                            print(f"  [Matched via] {name}")
-                        pspla_result = res
-                        break
-                    elif pspla_result is None:
-                        pspla_result = res
-
-                # If still no company license, check for individual license using director names
-                individual_license_found = None
-                if not pspla_result.get("licensed"):
-                    directors = info.get("director_names") or []
-                    for director in directors:
-                        print(f"  [Checking individual license] {director}")
-                        ind = check_pspla_individual(director)
-                        if ind.get("found"):
-                            individual_license_found = ind["name"]
-                            print(f"  [Individual license found] {individual_license_found}")
-                            break
-                    time.sleep(1)
-
-                co_result = {"name": None, "address": None}
-                time.sleep(2)
-
-                # Ensure pspla_licensed is always bool or None
-                licensed_val = pspla_result.get("licensed")
-                if not isinstance(licensed_val, bool):
-                    licensed_val = None
-
-                # Build plain-English match reason
-                directors = info.get("director_names") or []
-                reason_parts = []
-                if licensed_val is True:
-                    reason_parts.append(f"Found active PSPLA company license for '{pspla_result.get('matched_name')}'.")
-                    reason_parts.append(f"Match method: {pspla_result.get('match_method')}.")
-                    if pspla_result.get("pspla_license_number"):
-                        reason_parts.append(f"License #{pspla_result.get('pspla_license_number')}, expires {pspla_result.get('pspla_license_expiry') or 'unknown'}.")
-                    if pspla_result.get("pspla_address"):
-                        reason_parts.append(f"PSPLA address: {pspla_result.get('pspla_address')}.")
-                elif individual_license_found:
-                    reason_parts.append(f"No company license found on PSPLA for any of: {', '.join(names_to_try)}.")
-                    if directors:
-                        reason_parts.append(f"Director/owner names found on website: {', '.join(directors)}.")
-                    reason_parts.append(f"Individual PSPLA license found under the name '{individual_license_found}'.")
-                elif (pspla_result.get("pspla_license_status") or "").lower() == "expired":
-                    reason_parts.append(f"Found PSPLA entry for '{pspla_result.get('matched_name')}' but license status is EXPIRED.")
-                    reason_parts.append(f"Match method: {pspla_result.get('match_method')}.")
-                elif "rejected" in (pspla_result.get("match_method") or ""):
-                    reason_parts.append(f"Searched PSPLA for: {', '.join(names_to_try)}.")
-                    reason_parts.append(f"A potential match was found but rejected as a different company: {pspla_result.get('match_method')}.")
-                else:
-                    reason_parts.append(f"Searched PSPLA for: {', '.join(names_to_try)}.")
-                    if directors:
-                        reason_parts.append(f"Also checked individual licenses for directors: {', '.join(directors)}.")
-                    reason_parts.append("No match found.")
-
-                match_reason = " ".join(reason_parts)
-
-                record = {
-                    "company_name": company_name,
-                    "website": url,
-                    "phone": info.get("phone"),
-                    "email": info.get("email"),
-                    "address": info.get("address"),
-                    "region": website_region,
-                    "pspla_licensed": licensed_val,
-                    "pspla_name": pspla_result.get("matched_name"),
-                    "pspla_address": pspla_result.get("pspla_address"),
-                    "pspla_license_number": pspla_result.get("pspla_license_number"),
-                    "pspla_license_status": pspla_result.get("pspla_license_status"),
-                    "pspla_license_expiry": pspla_result.get("pspla_license_expiry"),
-                    "license_type": pspla_result.get("license_type"),
-                    "match_method": pspla_result.get("match_method"),
-                    "match_reason": match_reason,
-                    "companies_office_name": co_result.get("name"),
-                    "companies_office_address": co_result.get("address"),
-                    "individual_license": individual_license_found,
-                    "director_name": ", ".join(info.get("director_names") or []),
-                    "root_domain": root_domain,
-                    "source_url": url,
-                    "last_checked": datetime.utcnow().isoformat(),
-                    "notes": f"Found via: {term} {region}"
-                }
-
-                if save_to_supabase(record):
-                    total_new += 1
-                    if pspla_result.get("licensed") is True:
-                        status = "LICENSED"
-                    elif pspla_result.get("licensed") is False:
-                        status = "NOT LICENSED"
+                    if save_to_supabase(record):
+                        total_new += 1
+                        if pspla_result.get("licensed") is True:
+                            status = "LICENSED"
+                        elif pspla_result.get("licensed") is False:
+                            status = "NOT LICENSED"
+                        else:
+                            status = "UNKNOWN"
+                        print(f"  [Saved] PSPLA Status: {status}")
                     else:
-                        status = "UNKNOWN"
-                    print(f"  [Saved] PSPLA Status: {status}")
-                else:
-                    print("  [Error] Failed to save to database")
+                        print("  [Error] Failed to save to database")
+
+            # Region complete — save progress so we can resume if interrupted
+            completed_regions.append(region)
+            save_progress(completed_regions, total_found, total_new)
+            print(f"  [Progress saved] {region} done ({len(completed_regions)}/{len(NZ_REGIONS)} regions)")
+
+        # All regions done — clear progress file
+        clear_progress()
 
     finally:
         # Always clean up flags when done or crashed
