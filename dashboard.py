@@ -780,6 +780,21 @@ HTML_TEMPLATE = """
                         <div class="detail-item"><label>License Status</label><span>{{ c.pspla_license_status or '-' }}</span></div>
                         <div class="detail-item"><label>Last Checked</label><span>{{ (c.last_checked or '')[:10] }}</span></div>
                         <div class="detail-item"><label>Found Via</label><span>{{ c.notes or '-' }}</span></div>
+                        <div class="detail-item" id="pspla-recheck-item-{{ c.id }}">
+                            <label><i class="fa-solid fa-shield-halved" style="color:#2980b9;margin-right:3px"></i> PSPLA Re-check</label>
+                            <span id="pspla-recheck-result-{{ c.id }}">
+                                {{ c.pspla_name or ('Licensed' if c.pspla_licensed == true else ('Not licensed' if c.pspla_licensed == false else 'Unknown')) }}
+                            </span>
+                            <input id="pspla-term-{{ c.id }}" type="text"
+                                   value="{{ (c.company_name or '') | replace('"', '&quot;') }}"
+                                   style="margin-left:8px; padding:1px 5px; font-size:11px; border:1px solid #ccc; border-radius:3px; width:160px;"
+                                   title="Edit name if PSPLA uses a different registered name">
+                            <button onclick="recheckPspla({{ c.id }})"
+                                    id="pspla-btn-{{ c.id }}"
+                                    style="margin-left:4px; padding:1px 7px; font-size:11px; background:#2980b9; color:white; border:none; border-radius:3px; cursor:pointer;">
+                                Re-check
+                            </button>
+                        </div>
                         <div class="detail-item" id="fb-item-{{ c.id }}">
                             <label><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" width="8" height="12" fill="#1877f2" style="vertical-align:middle;margin-right:3px"><path d="M279.14 288l14.22-92.66h-88.91v-60.13c0-25.35 12.42-50.06 52.24-50.06h40.42V6.26S260.43 0 225.36 0c-73.22 0-121.08 44.38-121.08 124.72v70.62H22.89V288h81.39v224h100.17V288z"/></svg> Facebook Page</label>
                             <span id="fb-result-{{ c.id }}">
@@ -857,6 +872,42 @@ HTML_TEMPLATE = """
             .catch(function(e) {
                 result.innerHTML = '<em style="color:#e74c3c">Request failed</em>';
                 btn.textContent = 'Search';
+                btn.disabled = false;
+            });
+        }
+
+        function recheckPspla(id) {
+            var btn = document.getElementById('pspla-btn-' + id);
+            var result = document.getElementById('pspla-recheck-result-' + id);
+            var termInput = document.getElementById('pspla-term-' + id);
+            var name = termInput ? termInput.value.trim() : '';
+            if (!name) return;
+            btn.disabled = true;
+            btn.textContent = 'Checking...';
+            fetch('/recheck-pspla', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id, name: name})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.error) {
+                    result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
+                    btn.textContent = 'Re-check';
+                    btn.disabled = false;
+                } else if (d.licensed) {
+                    result.innerHTML = '<strong style="color:#27ae60">Licensed</strong> — ' + (d.pspla_name || '');
+                    btn.textContent = 'Done';
+                    btn.style.background = '#27ae60';
+                } else {
+                    result.innerHTML = '<em style="color:#e74c3c">Not licensed</em>';
+                    btn.textContent = 'Done';
+                    btn.style.background = '#95a5a6';
+                }
+            })
+            .catch(function(e) {
+                result.innerHTML = '<em style="color:#e74c3c">Request failed</em>';
+                btn.textContent = 'Re-check';
                 btn.disabled = false;
             });
         }
@@ -1547,6 +1598,52 @@ def find_facebook_for_company():
             )
             return jsonify({"found": True, "url": fb_url})
         return jsonify({"found": False})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/recheck-pspla", methods=["POST"])
+def recheck_pspla_for_company():
+    """Re-run PSPLA check for a single company by ID and save the result."""
+    from flask import jsonify
+    company_id = request.json.get("id")
+    company_name = request.json.get("name", "")
+    if not company_name:
+        return jsonify({"error": "No company name provided"}), 400
+    try:
+        from searcher import check_pspla
+        result = check_pspla(company_name)
+        licensed = result.get("licensed")
+        pspla_name = result.get("matched_name")
+        update = {
+            "pspla_licensed": licensed,
+            "pspla_name": pspla_name,
+            "pspla_address": result.get("pspla_address"),
+            "pspla_license_number": result.get("pspla_license_number"),
+            "pspla_license_status": result.get("pspla_license_status"),
+            "pspla_license_expiry": result.get("pspla_license_expiry"),
+            "license_type": result.get("license_type"),
+            "match_method": result.get("match_method"),
+        }
+        # Remove None values to avoid overwriting good data with null
+        update = {k: v for k, v in update.items() if v is not None}
+        # Always save pspla_licensed even if False
+        update["pspla_licensed"] = licensed
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        }
+        requests.patch(
+            f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
+            headers=headers,
+            json=update,
+        )
+        return jsonify({
+            "licensed": licensed,
+            "pspla_name": pspla_name,
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
