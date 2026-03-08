@@ -174,12 +174,16 @@ def find_facebook_url(company_name, page_text=""):
         """Normalise any Facebook link to a page home URL.
         - Strips query string and trailing slash.
         - Normalises m.facebook.com to www.facebook.com.
+        - Hard-rejects groups, marketplace, and other non-page sections.
         - If the URL is a content URL (/posts/, /photos/ etc.), extracts the
           base page URL so that posts mentioning the right company lead us to
           the page itself (e.g. /ChaytorCo/posts/xxx -> /ChaytorCo).
         Returns (page_url, is_content_url) or (None, False) if unusable."""
         link = link.split("?")[0].rstrip("/")
         link = _re.sub(r"^https?://m\.facebook\.com", "https://www.facebook.com", link)
+        # Hard-reject groups, marketplace, events — never company pages
+        if _re.search(r"facebook\.com/(groups|marketplace|events|watch)/", link):
+            return None, False
         # Extract base page from content sub-paths
         content_re = r"(https?://(www\.)?facebook\.com/(?:(?:p|people)/)?[^/?#\s]+)/(?:" + \
                      "|".join(_SKIP_PATHS) + r")(?:/|$)"
@@ -192,13 +196,12 @@ def find_facebook_url(company_name, page_text=""):
             return None, False
         return link, False
 
-    def _has_name_signal(url, title, name_words):
+    def _has_name_signal(url, name_words):
         """Return True if at least one company name word appears in the page
-        slug or title.  Filters out pages like 'BDL Tauranga' that show up
-        only because they shared a post mentioning the company."""
+        URL slug only — not the title, which can contain any company's name
+        when Google indexes a post or comment mentioning them."""
         slug_text = url.lower().replace("-", " ").replace("_", " ").replace("/", " ")
-        title_text = title.lower()
-        return any(w in slug_text or w in title_text for w in name_words)
+        return any(w in slug_text for w in name_words)
 
     def _extract_fb_candidates(results):
         found = []
@@ -225,7 +228,7 @@ def find_facebook_url(company_name, page_text=""):
             # KEY FILTER: reject pages whose slug and title share no words with
             # the company name — catches unrelated pages that merely mentioned
             # the company in a post (BDL Tauranga sharing a Chaytor post)
-            if not _has_name_signal(page_url, title, name_words):
+            if not _has_name_signal(page_url, name_words):
                 continue
             found.append((page_url, snippet, title))
         return found
