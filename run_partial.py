@@ -122,7 +122,7 @@ def run_partial(triggered_by="manual"):
                             info["email"] = found_email
 
                     print(f"  [Company] {info['company_name']}")
-                    fb_url = find_facebook_url(info["company_name"])
+                    fb_url = find_facebook_url(info["company_name"], page_text)
                     if fb_url:
                         info["facebook_url"] = fb_url
                     if process_and_save_company(info, url, root_domain,

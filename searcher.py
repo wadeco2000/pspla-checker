@@ -127,77 +127,123 @@ def google_search(query, num_results=10, time_filter=None):
         return []
 
 
-def find_facebook_url(company_name):
+def find_facebook_url(company_name, page_text=""):
     """Search Google for the company's Facebook page.
-    Pass 1: site:facebook.com "{company_name}" — fast, exact name match.
-    Pass 2 (fallback): plain Google search "{company_name}" facebook — catches
-      pages whose name differs from the trading name (e.g. ATF Hire vs ATF Services NZ).
-    Returns the best-scoring Facebook page URL string or None."""
+
+    Strategy:
+    - Build search terms: original name + alt trading names from page_text.
+    - Run site:facebook.com and plain 'name facebook' searches for each term.
+    - Score candidates on: word match (original name words) + NZ signal bonus.
+      The NZ bonus strongly favours pages with NZ city/domain signals in their
+      URL or Google snippet, reliably beating same-named overseas pages even
+      when they score equally on word match.
+    - Hard-filter obvious overseas results (co.uk / .com.au in snippet).
+    - Return the highest-scoring candidate.
+    """
     import re as _re
 
     _SKIP_SLUGS = {"sharer", "sharer.php", "share", "dialog", "login",
                    "home.php", "pages", "groups", "events", "marketplace",
                    "people", ""}
-    # Subpaths that indicate content, not a page home
     _SKIP_PATHS = {"posts", "photos", "videos", "events", "about",
                    "reviews", "community", "reels", "stories"}
+    # Hard-exclude obvious non-NZ results
+    _HARD_OVERSEAS = ["co.uk", ".uk", "united kingdom", ".com.au", "co.au"]
+    # NZ city/domain signals — presence boosts score significantly
+    _NZ_SIGNALS = ["new zealand", " nz", ".co.nz", ".nz",
+                   "auckland", "wellington", "christchurch", "hamilton",
+                   "tauranga", "dunedin", "palmerston north", "napier",
+                   "hastings", "rotorua", "nelson", "invercargill",
+                   "whangarei", "gisborne", "whanganui", "bay of plenty",
+                   "waikato", "northland", "otago", "southland", "taranaki"]
 
-    def _score(url, name_words):
-        """Score a Facebook URL by how many company name words appear in its full path."""
-        path = url.lower().replace("-", " ").replace("_", " ").replace("/", " ")
-        return sum(1 for w in name_words if w in path)
+    def _is_hard_overseas(result):
+        text = (result.get("snippet", "") + " " + result.get("title", "")).lower()
+        return any(ind in text for ind in _HARD_OVERSEAS)
+
+    def _nz_bonus(url, snippet, title):
+        combined = (url + " " + snippet + " " + title).lower()
+        return 3 if any(sig in combined for sig in _NZ_SIGNALS) else 0
+
+    def _word_score(url, snippet, name_words):
+        haystack = (url.lower().replace("-", " ").replace("_", " ").replace("/", " ")
+                    + " " + snippet.lower())
+        return sum(1 for w in name_words if w in haystack)
 
     def _extract_fb_candidates(results):
-        """Pull valid Facebook page URLs out of a SerpAPI results list."""
         found = []
         for r in results:
+            if _is_hard_overseas(r):
+                continue
             link = r.get("link", "")
             if "facebook.com" not in link:
                 continue
             if _re.search(r"/(" + "|".join(_SKIP_PATHS) + r")/", link):
                 continue
             link_clean = link.split("?")[0].rstrip("/")
-            # /p/PageName/ format
+            snippet = r.get("snippet", "")
+            title = r.get("title", "")
             if _re.match(r"https?://(www\.)?facebook\.com/p/[^/?#\s]+", link_clean):
-                found.append(link_clean)
+                found.append((link_clean, snippet, title))
                 continue
-            # /people/PageName/ID/ format
             if _re.match(r"https?://(www\.)?facebook\.com/people/[^/?#\s]+", link_clean):
-                found.append(link_clean)
+                found.append((link_clean, snippet, title))
                 continue
-            # standard /slug format
             m = _re.match(r"https?://(www\.)?facebook\.com/([^/?#\s]+)", link_clean)
             if m and m.group(2).lower() not in _SKIP_SLUGS:
-                found.append(link_clean)
+                found.append((link_clean, snippet, title))
         return found
+
+    def _alt_names(company_name, page_text):
+        terms = [company_name]
+        stripped = _re.sub(
+            r'\b(Ltd\.?|Limited|NZ|New Zealand|Group)\b',
+            '', company_name, flags=_re.IGNORECASE).strip(" -,")
+        if stripped and stripped != company_name and len(stripped) >= 3:
+            terms.append(stripped)
+        if page_text:
+            lead = _re.match(r'^([A-Z]{2,6})', company_name)
+            if lead:
+                ac = lead.group(1)
+                matches = _re.findall(
+                    r'\b' + _re.escape(ac) + r'\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?(?:\s+NZ\b)?',
+                    page_text)
+                for phrase in matches[:5]:
+                    phrase = phrase.strip()
+                    if phrase != company_name and len(phrase.split()) >= 2:
+                        terms.append(phrase)
+        return list(dict.fromkeys(terms))
 
     if not company_name:
         return None
 
+    # Score only on original company name words — keeps scoring tight and predictable
     name_words = [w.lower() for w in _re.split(r'\W+', company_name) if len(w) >= 3]
+    search_terms = _alt_names(company_name, page_text)
 
     try:
-        # Pass 1: site-restricted search — finds pages with matching name
-        r1 = google_search(f'site:facebook.com "{company_name}"', num_results=5)
-        candidates = []
-        if r1 and r1 is not SERPAPI_EXHAUSTED:
-            candidates = _extract_fb_candidates(r1)
+        all_candidates = []
 
-        # Score pass-1 candidates
-        if candidates:
-            scored = sorted(candidates, key=lambda u: -_score(u, name_words))
-            if _score(scored[0], name_words) > 0:
-                return scored[0]
+        for term in search_terms:
+            r1 = google_search(f'site:facebook.com "{term}"', num_results=5)
+            if r1 and r1 is not SERPAPI_EXHAUSTED:
+                all_candidates += _extract_fb_candidates(r1)
+            r2 = google_search(f'"{term}" facebook', num_results=5)
+            if r2 and r2 is not SERPAPI_EXHAUSTED:
+                all_candidates += _extract_fb_candidates(r2)
 
-        # Pass 2: plain search — finds pages whose name differs from trading name
-        r2 = google_search(f'"{company_name}" facebook', num_results=5)
-        if r2 and r2 is not SERPAPI_EXHAUSTED:
-            candidates2 = _extract_fb_candidates(r2)
-            all_candidates = list({u: None for u in candidates + candidates2})  # dedupe
-            if all_candidates:
-                scored2 = sorted(all_candidates, key=lambda u: -_score(u, name_words))
-                if scored2:
-                    return scored2[0]
+        # Dedupe by URL, keeping the best (word_score + nz_bonus) for each
+        best_per_url = {}
+        for url, snippet, title in all_candidates:
+            score = _word_score(url, snippet, name_words) + _nz_bonus(url, snippet, title)
+            if url not in best_per_url or score > best_per_url[url]:
+                best_per_url[url] = score
+
+        if not best_per_url:
+            return None
+
+        ranked = sorted(best_per_url.items(), key=lambda x: -x[1])
+        return ranked[0][0]
 
     except Exception:
         pass
@@ -1504,7 +1550,7 @@ def run_search(triggered_by="manual"):
                     print(f"  [Company] {info['company_name']}")
 
                     # Find Facebook page via Google search now that we know the name
-                    fb_url = find_facebook_url(info["company_name"])
+                    fb_url = find_facebook_url(info["company_name"], page_text)
                     if fb_url:
                         info["facebook_url"] = fb_url
                         print(f"  [Facebook] {fb_url}")
