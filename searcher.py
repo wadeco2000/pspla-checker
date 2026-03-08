@@ -473,30 +473,49 @@ def check_pspla_individual(name):
     return {"found": False, "name": None}
 
 
+PAUSE_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pause.flag")
+RUNNING_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "running.flag")
+
+
+def check_pause():
+    """Block here if pause.flag exists, until it's removed."""
+    if os.path.exists(PAUSE_FLAG):
+        print("  [PAUSED] Waiting for resume...")
+        while os.path.exists(PAUSE_FLAG):
+            time.sleep(2)
+        print("  [RESUMED]")
+
+
 def run_search():
     print("=" * 60)
     print("  PSPLA Security Camera Company Checker")
     print("=" * 60)
 
+    # Write running flag so dashboard knows search is active
+    open(RUNNING_FLAG, "w").close()
+
     total_found = 0
     total_new = 0
 
-    for region in NZ_REGIONS:
-        print(f"\nSearching region: {region}")
+    try:
+        for region in NZ_REGIONS:
+            print(f"\nSearching region: {region}")
 
-        found_urls = set()
+            found_urls = set()
 
-        for term in SEARCH_TERMS:
-            query = f"{term} {region} New Zealand"
-            print(f"  Query: {query}")
+            for term in SEARCH_TERMS:
+                check_pause()
+                query = f"{term} {region} New Zealand"
+                print(f"  Query: {query}")
 
-            results = google_search(query)
-            time.sleep(1)
+                results = google_search(query)
+                time.sleep(1)
 
-            for result in results:
-                url = result["link"]
+                for result in results:
+                    check_pause()
+                    url = result["link"]
 
-                if url in found_urls:
+                    if url in found_urls:
                     continue
                 found_urls.add(url)
 
@@ -674,6 +693,12 @@ def run_search():
                     print(f"  [Saved] PSPLA Status: {status}")
                 else:
                     print("  [Error] Failed to save to database")
+
+    finally:
+        # Always clean up flags when done or crashed
+        for flag in [RUNNING_FLAG, PAUSE_FLAG]:
+            if os.path.exists(flag):
+                os.remove(flag)
 
     print("\n" + "=" * 60)
     print(f"  Search complete!")

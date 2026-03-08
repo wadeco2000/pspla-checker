@@ -9,6 +9,10 @@ load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PAUSE_FLAG = os.path.join(BASE_DIR, "pause.flag")
+RUNNING_FLAG = os.path.join(BASE_DIR, "running.flag")
+
 app = Flask(__name__)
 
 HTML_TEMPLATE = """
@@ -63,10 +67,23 @@ HTML_TEMPLATE = """
             <h1>PSPLA Security Camera Company Checker</h1>
             <p class="subtitle">NZ companies found installing security cameras — checked against PSPLA licensing register.</p>
         </div>
-        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
-            <form method="POST" action="/start-search" onsubmit="return confirm('Start a full search? This will run in the background and may take a long time.')">
-                <button class="btn" style="background:#27ae60; color:white;">&#9654; Start Search</button>
-            </form>
+        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:center;">
+            {% if search_running %}
+                <span style="font-size:12px; color:#27ae60; font-weight:bold;">&#9679; Search running</span>
+                {% if search_paused %}
+                    <form method="POST" action="/resume-search">
+                        <button class="btn" style="background:#27ae60; color:white;">&#9654; Resume Search</button>
+                    </form>
+                {% else %}
+                    <form method="POST" action="/pause-search">
+                        <button class="btn" style="background:#e67e22; color:white;">&#9646;&#9646; Pause Search</button>
+                    </form>
+                {% endif %}
+            {% else %}
+                <form method="POST" action="/start-search" onsubmit="return confirm('Start a full search? This will run in the background and may take a long time.')">
+                    <button class="btn" style="background:#27ae60; color:white;">&#9654; Start Search</button>
+                </form>
+            {% endif %}
             <form method="POST" action="/clear-db" onsubmit="return confirm('Delete ALL entries from the database? This cannot be undone.')">
                 <button class="btn" style="background:#e74c3c; color:white;">&#x1F5D1; Clear Database</button>
             </form>
@@ -291,7 +308,9 @@ def index():
         unknown=unknown,
         regions=regions,
         message=message,
-        message_type=message_type
+        message_type=message_type,
+        search_running=os.path.exists(RUNNING_FLAG),
+        search_paused=os.path.exists(PAUSE_FLAG)
     )
 
 
@@ -433,6 +452,19 @@ def clear_db():
             return redirect(url_for("index", message=f"Delete failed: {response.text[:200]}", type="error"))
     except Exception as e:
         return redirect(url_for("index", message=f"Error: {e}", type="error"))
+
+
+@app.route("/pause-search", methods=["POST"])
+def pause_search():
+    open(PAUSE_FLAG, "w").close()
+    return redirect(url_for("index", message="Search paused — it will stop after the current company.", type="success"))
+
+
+@app.route("/resume-search", methods=["POST"])
+def resume_search():
+    if os.path.exists(PAUSE_FLAG):
+        os.remove(PAUSE_FLAG)
+    return redirect(url_for("index", message="Search resumed.", type="success"))
 
 
 if __name__ == "__main__":
