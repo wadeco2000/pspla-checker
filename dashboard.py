@@ -137,6 +137,8 @@ HTML_TEMPLATE = """
                         <span class="badge badge-licensed">LICENSED</span>
                     {% elif c.pspla_license_status and c.pspla_license_status|lower == 'expired' %}
                         <span class="badge badge-expired">EXPIRED</span>
+                    {% elif lic == 'false' and c.individual_license %}
+                        <span class="badge badge-expired">INDIVIDUAL ONLY</span>
                     {% elif lic == 'false' %}
                         <span class="badge badge-unlicensed">NOT LICENSED</span>
                     {% else %}

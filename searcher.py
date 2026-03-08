@@ -115,8 +115,10 @@ If they do, extract and return JSON with these fields:
 - email: email address
 - address: physical address including city
 - region: NZ region or city
+- director_names: list of any owner, director, founder or principal names mentioned on the page
 
 Important: Look carefully for the full company name in the footer, about page, contact details, and copyright notices. Companies often use abbreviations in their URL but their full name elsewhere.
+Also look for owner/director names in "about us", "meet the team", "our story" sections.
 If page content is empty or blocked, try to extract what you can from the URL and search snippet alone.
 
 Return ONLY valid JSON or null."""
@@ -399,18 +401,75 @@ def save_to_supabase(record):
         return False
 
 
+def get_root_domain(url):
+    """Extract root domain from URL e.g. https://www.adtsecurity.co.nz/branches/hamilton -> adtsecurity.co.nz"""
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower().replace("www.", "")
+        return domain
+    except:
+        return url
+
+
 def company_exists(website):
     url = f"{SUPABASE_URL}/rest/v1/Companies?website=eq.{requests.utils.quote(website)}"
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}"
-    }
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
     try:
         response = requests.get(url, headers=headers)
         data = response.json()
         return len(data) > 0
     except:
         return False
+
+
+def get_domain_record(domain):
+    """Check if we already have a record for this root domain."""
+    url = f"{SUPABASE_URL}/rest/v1/Companies?root_domain=eq.{requests.utils.quote(domain)}&select=*&limit=1"
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    try:
+        response = requests.get(url, headers=headers)
+        data = response.json()
+        return data[0] if data else None
+    except:
+        return None
+
+
+def check_pspla_individual(name):
+    """Search PSPLA for an individual license."""
+    try:
+        url = "https://forms.justice.govt.nz/forms/publicSolrProxy/solr/PSPLA/select"
+        params = {
+            "rows": "5",
+            "fl": "*, score",
+            "sort": "score desc",
+            "json.nl": "map",
+            "q": f"name_txt:({name})",
+            "fq": "jurisdictionCode_s:PSPLA AND permitHasBeenIssued_b:true",
+            "wt": "json"
+        }
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://forms.justice.govt.nz/search/PSPLA/"
+        }
+        response = requests.get(url, params=params, headers=headers, timeout=15)
+        data = response.json()
+        docs = data.get("response", {}).get("docs", [])
+
+        def get_status(d):
+            s = d.get("permitStatus_s", "")
+            if isinstance(s, list): s = s[0] if s else ""
+            return s.lower()
+
+        active = [d for d in docs if get_status(d) == "active"]
+        if active:
+            matched = active[0]
+            name_field = matched.get("name_txt") or matched.get("caseTitle_s", name)
+            if isinstance(name_field, list): name_field = name_field[0]
+            return {"found": True, "name": name_field}
+    except Exception as e:
+        print(f"  [Individual PSPLA error] {e}")
+    return {"found": False, "name": None}
 
 
 def run_search():
@@ -447,6 +506,31 @@ def run_search():
                     print(f"  [Already in DB] {url}")
                     continue
 
+                # Check if we already have this domain (national company branch pages)
+                root_domain = get_root_domain(url)
+                existing = get_domain_record(root_domain)
+                if existing and existing.get("pspla_licensed") == "true":
+                    print(f"  [Domain already licensed] {root_domain} - saving branch entry")
+                    branch_record = {
+                        "company_name": existing["company_name"],
+                        "website": url,
+                        "region": region,
+                        "pspla_licensed": existing["pspla_licensed"],
+                        "pspla_name": existing["pspla_name"],
+                        "pspla_address": existing["pspla_address"],
+                        "pspla_license_number": existing["pspla_license_number"],
+                        "pspla_license_status": existing["pspla_license_status"],
+                        "pspla_license_expiry": existing["pspla_license_expiry"],
+                        "license_type": existing["license_type"],
+                        "match_method": "inherited from parent domain",
+                        "root_domain": root_domain,
+                        "source_url": url,
+                        "last_checked": datetime.utcnow().isoformat(),
+                        "notes": f"Branch of {root_domain}"
+                    }
+                    save_to_supabase(branch_record)
+                    continue
+
                 print(f"  [Found] {url}")
                 total_found += 1
 
@@ -459,6 +543,7 @@ def run_search():
                     continue
 
                 company_name = info["company_name"]
+                website_region = info.get("region") or region
                 print(f"  [Company] {company_name}")
 
                 # Build list of all names to try on PSPLA
@@ -473,20 +558,31 @@ def run_search():
 
                 # Try each name on PSPLA until we find a match
                 pspla_result = None
-                website_region = info.get("region") or region
                 for name in names_to_try:
                     print(f"  [Checking PSPLA] {name}")
-                    result = check_pspla(name, website_region=website_region)
-                    if result.get("licensed"):
-                        pspla_result = result
+                    res = check_pspla(name, website_region=website_region)
+                    if res.get("licensed"):
+                        pspla_result = res
                         if name != company_name:
                             print(f"  [Matched via] {name}")
                         break
                     elif pspla_result is None:
-                        pspla_result = result  # keep first result as fallback
+                        pspla_result = res
+
+                # If still no company license, check for individual license using director names
+                individual_license_found = None
+                if not pspla_result.get("licensed"):
+                    directors = info.get("director_names") or []
+                    for director in directors:
+                        print(f"  [Checking individual license] {director}")
+                        ind = check_pspla_individual(director)
+                        if ind.get("found"):
+                            individual_license_found = ind["name"]
+                            print(f"  [Individual license found] {individual_license_found}")
+                            break
+                    time.sleep(1)
 
                 co_result = {"name": None, "address": None}
-
                 time.sleep(2)
 
                 # Ensure pspla_licensed is always bool or None
@@ -500,7 +596,7 @@ def run_search():
                     "phone": info.get("phone"),
                     "email": info.get("email"),
                     "address": info.get("address"),
-                    "region": info.get("region") or region,
+                    "region": website_region,
                     "pspla_licensed": licensed_val,
                     "pspla_name": pspla_result.get("matched_name"),
                     "pspla_address": pspla_result.get("pspla_address"),
@@ -511,6 +607,9 @@ def run_search():
                     "match_method": pspla_result.get("match_method"),
                     "companies_office_name": co_result.get("name"),
                     "companies_office_address": co_result.get("address"),
+                    "individual_license": individual_license_found,
+                    "director_name": ", ".join(info.get("director_names") or []),
+                    "root_domain": root_domain,
                     "source_url": url,
                     "last_checked": datetime.utcnow().isoformat(),
                     "notes": f"Found via: {term} {region}"
