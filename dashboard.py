@@ -761,7 +761,7 @@ HTML_TEMPLATE = """
                     {% if c.companies_office_address %}<div class="detail-block">{{ c.companies_office_address }}</div>{% endif %}
                 </td>
                 <td>
-                    <button class="expand-btn" onclick="toggleDetail({{ loop.index }})">▼ more</button>
+                    <button class="expand-btn" onclick="toggleDetail(this, {{ loop.index }})">▼ more</button>
                 </td>
             </tr>
             <tr class="detail-row" id="detail-{{ loop.index }}">
@@ -818,7 +818,8 @@ HTML_TEMPLATE = """
                             </button>
                         </div>
                         <div class="detail-item" style="grid-column: 1 / -1; border-top: 1px solid #ddd; padding-top: 10px; margin-top: 4px;">
-                            <button onclick="deleteCompany({{ c.id }}, {{ c.company_name | tojson }})"
+                            <button data-cid="{{ c.id }}" data-cname="{{ (c.company_name or '') | e }}"
+                                    onclick="deleteCompany(this.dataset.cid, this.dataset.cname)"
                                     style="padding:3px 12px; font-size:12px; background:#c0392b; color:white; border:none; border-radius:3px; cursor:pointer;">
                                 ✕ Delete this record
                             </button>
@@ -941,9 +942,8 @@ HTML_TEMPLATE = """
             .catch(function() { alert('Delete request failed.'); });
         }
 
-        function toggleDetail(id) {
+        function toggleDetail(btn, id) {
             const row = document.getElementById('detail-' + id);
-            const btn = event.target;
             if (row.style.display === 'table-row') {
                 row.style.display = 'none';
                 btn.textContent = '▼ more';
