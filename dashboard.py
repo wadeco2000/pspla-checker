@@ -1115,6 +1115,8 @@ def start_facebook_search():
 def dedupe_db():
     """Merge duplicate company names into one record, combining all regions.
     Keeps the record with the most contact info (phone/email), deletes the rest."""
+    if _search_process_alive():
+        return redirect(url_for("index", message="Cannot dedupe while a search is running — stop it first.", type="error"))
     try:
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
         patch_headers = {**headers, "Content-Type": "application/json", "Prefer": "return=minimal"}
@@ -1415,12 +1417,10 @@ def _write_stopped_history():
         pass
 
 
-@app.route("/stop-search", methods=["POST"])
-def stop_search():
+def _kill_search_processes():
+    """Kill any Python search subprocess — by handle if available, else by scanning processes."""
     global _search_proc
-    # Write history before killing the process (we won't get another chance)
-    _write_stopped_history()
-    # Terminate the subprocess if we have a handle
+    # Kill via handle if we have one
     if _search_proc is not None and _search_proc.poll() is None:
         _search_proc.terminate()
         try:
@@ -1428,8 +1428,38 @@ def stop_search():
         except Exception:
             _search_proc.kill()
     _search_proc = None
-    # Clean up all flags so the UI resets correctly
-    for path in [RUNNING_FLAG, PAUSE_FLAG, PID_FILE]:
+    # Also scan for orphaned search processes (e.g. after dashboard restart)
+    search_scripts = {"searcher.py", "run_weekly.py", "run_facebook.py", "run_partial.py"}
+    our_pid = str(os.getpid())
+    try:
+        result = subprocess.run(
+            ["powershell", "-Command",
+             "Get-WmiObject Win32_Process | Where-Object { $_.Name -eq 'python.exe' } "
+             "| Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"],
+            capture_output=True, text=True, timeout=10)
+        if result.stdout.strip():
+            import json as _json
+            procs = _json.loads(result.stdout)
+            if isinstance(procs, dict):
+                procs = [procs]
+            for proc in procs:
+                pid = str(proc.get("ProcessId", ""))
+                cmd = proc.get("CommandLine") or ""
+                if pid == our_pid:
+                    continue
+                if any(s in cmd for s in search_scripts):
+                    subprocess.run(["taskkill", "/F", "/PID", pid],
+                                   capture_output=True, timeout=5)
+    except Exception:
+        pass
+
+
+@app.route("/stop-search", methods=["POST"])
+def stop_search():
+    _write_stopped_history()
+    _kill_search_processes()
+    # Clean up all flags and status so the UI resets immediately
+    for path in [RUNNING_FLAG, PAUSE_FLAG, PID_FILE, STATUS_FILE, START_FILE]:
         try:
             os.remove(path)
         except FileNotFoundError:
