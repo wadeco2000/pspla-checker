@@ -136,6 +136,7 @@ HTML_TEMPLATE = """
         .company-cell { font-weight: bold; }
         .expand-btn { background: none; border: none; cursor: pointer; color: #2980b9; font-size: 12px; padding: 0; }
         .detail-row { display: none; }
+        .detail-row.open { display: table-row; }
         .detail-row td { background: #f8f9fa; padding: 12px; }
         .detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
         .detail-item label { font-weight: bold; color: #555; font-size: 11px; display: block; margin-bottom: 2px; }
@@ -844,7 +845,7 @@ HTML_TEMPLATE = """
                 const visible = nameMatch && regionMatch && statusMatch;
                 row.style.display = visible ? '' : 'none';
                 const detailRow = document.getElementById('detail-' + row.dataset.id);
-                if (detailRow && !visible) detailRow.style.display = 'none';
+                if (detailRow && !visible) detailRow.classList.remove('open');
             });
         }
 
@@ -943,14 +944,11 @@ HTML_TEMPLATE = """
         }
 
         function toggleDetail(btn, id) {
-            const row = document.getElementById('detail-' + id);
-            if (row.style.display === 'table-row') {
-                row.style.display = 'none';
-                btn.textContent = '▼ more';
-            } else {
-                row.style.display = 'table-row';
-                btn.textContent = '▲ less';
-            }
+            var row = document.getElementById('detail-' + id);
+            if (!row) return;
+            var isOpen = row.classList.contains('open');
+            row.classList.toggle('open');
+            btn.textContent = isOpen ? '▼ more' : '▲ less';
         }
 
         function copyAndOpen(e, licNum) {
