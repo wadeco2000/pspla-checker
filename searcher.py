@@ -542,17 +542,35 @@ Return ONLY JSON: {{"match": true or false, "confidence": "high/medium/low", "re
 
 
 def check_pspla(company_name, website_region=None):
+    def _get_status(d):
+        s = d.get("permitStatus_s", "")
+        if isinstance(s, list): s = s[0] if s else ""
+        return s.lower()
+
     try:
         match_method = None
         docs, num_found = [], 0
 
         # Try 1: full name + name variations
-        # Handles: 'Onguard' vs 'On Guard', 'On-Guard' vs 'On Guard', CamelCase etc.
+        # Prefer the first variant that finds an ACTIVE licence.
+        # If only expired results are found for the first hit, keep trying other
+        # variants — e.g. 'Onguard Security' finds expired Whakatane record but
+        # 'On guard Security' finds the active 'On Guard Security Solutions Ltd'.
+        fallback_docs, fallback_found, fallback_method = [], 0, None
         for variant in generate_name_variations(company_name):
-            docs, num_found = pspla_search(variant)
-            if num_found > 0:
-                match_method = "full name" if variant == company_name else f"name variant: {variant}"
-                break
+            vdocs, vfound = pspla_search(variant)
+            if vfound > 0:
+                vm = "full name" if variant == company_name else f"name variant: {variant}"
+                has_active = any(_get_status(d) == "active" for d in vdocs)
+                if has_active:
+                    docs, num_found, match_method = vdocs, vfound, vm
+                    break  # active licence found — stop here
+                if fallback_found == 0:
+                    fallback_docs, fallback_found, fallback_method = vdocs, vfound, vm
+
+        # If no variant had an active licence, use the first hit (expired/unknown)
+        if num_found == 0 and fallback_found > 0:
+            docs, num_found, match_method = fallback_docs, fallback_found, fallback_method
 
         # Try 2: keyword search (need at least 2 meaningful keywords)
         if num_found == 0:
@@ -572,34 +590,42 @@ def check_pspla(company_name, website_region=None):
                     match_method = f"keyword: {keywords[0]}"
 
         if num_found > 0 and docs:
-            # For keyword/partial matches, verify with Claude before trusting
-            if match_method and match_method != "full name":
-                candidate_name = docs[0].get("name_txt") or docs[0].get("caseTitle_s", "")
-                if isinstance(candidate_name, list): candidate_name = candidate_name[0] if candidate_name else ""
-                candidate_address = docs[0].get("registeredOffice_txt") or docs[0].get("townCity_txt", "")
-                if isinstance(candidate_address, list): candidate_address = candidate_address[0] if candidate_address else ""
-
-                verification = verify_pspla_match(company_name, candidate_name, website_region, candidate_address)
-                if not verification.get("match"):
-                    print(f"  [Match rejected] {company_name} vs {candidate_name} - {verification.get('reason')}")
-                    return {"licensed": False, "matched_name": None, "license_type": None, "match_method": f"rejected: {verification.get('reason')}", "pspla_address": None, "pspla_license_number": None, "pspla_license_status": None, "pspla_license_expiry": None}
-                else:
-                    match_method = f"{match_method} (verified: {verification.get('confidence')})"
-
-            # Prefer active licenses over expired ones
-            def get_status(d):
-                s = d.get("permitStatus_s", "")
-                if isinstance(s, list): s = s[0] if s else ""
-                return s.lower()
-
             def get_field(d, key):
                 val = d.get(key)
                 if isinstance(val, list): val = val[0] if val else None
                 return val
 
-            active_docs = [d for d in docs if get_status(d) == "active"]
+            active_docs = [d for d in docs if _get_status(d) == "active"]
             has_active = len(active_docs) > 0
-            matched = active_docs[0] if has_active else docs[0]
+
+            # For keyword/partial/variant matches, verify with Claude before trusting.
+            # Verify against the best candidate (active first), trying each in turn
+            # until one passes — avoids rejecting the whole result because docs[0]
+            # happens to be a different company with a high keyword score.
+            if match_method and match_method != "full name":
+                candidates = (active_docs or docs)[:5]
+                verified_doc = None
+                for cand in candidates:
+                    cname = get_field(cand, "name_txt") or get_field(cand, "caseTitle_s") or ""
+                    caddr = get_field(cand, "registeredOffice_txt") or get_field(cand, "townCity_txt") or ""
+                    verification = verify_pspla_match(company_name, cname, website_region, caddr)
+                    if verification.get("match"):
+                        verified_doc = cand
+                        match_method = f"{match_method} (verified: {verification.get('confidence')})"
+                        break
+                    print(f"  [Match rejected] {company_name} vs {cname} - {verification.get('reason')}")
+
+                if verified_doc is None:
+                    return {"licensed": False, "matched_name": None, "license_type": None,
+                            "match_method": "rejected: no candidate passed verification",
+                            "pspla_address": None, "pspla_license_number": None,
+                            "pspla_license_status": None, "pspla_license_expiry": None}
+
+                # Re-evaluate active status from the verified doc only
+                has_active = _get_status(verified_doc) == "active"
+                matched = verified_doc
+            else:
+                matched = active_docs[0] if has_active else docs[0]
 
             name_field = get_field(matched, "name_txt") or get_field(matched, "caseTitle_s") or company_name
             pspla_address = get_field(matched, "registeredOffice_txt") or get_field(matched, "townCity_txt")
