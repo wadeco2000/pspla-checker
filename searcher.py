@@ -72,9 +72,21 @@ _DEFAULT_GOOGLE_TERMS = [
 ]
 
 SKIP_DOMAINS = [
-    "youtube.com", "facebook.com", "trademe.co.nz",
-    "google.com", "wikipedia.org", "linkedin.com",
-    "instagram.com", "twitter.com", "yellowpages.co.nz"
+    # Social / search
+    "youtube.com", "facebook.com", "google.com", "wikipedia.org",
+    "linkedin.com", "instagram.com", "twitter.com", "x.com",
+    # NZ directories / review sites
+    "trademe.co.nz", "yellowpages.co.nz", "localist.co.nz",
+    "neighbourly.co.nz", "finda.co.nz", "nzherald.co.nz",
+    "stuff.co.nz", "yelp.com",
+    # NZ retail chains (sell gear, don't install)
+    "pbtech.co.nz", "jbhifi.co.nz", "noelleeming.co.nz",
+    "harveynorman.co.nz", "thewarehouse.co.nz", "countdown.co.nz",
+    "supercheapauto.co.nz", "mitre10.co.nz", "bunnings.co.nz",
+    "smarthomenz.nz", "aliexpress.com", "amazon.com",
+    # Aggregator / listicle sites
+    "angi.com", "hipages.com.au", "bark.com",
+    "houzz.com", "homestars.com",
 ]
 
 
