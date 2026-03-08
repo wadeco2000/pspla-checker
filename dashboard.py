@@ -780,11 +780,23 @@ HTML_TEMPLATE = """
                         <div class="detail-item"><label>License Status</label><span>{{ c.pspla_license_status or '-' }}</span></div>
                         <div class="detail-item"><label>Last Checked</label><span>{{ (c.last_checked or '')[:10] }}</span></div>
                         <div class="detail-item"><label>Found Via</label><span>{{ c.notes or '-' }}</span></div>
-                        {% if c.facebook_url %}
-                        <div class="detail-item"><label><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" width="8" height="12" fill="#1877f2" style="vertical-align:middle;margin-right:3px"><path d="M279.14 288l14.22-92.66h-88.91v-60.13c0-25.35 12.42-50.06 52.24-50.06h40.42V6.26S260.43 0 225.36 0c-73.22 0-121.08 44.38-121.08 124.72v70.62H22.89V288h81.39v224h100.17V288z"/></svg> Facebook Page</label><span><a href="{{ c.facebook_url }}" target="_blank">{{ c.facebook_url }}</a></span></div>
-                        {% elif c.source_url and 'facebook.com' in c.source_url %}
-                        <div class="detail-item"><label><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" width="8" height="12" fill="#1877f2" style="vertical-align:middle;margin-right:3px"><path d="M279.14 288l14.22-92.66h-88.91v-60.13c0-25.35 12.42-50.06 52.24-50.06h40.42V6.26S260.43 0 225.36 0c-73.22 0-121.08 44.38-121.08 124.72v70.62H22.89V288h81.39v224h100.17V288z"/></svg> Facebook Page</label><span><a href="{{ c.source_url }}" target="_blank">{{ c.source_url }}</a></span></div>
-                        {% endif %}
+                        <div class="detail-item" id="fb-item-{{ c.id }}">
+                            <label><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" width="8" height="12" fill="#1877f2" style="vertical-align:middle;margin-right:3px"><path d="M279.14 288l14.22-92.66h-88.91v-60.13c0-25.35 12.42-50.06 52.24-50.06h40.42V6.26S260.43 0 225.36 0c-73.22 0-121.08 44.38-121.08 124.72v70.62H22.89V288h81.39v224h100.17V288z"/></svg> Facebook Page</label>
+                            <span id="fb-result-{{ c.id }}">
+                                {% if c.facebook_url %}
+                                    <a href="{{ c.facebook_url }}" target="_blank">{{ c.facebook_url }}</a>
+                                {% elif c.source_url and 'facebook.com' in c.source_url %}
+                                    <a href="{{ c.source_url }}" target="_blank">{{ c.source_url }}</a>
+                                {% else %}
+                                    <em style="color:#aaa">not found</em>
+                                {% endif %}
+                            </span>
+                            <button onclick="lookupFacebook({{ c.id }}, '{{ (c.company_name or '') | replace("'", "\\'") }}')"
+                                    id="fb-btn-{{ c.id }}"
+                                    style="margin-left:8px; padding:1px 7px; font-size:11px; background:#1877f2; color:white; border:none; border-radius:3px; cursor:pointer;">
+                                Search
+                            </button>
+                        </div>
                     </div>
                 </td>
             </tr>
@@ -806,6 +818,39 @@ HTML_TEMPLATE = """
                 row.style.display = visible ? '' : 'none';
                 const detailRow = document.getElementById('detail-' + row.dataset.id);
                 if (detailRow && !visible) detailRow.style.display = 'none';
+            });
+        }
+
+        function lookupFacebook(id, name) {
+            var btn = document.getElementById('fb-btn-' + id);
+            var result = document.getElementById('fb-result-' + id);
+            btn.disabled = true;
+            btn.textContent = 'Searching...';
+            fetch('/find-facebook', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id, name: name})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.found && d.url) {
+                    result.innerHTML = '<a href="' + d.url + '" target="_blank">' + d.url + '</a>';
+                    btn.textContent = 'Done';
+                    btn.style.background = '#27ae60';
+                } else if (d.error) {
+                    result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
+                    btn.textContent = 'Search';
+                    btn.disabled = false;
+                } else {
+                    result.innerHTML = '<em style="color:#aaa">not found</em>';
+                    btn.textContent = 'Not found';
+                    btn.style.background = '#95a5a6';
+                }
+            })
+            .catch(function(e) {
+                result.innerHTML = '<em style="color:#e74c3c">Request failed</em>';
+                btn.textContent = 'Search';
+                btn.disabled = false;
             });
         }
 
@@ -1468,6 +1513,35 @@ def stop_search():
         except FileNotFoundError:
             pass
     return redirect(url_for("index", message="Search stopped.", type="success"))
+
+
+@app.route("/find-facebook", methods=["POST"])
+def find_facebook_for_company():
+    """Look up a Facebook page for a single company by ID and save it."""
+    from flask import jsonify
+    company_id = request.json.get("id")
+    company_name = request.json.get("name", "")
+    if not company_name:
+        return jsonify({"error": "No company name provided"}), 400
+    try:
+        from searcher import find_facebook_url
+        fb_url = find_facebook_url(company_name)
+        if fb_url:
+            headers = {
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            }
+            requests.patch(
+                f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
+                headers=headers,
+                json={"facebook_url": fb_url},
+            )
+            return jsonify({"found": True, "url": fb_url})
+        return jsonify({"found": False})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 _search_proc = None   # module-level reference to the running subprocess
