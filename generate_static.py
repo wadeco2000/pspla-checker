@@ -258,7 +258,7 @@ def build_rows(companies):
                 <td>{contact}</td>
                 <td>{badge}</td>
                 <td>{pspla_cell}</td>
-                <td>{escape(c.get('pspla_license_number') or '-')}</td>
+                <td>{('<a href="https://forms.justice.govt.nz/search/PSPLA/" target="_blank" title="Search PSPLA register">' + escape(c.get('pspla_license_number')) + '</a>') if c.get('pspla_license_number') else '-'}</td>
                 <td>{escape(c.get('pspla_license_expiry') or '-')}</td>
                 <td>{co_cell}</td>
                 <td><button class="expand-btn" onclick="toggleDetail({i})">▼ more</button></td>

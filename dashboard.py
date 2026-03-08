@@ -196,7 +196,11 @@ HTML_TEMPLATE = """
                     {{ c.pspla_name or '-' }}
                     {% if c.pspla_address %}<div class="detail-block">{{ c.pspla_address }}</div>{% endif %}
                 </td>
-                <td>{{ c.pspla_license_number or '-' }}</td>
+                <td>
+                    {% if c.pspla_license_number %}
+                        <a href="https://forms.justice.govt.nz/search/PSPLA/" target="_blank" title="Search PSPLA register">{{ c.pspla_license_number }}</a>
+                    {% else %}-{% endif %}
+                </td>
                 <td>{{ c.pspla_license_expiry or '-' }}</td>
                 <td>
                     {{ c.companies_office_name or '-' }}
