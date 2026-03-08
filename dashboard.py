@@ -791,9 +791,13 @@ HTML_TEMPLATE = """
                                     <em style="color:#aaa">not found</em>
                                 {% endif %}
                             </span>
-                            <button onclick="lookupFacebook({{ c.id }}, '{{ (c.company_name or '') | replace("'", "\\'") }}')"
+                            <input id="fb-term-{{ c.id }}" type="text"
+                                   value="{{ (c.company_name or '') | replace('"', '&quot;') }}"
+                                   style="margin-left:8px; padding:1px 5px; font-size:11px; border:1px solid #ccc; border-radius:3px; width:160px;"
+                                   title="Edit search term if the company uses a different name on Facebook">
+                            <button onclick="lookupFacebook({{ c.id }})"
                                     id="fb-btn-{{ c.id }}"
-                                    style="margin-left:8px; padding:1px 7px; font-size:11px; background:#1877f2; color:white; border:none; border-radius:3px; cursor:pointer;">
+                                    style="margin-left:4px; padding:1px 7px; font-size:11px; background:#1877f2; color:white; border:none; border-radius:3px; cursor:pointer;">
                                 Search
                             </button>
                         </div>
@@ -821,9 +825,12 @@ HTML_TEMPLATE = """
             });
         }
 
-        function lookupFacebook(id, name) {
+        function lookupFacebook(id) {
             var btn = document.getElementById('fb-btn-' + id);
             var result = document.getElementById('fb-result-' + id);
+            var termInput = document.getElementById('fb-term-' + id);
+            var name = termInput ? termInput.value.trim() : '';
+            if (!name) return;
             btn.disabled = true;
             btn.textContent = 'Searching...';
             fetch('/find-facebook', {

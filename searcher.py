@@ -129,26 +129,47 @@ def google_search(query, num_results=10, time_filter=None):
 
 def find_facebook_url(company_name):
     """Search Google for the company's Facebook page.
-    Uses site:facebook.com query — accurate but costs one SerpAPI credit.
-    Returns the Facebook page URL string or None."""
+    Pass 1: site:facebook.com "{company_name}" — fast, exact name match.
+    Pass 2 (fallback): plain Google search "{company_name}" facebook — catches
+      pages whose name differs from the trading name (e.g. ATF Hire vs ATF Services NZ).
+    Returns the best-scoring Facebook page URL string or None."""
     import re as _re
 
     _SKIP_SLUGS = {"sharer", "sharer.php", "share", "dialog", "login",
-                   "home.php", "pages", "groups", "events", "marketplace", ""}
+                   "home.php", "pages", "groups", "events", "marketplace",
+                   "people", ""}
+    # Subpaths that indicate content, not a page home
+    _SKIP_PATHS = {"posts", "photos", "videos", "events", "about",
+                   "reviews", "community", "reels", "stories"}
 
     def _score(url, name_words):
-        """Score a Facebook URL by how many company name words appear in its path."""
+        """Score a Facebook URL by how many company name words appear in its full path."""
         path = url.lower().replace("-", " ").replace("_", " ").replace("/", " ")
         return sum(1 for w in name_words if w in path)
 
-    def _clean_url(link):
-        """Normalise a Facebook link, handling both /slug and /p/PageName/ formats."""
-        link = link.split("?")[0].rstrip("/")
-        # Handle /p/PageName-numbers/ — newer Facebook page format
-        m = _re.match(r"(https?://(www\.)?facebook\.com)/p/([^/]+)", link)
-        if m:
-            return link  # keep full /p/PageName path
-        return link
+    def _extract_fb_candidates(results):
+        """Pull valid Facebook page URLs out of a SerpAPI results list."""
+        found = []
+        for r in results:
+            link = r.get("link", "")
+            if "facebook.com" not in link:
+                continue
+            if _re.search(r"/(" + "|".join(_SKIP_PATHS) + r")/", link):
+                continue
+            link_clean = link.split("?")[0].rstrip("/")
+            # /p/PageName/ format
+            if _re.match(r"https?://(www\.)?facebook\.com/p/[^/?#\s]+", link_clean):
+                found.append(link_clean)
+                continue
+            # /people/PageName/ID/ format
+            if _re.match(r"https?://(www\.)?facebook\.com/people/[^/?#\s]+", link_clean):
+                found.append(link_clean)
+                continue
+            # standard /slug format
+            m = _re.match(r"https?://(www\.)?facebook\.com/([^/?#\s]+)", link_clean)
+            if m and m.group(2).lower() not in _SKIP_SLUGS:
+                found.append(link_clean)
+        return found
 
     if not company_name:
         return None
@@ -156,40 +177,27 @@ def find_facebook_url(company_name):
     name_words = [w.lower() for w in _re.split(r'\W+', company_name) if len(w) >= 3]
 
     try:
-        query = f'site:facebook.com "{company_name}"'
-        results = google_search(query, num_results=5)
-        if not results or results is SERPAPI_EXHAUSTED:
-            return None
-
-        # Subpaths that indicate content, not a page home
-        _SKIP_PATHS = {"posts", "photos", "videos", "events", "about",
-                       "reviews", "community", "reels", "stories"}
-
+        # Pass 1: site-restricted search — finds pages with matching name
+        r1 = google_search(f'site:facebook.com "{company_name}"', num_results=5)
         candidates = []
-        for r in results:
-            link = r.get("link", "")
-            # Skip content URLs (/posts/, /photos/, etc.)
-            if _re.search(r"/(" + "|".join(_SKIP_PATHS) + r")/", link):
-                continue
-            # Handle /p/PageName/ — newer Facebook page format
-            pm = _re.match(r"https?://(www\.)?facebook\.com/p/([^/?#\s]+)", link)
-            if pm:
-                candidates.append((link, pm.group(2).lower()))
-                continue
-            m = _re.match(r"https?://(www\.)?facebook\.com/([^/?#\s]+)", link)
-            if m:
-                slug = m.group(2).lower()
-                if slug not in _SKIP_SLUGS:
-                    candidates.append((link, slug))
+        if r1 and r1 is not SERPAPI_EXHAUSTED:
+            candidates = _extract_fb_candidates(r1)
 
-        if not candidates:
-            return None
+        # Score pass-1 candidates
+        if candidates:
+            scored = sorted(candidates, key=lambda u: -_score(u, name_words))
+            if _score(scored[0], name_words) > 0:
+                return scored[0]
 
-        # Score each candidate — pick the one with the most company name words in the URL
-        scored = [(c, _score(c[0], name_words)) for c in candidates]
-        scored.sort(key=lambda x: -x[1])
-        best_url = _clean_url(scored[0][0][0])
-        return best_url
+        # Pass 2: plain search — finds pages whose name differs from trading name
+        r2 = google_search(f'"{company_name}" facebook', num_results=5)
+        if r2 and r2 is not SERPAPI_EXHAUSTED:
+            candidates2 = _extract_fb_candidates(r2)
+            all_candidates = list({u: None for u in candidates + candidates2})  # dedupe
+            if all_candidates:
+                scored2 = sorted(all_candidates, key=lambda u: -_score(u, name_words))
+                if scored2:
+                    return scored2[0]
 
     except Exception:
         pass
