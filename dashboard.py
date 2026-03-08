@@ -762,9 +762,6 @@ HTML_TEMPLATE = """
                 </td>
                 <td>
                     <button class="expand-btn" onclick="toggleDetail({{ loop.index }})">▼ more</button>
-                    <button onclick="deleteCompany({{ c.id }}, '{{ (c.company_name or '') | replace("'", "\\'") }}')"
-                            style="margin-left:4px; padding:1px 7px; font-size:11px; background:#c0392b; color:white; border:none; border-radius:3px; cursor:pointer;"
-                            title="Delete this record">✕</button>
                 </td>
             </tr>
             <tr class="detail-row" id="detail-{{ loop.index }}">
@@ -818,6 +815,12 @@ HTML_TEMPLATE = """
                                     id="fb-btn-{{ c.id }}"
                                     style="margin-left:4px; padding:1px 7px; font-size:11px; background:#1877f2; color:white; border:none; border-radius:3px; cursor:pointer;">
                                 Search
+                            </button>
+                        </div>
+                        <div class="detail-item" style="grid-column: 1 / -1; border-top: 1px solid #ddd; padding-top: 10px; margin-top: 4px;">
+                            <button onclick="deleteCompany({{ c.id }}, {{ c.company_name | tojson }})"
+                                    style="padding:3px 12px; font-size:12px; background:#c0392b; color:white; border:none; border-radius:3px; cursor:pointer;">
+                                ✕ Delete this record
                             </button>
                         </div>
                     </div>
