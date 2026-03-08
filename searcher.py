@@ -1,0 +1,448 @@
+import os
+import json
+import time
+import requests
+from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+import anthropic
+from datetime import datetime
+
+load_dotenv()
+
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+SERPAPI_KEY = os.getenv("SERPAPI_KEY")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+NZ_REGIONS = [
+    "Auckland", "Wellington", "Christchurch", "Hamilton", "Tauranga",
+    "Dunedin", "Palmerston North", "Napier", "New Plymouth", "Whangarei",
+    "Nelson", "Invercargill", "Gisborne", "Whanganui", "Rotorua",
+    "Hastings", "Blenheim", "Timaru", "Pukekohe", "Taupo"
+]
+
+SEARCH_TERMS = [
+    "security camera installer",
+    "CCTV installer",
+    "IP camera installation",
+    "security camera installation company",
+    "CCTV installation company",
+    "security alarm installation",
+    "alarm system installer",
+    "IT security camera install",
+    "network camera installation",
+    "surveillance camera installation",
+    "security system installer",
+    "intruder alarm installer",
+    "CCTV security alarm",
+    "electrical security camera installation",
+    "smart home security camera"
+]
+
+SKIP_DOMAINS = [
+    "youtube.com", "facebook.com", "trademe.co.nz",
+    "google.com", "wikipedia.org", "linkedin.com",
+    "instagram.com", "twitter.com", "yellowpages.co.nz"
+]
+
+
+def google_search(query, num_results=10):
+    url = "https://serpapi.com/search"
+    params = {
+        "api_key": SERPAPI_KEY,
+        "engine": "google",
+        "q": query,
+        "num": num_results,
+        "gl": "nz",
+        "hl": "en"
+    }
+    try:
+        response = requests.get(url, params=params, timeout=15)
+        data = response.json()
+        results = []
+        if "organic_results" in data:
+            for item in data["organic_results"]:
+                results.append({
+                    "title": item.get("title", ""),
+                    "link": item.get("link", ""),
+                    "snippet": item.get("snippet", "")
+                })
+        elif "error" in data:
+            print(f"  [SerpAPI error] {data['error']}")
+        return results
+    except Exception as e:
+        print(f"  [Search error] {e}")
+        return []
+
+
+def scrape_website(url):
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        response = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
+        text = soup.get_text(separator=" ", strip=True)[:3000]
+        return text
+    except Exception as e:
+        print(f"  [Scrape error] {url}: {e}")
+        return ""
+
+
+def extract_company_info(url, page_text, search_snippet):
+    prompt = f"""Extract company information from this New Zealand business website.
+The company may be a security company, IT company, electrician, or any other business that installs security cameras, CCTV, IP cameras, surveillance systems, or security alarms.
+
+URL: {url}
+Search snippet: {search_snippet}
+Page content: {page_text}
+
+Only extract if this company installs security cameras, CCTV, IP cameras, surveillance systems or security alarms in New Zealand.
+If they do not offer these services, return null.
+
+If they do, extract and return JSON with these fields:
+- company_name: the business trading name
+- phone: phone number (NZ format)
+- email: email address
+- address: physical address including city
+- region: NZ region or city
+
+Return ONLY valid JSON or null."""
+
+    try:
+        message = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=500,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        text = message.content[0].text.strip()
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        result = json.loads(text.strip())
+        if isinstance(result, list):
+            result = result[0] if result else None
+        return result
+    except Exception as e:
+        print(f"  [Claude extract error] {e}")
+        return None
+
+
+def pspla_search(query):
+    """Run a search against the PSPLA Solr API."""
+    url = "https://forms.justice.govt.nz/forms/publicSolrProxy/solr/PSPLA/select"
+    params = {
+        "facet": "true",
+        "rows": "10",
+        "fl": "*, score",
+        "facet.limit": "-1",
+        "facet.mincount": "-1",
+        "sort": "score desc",
+        "json.nl": "map",
+        "q": f"name_txt:({query})",
+        "fq": "jurisdictionCode_s:PSPLA AND permitHasBeenIssued_b:true",
+        "wt": "json"
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://forms.justice.govt.nz/search/PSPLA/"
+    }
+    response = requests.get(url, params=params, headers=headers, timeout=15)
+    data = response.json()
+    return data.get("response", {}).get("docs", []), data.get("response", {}).get("numFound", 0)
+
+
+def extract_keywords(company_name):
+    """Extract meaningful keywords from a company name."""
+    stop_words = {"limited", "ltd", "nz", "n.z.", "new", "zealand", "the", "and", "&",
+                  "co", "company", "group", "services", "solutions", "systems", "technologies",
+                  "technology", "tech", "security", "electrical", "holdings", "cctv", "camera",
+                  "cameras", "install", "installer", "installation", "alarm", "alarms",
+                  "auckland", "wellington", "christchurch", "hamilton", "tauranga", "dunedin",
+                  "northland", "waikato", "otago", "canterbury", "nelson", "gisborne", "taranaki"}
+    words = company_name.lower().replace("(", "").replace(")", "").replace(",", "").split()
+    keywords = [w for w in words if w not in stop_words and len(w) > 2]
+    return keywords
+
+
+def check_pspla(company_name):
+    try:
+        match_method = None
+
+        # Try 1: full name search
+        docs, num_found = pspla_search(company_name)
+        if num_found > 0:
+            match_method = "full name"
+
+        # Try 2: keyword search if no results (need at least 2 meaningful keywords)
+        if num_found == 0:
+            keywords = extract_keywords(company_name)
+            if len(keywords) >= 2:
+                keyword_query = " AND ".join(keywords[:3])
+                docs, num_found = pspla_search(keyword_query)
+                if num_found > 0:
+                    match_method = f"keywords: {keyword_query}"
+
+        # Try 3: first significant word only if it's long enough to be unique (6+ chars)
+        if num_found == 0:
+            keywords = extract_keywords(company_name)
+            if keywords and len(keywords[0]) >= 6:
+                docs, num_found = pspla_search(keywords[0])
+                if num_found > 0:
+                    match_method = f"keyword: {keywords[0]}"
+
+        if num_found > 0 and docs:
+            # Prefer active licenses over expired ones
+            def get_status(d):
+                s = d.get("permitStatus_s", "")
+                if isinstance(s, list): s = s[0] if s else ""
+                return s.lower()
+            active_docs = [d for d in docs if get_status(d) == "active"]
+            matched = active_docs[0] if active_docs else docs[0]
+            name_field = matched.get("name_txt") or matched.get("caseTitle_s", company_name)
+            if isinstance(name_field, list):
+                name_field = name_field[0]
+            license_type = "individual" if matched.get("isIndividual_b") else "company"
+
+            pspla_address = matched.get("registeredOffice_txt") or matched.get("townCity_txt")
+            if isinstance(pspla_address, list):
+                pspla_address = pspla_address[0]
+
+            permit_number = matched.get("permitNumber_txt")
+            if isinstance(permit_number, list):
+                permit_number = permit_number[0]
+
+            permit_status = matched.get("permitStatus_s")
+            if isinstance(permit_status, list):
+                permit_status = permit_status[0]
+
+            permit_expiry = matched.get("permitEndDate_s")
+            if isinstance(permit_expiry, list):
+                permit_expiry = permit_expiry[0]
+
+            # Check if license is currently active
+            status_str = permit_status.lower() if permit_status else ""
+            is_active = status_str == "active"
+
+            return {
+                "licensed": is_active,
+                "matched_name": name_field,
+                "license_type": license_type,
+                "match_method": match_method,
+                "pspla_address": pspla_address,
+                "pspla_license_number": permit_number,
+                "pspla_license_status": permit_status,
+                "pspla_license_expiry": permit_expiry
+            }
+        else:
+            return {"licensed": False, "matched_name": None, "license_type": None, "match_method": "no match found", "pspla_address": None, "pspla_license_number": None, "pspla_license_status": None, "pspla_license_expiry": None}
+
+    except Exception as e:
+        print(f"  [PSPLA check error] {e}")
+        return {"licensed": None, "matched_name": None, "license_type": None, "match_method": "error", "pspla_address": None}
+
+
+def check_companies_office(company_name, pspla_address=None):
+    try:
+        # If we have a full registered name from PSPLA, search by first 2 words for specificity
+        words = company_name.replace("(", "").replace(")", "").replace(".", "").split()
+        non_generic = [w for w in words if w.lower() not in {"limited", "ltd", "nz", "the", "and", "&", "co"}]
+        search_term = " ".join(non_generic[:3]) if non_generic else company_name
+
+        url = "https://app.companiesoffice.govt.nz/companies/app/ui/pages/companies/search"
+        params = {
+            "q": search_term,
+            "entityTypes": "ALL",
+            "entityStatusGroups": "ALL",
+            "start": "0",
+            "limit": "15",
+            "advancedPanel": "true",
+            "mode": "advanced"
+        }
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/145.0.0.0 Safari/537.36"
+        }
+        response = requests.get(url, params=params, headers=headers, timeout=15)
+        soup = BeautifulSoup(response.text, "html.parser")
+        text = soup.get_text(separator="\n", strip=True)
+
+        # Find company names in results - they appear in ALL CAPS
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+        company_name_upper = company_name.upper()
+
+        # Look for exact or close match
+        for i, line in enumerate(lines):
+            if company_name_upper in line:
+                # Try to get a real address (contains street/road/avenue etc, not just numbers)
+                address = None
+                address_words = ["road", "street", "avenue", "drive", "place", "lane", "way", "rd ", "st ", "ave "]
+                for j in range(i+1, min(i+6, len(lines))):
+                    l = lines[j].lower()
+                    if any(w in l for w in address_words) and len(lines[j]) > 10:
+                        address = lines[j]
+                        break
+                return {"name": line.title(), "address": address}
+
+        # If no exact match, use Claude to find best match
+        candidates = [l for l in lines if l.isupper() and len(l) > 5][:20]
+        if candidates and pspla_address:
+            prompt = f"""From this list of NZ Companies Office results, which company best matches "{company_name}" with address near "{pspla_address}"?
+
+Companies found:
+{chr(10).join(candidates)}
+
+Return ONLY JSON: {{"name": "best match or null", "address": null}}"""
+            message = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=100,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            text = message.content[0].text.strip()
+            if "```" in text:
+                text = text.split("```")[1]
+                if text.startswith("json"):
+                    text = text[4:]
+            return json.loads(text.strip())
+
+    except Exception as e:
+        print(f"  [Companies Office error] {e}")
+    return {"name": None, "address": None}
+
+
+def save_to_supabase(record):
+    url = f"{SUPABASE_URL}/rest/v1/Companies"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal"
+    }
+    try:
+        response = requests.post(url, headers=headers, json=record)
+        if response.status_code not in [200, 201]:
+            print(f"  [Supabase error] {response.status_code}: {response.text[:300]}")
+            return False
+        return True
+    except Exception as e:
+        print(f"  [Supabase save error] {e}")
+        return False
+
+
+def company_exists(website):
+    url = f"{SUPABASE_URL}/rest/v1/Companies?website=eq.{requests.utils.quote(website)}"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}"
+    }
+    try:
+        response = requests.get(url, headers=headers)
+        data = response.json()
+        return len(data) > 0
+    except:
+        return False
+
+
+def run_search():
+    print("=" * 60)
+    print("  PSPLA Security Camera Company Checker")
+    print("=" * 60)
+
+    total_found = 0
+    total_new = 0
+
+    for region in NZ_REGIONS:
+        print(f"\nSearching region: {region}")
+
+        found_urls = set()
+
+        for term in SEARCH_TERMS:
+            query = f"{term} {region} New Zealand"
+            print(f"  Query: {query}")
+
+            results = google_search(query)
+            time.sleep(1)
+
+            for result in results:
+                url = result["link"]
+
+                if url in found_urls:
+                    continue
+                found_urls.add(url)
+
+                if any(domain in url for domain in SKIP_DOMAINS):
+                    continue
+
+                if company_exists(url):
+                    print(f"  [Already in DB] {url}")
+                    continue
+
+                print(f"  [Found] {url}")
+                total_found += 1
+
+                page_text = scrape_website(url)
+                time.sleep(1)
+
+                info = extract_company_info(url, page_text, result["snippet"])
+                if not info or not info.get("company_name"):
+                    print("  [Skipped] Could not extract company name")
+                    continue
+
+                company_name = info["company_name"]
+                print(f"  [Company] {company_name}")
+
+                print(f"  [Checking PSPLA] {company_name}")
+                pspla_result = check_pspla(company_name)
+
+                co_result = {"name": None, "address": None}
+
+                time.sleep(2)
+
+                # Ensure pspla_licensed is always bool or None
+                licensed_val = pspla_result.get("licensed")
+                if not isinstance(licensed_val, bool):
+                    licensed_val = None
+
+                record = {
+                    "company_name": company_name,
+                    "website": url,
+                    "phone": info.get("phone"),
+                    "email": info.get("email"),
+                    "address": info.get("address"),
+                    "region": info.get("region") or region,
+                    "pspla_licensed": licensed_val,
+                    "pspla_name": pspla_result.get("matched_name"),
+                    "pspla_address": pspla_result.get("pspla_address"),
+                    "pspla_license_number": pspla_result.get("pspla_license_number"),
+                    "pspla_license_status": pspla_result.get("pspla_license_status"),
+                    "pspla_license_expiry": pspla_result.get("pspla_license_expiry"),
+                    "license_type": pspla_result.get("license_type"),
+                    "match_method": pspla_result.get("match_method"),
+                    "companies_office_name": co_result.get("name"),
+                    "companies_office_address": co_result.get("address"),
+                    "source_url": url,
+                    "last_checked": datetime.utcnow().isoformat(),
+                    "notes": f"Found via: {term} {region}"
+                }
+
+                if save_to_supabase(record):
+                    total_new += 1
+                    if pspla_result.get("licensed") is True:
+                        status = "LICENSED"
+                    elif pspla_result.get("licensed") is False:
+                        status = "NOT LICENSED"
+                    else:
+                        status = "UNKNOWN"
+                    print(f"  [Saved] PSPLA Status: {status}")
+                else:
+                    print("  [Error] Failed to save to database")
+
+    print("\n" + "=" * 60)
+    print(f"  Search complete!")
+    print(f"  Total URLs found:      {total_found}")
+    print(f"  New companies added:   {total_new}")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    run_search()
