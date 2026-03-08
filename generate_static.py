@@ -107,12 +107,12 @@ STATIC_TEMPLATE = """<!DOCTYPE html>
     </table>
 
     <script>
-        function filterTable() {{
+        function filterTable() {
             const search = document.getElementById('searchBox').value.toLowerCase();
             const region = document.getElementById('regionFilter').value.toLowerCase();
             const status = document.getElementById('statusFilter').value.toLowerCase();
             const rows = document.querySelectorAll('.company-row');
-            rows.forEach(row => {{
+            rows.forEach(row => {
                 const nameMatch = !search || row.dataset.name.includes(search);
                 const regionMatch = !region || row.dataset.region.includes(region);
                 const statusMatch = !status || row.dataset.status === status;
@@ -120,20 +120,20 @@ STATIC_TEMPLATE = """<!DOCTYPE html>
                 row.style.display = visible ? '' : 'none';
                 const detailRow = document.getElementById('detail-' + row.dataset.id);
                 if (detailRow && !visible) detailRow.style.display = 'none';
-            }});
-        }}
+            });
+        }
 
-        function toggleDetail(id) {{
+        function toggleDetail(id) {
             const row = document.getElementById('detail-' + id);
             const btn = event.target;
-            if (row.style.display === 'table-row') {{
+            if (row.style.display === 'table-row') {
                 row.style.display = 'none';
                 btn.textContent = '▼ more';
-            }} else {{
+            } else {
                 row.style.display = 'table-row';
                 btn.textContent = '▲ less';
-            }}
-        }}
+            }
+        }
     </script>
 </body>
 </html>"""
@@ -267,16 +267,15 @@ def generate():
     updated = datetime.utcnow().strftime("%d %B %Y %H:%M UTC")
     rows = build_rows(companies)
 
-    html = STATIC_TEMPLATE.format(
-        updated=updated,
-        total=total,
-        licensed=licensed,
-        unlicensed=unlicensed,
-        expired=expired,
-        unknown=unknown,
-        region_options=region_options,
-        rows=rows
-    )
+    html = STATIC_TEMPLATE
+    html = html.replace("{updated}", updated)
+    html = html.replace("{total}", str(total))
+    html = html.replace("{licensed}", str(licensed))
+    html = html.replace("{unlicensed}", str(unlicensed))
+    html = html.replace("{expired}", str(expired))
+    html = html.replace("{unknown}", str(unknown))
+    html = html.replace("{region_options}", region_options)
+    html = html.replace("{rows}", rows)
 
     os.makedirs("docs", exist_ok=True)
     with open("docs/index.html", "w", encoding="utf-8") as f:
