@@ -106,7 +106,7 @@ def run_partial(triggered_by="manual"):
                     print(f"  [Found] {url}")
                     total_found += 1
 
-                    page_text, scraped_email = scrape_website(url)
+                    page_text, scraped_email, scraped_facebook = scrape_website(url)
                     time.sleep(1)
 
                     info = extract_company_info(url, page_text, result["snippet"])
@@ -116,6 +116,8 @@ def run_partial(triggered_by="manual"):
 
                     if not info.get("email") and scraped_email:
                         info["email"] = scraped_email
+                    if scraped_facebook:
+                        info["facebook_url"] = scraped_facebook
                     if not info.get("email"):
                         found_email = find_email_via_google(root_domain)
                         if found_email:

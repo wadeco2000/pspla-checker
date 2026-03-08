@@ -722,8 +722,10 @@ HTML_TEMPLATE = """
                 data-id="{{ loop.index }}">
                 <td class="company-cell">
                     {% if c.website %}<a href="{{ c.website }}" target="_blank">{{ c.company_name or '-' }}</a>{% else %}{{ c.company_name or '-' }}{% endif %}
-                    {% if c.source_url and 'facebook.com' in c.source_url %}
-                        <a href="{{ c.source_url }}" target="_blank" class="fb-tag" title="Found via Facebook"><i class="fa-brands fa-facebook-f"></i> FB</a>
+                    {% if c.facebook_url %}
+                        <a href="{{ c.facebook_url }}" target="_blank" class="fb-tag" title="Facebook page"><i class="fa-brands fa-facebook-f"></i></a>
+                    {% elif c.source_url and 'facebook.com' in c.source_url %}
+                        <a href="{{ c.source_url }}" target="_blank" class="fb-tag" title="Found via Facebook"><i class="fa-brands fa-facebook-f"></i></a>
                     {% endif %}
                 </td>
                 <td>{{ c.region or '-' }}</td>

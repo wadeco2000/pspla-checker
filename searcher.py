@@ -115,9 +115,50 @@ def google_search(query, num_results=10, time_filter=None):
         return []
 
 
+def find_facebook_url(company_name, soup=None, raw_html=""):
+    """Return a facebook.com page URL for the company, or None.
+    Checks the already-scraped website HTML first (free), then falls
+    back to a Google site:facebook.com search (uses SerpAPI quota)."""
+    import re as _re
+
+    # 1. Look for a facebook.com link in the scraped HTML
+    if soup:
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            m = _re.match(r"https?://(www\.)?facebook\.com/([^/?#\s\"']+)", href)
+            if m and m.group(2).lower() not in ("sharer", "share", "sharer.php",
+                                                  "dialog", "login", "home.php", ""):
+                return href.split("?")[0].rstrip("/")
+
+    # 2. Regex scan the raw HTML for facebook.com URLs (catches JS/data attrs)
+    if raw_html:
+        for m in _re.finditer(
+                r"https?://(www\.)?facebook\.com/([A-Za-z0-9._\-]+)", raw_html):
+            slug = m.group(2).lower()
+            if slug not in ("sharer", "share", "sharer.php", "dialog",
+                             "login", "home.php", ""):
+                return m.group(0).split("?")[0].rstrip("/")
+
+    # 3. Google site:facebook.com fallback
+    try:
+        query = f'site:facebook.com "{company_name}" New Zealand'
+        results = google_search(query, num_results=3)
+        if results and results is not SERPAPI_EXHAUSTED:
+            for r in results:
+                link = r.get("link", "")
+                m = _re.match(r"https?://(www\.)?facebook\.com/([^/?#\s]+)", link)
+                if m and m.group(2).lower() not in ("sharer", "pages", "groups",
+                                                      "events", "marketplace", ""):
+                    return link.split("?")[0].rstrip("/")
+    except Exception:
+        pass
+
+    return None
+
+
 def scrape_website(url):
-    """Returns (page_text, email_or_None). Extracts mailto: links directly so
-    footer emails are found even though page_text is capped at 3000 chars."""
+    """Returns (page_text, email_or_None, facebook_url_or_None).
+    Extracts mailto: and facebook links directly from HTML."""
     import re
     try:
         headers = {
@@ -128,7 +169,7 @@ def scrape_website(url):
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 403:
             print(f"  [Scrape blocked 403] {url} - will use search snippet only")
-            return "", None
+            return "", None, None
         soup = BeautifulSoup(response.text, "html.parser")
 
         # Extract email from mailto: links before truncating text
@@ -147,6 +188,9 @@ def scrape_website(url):
             if m:
                 scraped_email = m.group(1).lower()
 
+        # Extract Facebook URL from the website HTML (no API cost)
+        scraped_facebook = find_facebook_url("", soup=soup, raw_html=response.text)
+
         # Remove chrome (nav/header/footer/sidebar) before capping so actual content isn't crowded out
         for tag in soup.find_all(["nav", "header", "footer",
                                    "script", "style", "noscript"]):
@@ -154,10 +198,10 @@ def scrape_website(url):
         for tag in soup.find_all(True, {"role": ["navigation", "banner", "contentinfo"]}):
             tag.decompose()
         text = " ".join(soup.get_text(separator=" ", strip=True).split())[:5000]
-        return text, scraped_email
+        return text, scraped_email, scraped_facebook
     except Exception as e:
         print(f"  [Scrape error] {url}: {e}")
-        return "", None
+        return "", None, None
 
 
 def extract_company_info(url, page_text, search_snippet):
@@ -1013,6 +1057,7 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         "companies_office_address": co_result.get("address"),
         "individual_license": individual_license_found,
         "director_name": ", ".join(directors),
+        "facebook_url": info.get("facebook_url"),
         "root_domain": root_domain,
         "source_url": info.get("_fb_url") or website_url,
         "last_checked": datetime.now(timezone.utc).isoformat(),
@@ -1187,7 +1232,7 @@ def _process_fb_result(result, found_urls_all, fb_total, fb_new, term, fallback_
             return fb_total, fb_new
 
         print(f"  [Website found] {website_url}")
-        page_text, scraped_email = scrape_website(website_url)
+        page_text, scraped_email, scraped_facebook = scrape_website(website_url)
         time.sleep(1)
 
         info = extract_company_info(website_url, page_text, result["snippet"])
@@ -1200,6 +1245,8 @@ def _process_fb_result(result, found_urls_all, fb_total, fb_new, term, fallback_
 
         if not info.get("email") and scraped_email:
             info["email"] = scraped_email
+        if scraped_facebook:
+            info["facebook_url"] = scraped_facebook
         if not info.get("email"):
             found_email = find_email_via_google(root_domain)
             if found_email:
@@ -1396,7 +1443,7 @@ def run_search(triggered_by="manual"):
                     print(f"  [Found] {url}")
                     total_found += 1
 
-                    page_text, scraped_email = scrape_website(url)
+                    page_text, scraped_email, scraped_facebook = scrape_website(url)
                     time.sleep(1)
 
                     info = extract_company_info(url, page_text, result["snippet"])
@@ -1408,6 +1455,8 @@ def run_search(triggered_by="manual"):
                     if not info.get("email") and scraped_email:
                         info["email"] = scraped_email
                         print(f"  [Email from mailto] {scraped_email}")
+                    if scraped_facebook:
+                        info["facebook_url"] = scraped_facebook
 
                     print(f"  [Company] {info['company_name']}")
 
