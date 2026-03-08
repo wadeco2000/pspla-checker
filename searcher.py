@@ -695,10 +695,10 @@ def run_search():
                     for name in names_to_try:
                         print(f"  [Checking PSPLA] {name}")
                         res = check_pspla(name, website_region=website_region)
-                        if res.get("licensed") and res.get("matched_name"):
-                            # Always verify the PSPLA result against the PRIMARY company name.
-                            # This catches cases where e.g. "Livewire" matches "Livewire Electrical Wellington"
-                            # even though the actual company is "Addz Livewire" — a different business.
+                        if res.get("matched_name"):
+                            # Verify ALL matches (active or expired) against the primary company
+                            # name and location — catches cases like "Livewire Electrical" (Auckland)
+                            # incorrectly matching "Addz Livewire Electrical Limited" (Palmerston North).
                             matched = res["matched_name"]
                             needs_verify = company_name.lower() not in matched.lower() and matched.lower() not in company_name.lower()
                             if needs_verify:
@@ -716,7 +716,10 @@ def run_search():
                             if name != company_name:
                                 print(f"  [Matched via] {name}")
                             pspla_result = res
-                            break
+                            # Only stop searching on an active license — keep looking if expired,
+                            # in case another name variation finds a current one.
+                            if res.get("licensed"):
+                                break
                         elif pspla_result is None:
                             pspla_result = res
 
