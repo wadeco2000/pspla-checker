@@ -110,7 +110,7 @@ If they do not offer these services, return null.
 If they do, extract and return JSON with these fields:
 - company_name: the PRIMARY trading name shown on the website (not abbreviations)
 - legal_name: the full legal name including Ltd/Limited if found anywhere on the page
-- other_names: list of any other business names, abbreviations, or trading names found
+- other_names: list of OTHER NAMES THIS SAME COMPANY trades under or abbreviates itself as. Do NOT include brands they sell, products they stock, partner companies, or manufacturer names.
 - phone: phone number (NZ format)
 - email: email address
 - address: physical address including city
@@ -120,6 +120,7 @@ If they do, extract and return JSON with these fields:
 Important: Look carefully for the full company name in the footer, about page, contact details, and copyright notices. Companies often use abbreviations in their URL but their full name elsewhere.
 Also look for owner/director names in "about us", "meet the team", "our story" sections.
 If page content is empty or blocked, try to extract what you can from the URL and search snippet alone.
+Do NOT include large national retail chains (Noel Leeming, Harvey Norman, JB Hi-Fi, The Warehouse, etc.) - only include companies whose primary business is installing/servicing security systems.
 
 Return ONLY valid JSON or null."""
 
@@ -562,9 +563,22 @@ def run_search():
                     print(f"  [Checking PSPLA] {name}")
                     res = check_pspla(name, website_region=website_region)
                     if res.get("licensed"):
-                        pspla_result = res
-                        if name != company_name:
+                        # If matched via a non-primary name, verify the PSPLA result
+                        # actually corresponds to the primary company (not a brand they sell)
+                        if name != company_name and res.get("matched_name"):
+                            verification = verify_pspla_match(
+                                company_name, res["matched_name"], website_region, res.get("pspla_address")
+                            )
+                            if not verification.get("match"):
+                                print(f"  [Cross-verify rejected] {company_name} vs {res['matched_name']} (found via '{name}') - {verification.get('reason')}")
+                                if pspla_result is None:
+                                    pspla_result = {"licensed": False, "matched_name": None, "license_type": None,
+                                                    "match_method": f"rejected: {verification.get('reason')}",
+                                                    "pspla_address": None, "pspla_license_number": None,
+                                                    "pspla_license_status": None, "pspla_license_expiry": None}
+                                continue
                             print(f"  [Matched via] {name}")
+                        pspla_result = res
                         break
                     elif pspla_result is None:
                         pspla_result = res
