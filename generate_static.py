@@ -7,6 +7,7 @@ load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+PAGES_PASSWORD = os.getenv("PAGES_PASSWORD", "")
 
 STATIC_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
@@ -54,6 +55,26 @@ STATIC_TEMPLATE = """<!DOCTYPE html>
     </style>
 </head>
 <body>
+    <div id="password-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+        background:rgba(44,62,80,0.97); z-index:9999; align-items:center; justify-content:center;">
+        <div style="background:white; padding:40px; border-radius:12px; text-align:center; max-width:360px; width:90%;">
+            <h2 style="margin:0 0 8px; color:#2c3e50;">PSPLA Checker</h2>
+            <p style="color:#666; font-size:14px; margin-bottom:24px;">Enter the password to access this tool.</p>
+            <input type="password" id="pw-input" placeholder="Password"
+                style="width:100%; padding:10px 14px; border:1px solid #ddd; border-radius:6px; font-size:15px;
+                       box-sizing:border-box; margin-bottom:12px;"
+                onkeydown="if(event.key==='Enter') checkPassword()">
+            <div id="pw-error" style="color:#e74c3c; font-size:13px; margin-bottom:10px; display:none;">
+                Incorrect password. Please try again.
+            </div>
+            <button onclick="checkPassword()"
+                style="width:100%; padding:10px; background:#2c3e50; color:white; border:none;
+                       border-radius:6px; font-size:15px; cursor:pointer;">
+                Enter
+            </button>
+        </div>
+    </div>
+
     <h1>PSPLA Security Camera Company Checker</h1>
     <p class="subtitle">NZ companies found installing security cameras — checked against PSPLA licensing register.</p>
     <p class="updated">Last updated: {updated}</p>
@@ -133,6 +154,25 @@ STATIC_TEMPLATE = """<!DOCTYPE html>
                 row.style.display = 'table-row';
                 btn.textContent = '▲ less';
             }
+        }
+
+        const CORRECT_PASSWORD = '{password}';
+        const overlay = document.getElementById('password-overlay');
+
+        function checkPassword() {
+            const input = document.getElementById('pw-input').value;
+            if (input === CORRECT_PASSWORD) {
+                sessionStorage.setItem('pspla_auth', '1');
+                overlay.style.display = 'none';
+            } else {
+                document.getElementById('pw-error').style.display = 'block';
+                document.getElementById('pw-input').value = '';
+            }
+        }
+
+        if (CORRECT_PASSWORD && sessionStorage.getItem('pspla_auth') !== '1') {
+            overlay.style.display = 'flex';
+            setTimeout(() => document.getElementById('pw-input').focus(), 100);
         }
     </script>
 </body>
@@ -276,6 +316,7 @@ def generate():
     html = html.replace("{unknown}", str(unknown))
     html = html.replace("{region_options}", region_options)
     html = html.replace("{rows}", rows)
+    html = html.replace("{password}", PAGES_PASSWORD)
 
     os.makedirs("docs", exist_ok=True)
     with open("docs/index.html", "w", encoding="utf-8") as f:

@@ -27,6 +27,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          PAGES_PASSWORD: ${{ secrets.PAGES_PASSWORD }}
         run: python generate_static.py
 
       - name: Deploy to GitHub Pages
