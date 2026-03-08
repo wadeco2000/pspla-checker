@@ -170,6 +170,36 @@ def find_facebook_url(company_name, page_text=""):
                     + " " + snippet.lower())
         return sum(1 for w in name_words if w in haystack)
 
+    def _page_url_from_link(link):
+        """Normalise any Facebook link to a page home URL.
+        - Strips query string and trailing slash.
+        - Normalises m.facebook.com to www.facebook.com.
+        - If the URL is a content URL (/posts/, /photos/ etc.), extracts the
+          base page URL so that posts mentioning the right company lead us to
+          the page itself (e.g. /ChaytorCo/posts/xxx -> /ChaytorCo).
+        Returns (page_url, is_content_url) or (None, False) if unusable."""
+        link = link.split("?")[0].rstrip("/")
+        link = _re.sub(r"^https?://m\.facebook\.com", "https://www.facebook.com", link)
+        # Extract base page from content sub-paths
+        content_re = r"(https?://(www\.)?facebook\.com/(?:(?:p|people)/)?[^/?#\s]+)/(?:" + \
+                     "|".join(_SKIP_PATHS) + r")(?:/|$)"
+        cm = _re.match(content_re, link)
+        if cm:
+            return cm.group(1), True
+        # Numeric-only IDs (e.g. /897860640265587/) are unusable — skip
+        slug_m = _re.match(r"https?://(www\.)?facebook\.com/(\d+)$", link)
+        if slug_m:
+            return None, False
+        return link, False
+
+    def _has_name_signal(url, title, name_words):
+        """Return True if at least one company name word appears in the page
+        slug or title.  Filters out pages like 'BDL Tauranga' that show up
+        only because they shared a post mentioning the company."""
+        slug_text = url.lower().replace("-", " ").replace("_", " ").replace("/", " ")
+        title_text = title.lower()
+        return any(w in slug_text or w in title_text for w in name_words)
+
     def _extract_fb_candidates(results):
         found = []
         for r in results:
@@ -178,20 +208,26 @@ def find_facebook_url(company_name, page_text=""):
             link = r.get("link", "")
             if "facebook.com" not in link:
                 continue
-            if _re.search(r"/(" + "|".join(_SKIP_PATHS) + r")/", link):
-                continue
-            link_clean = link.split("?")[0].rstrip("/")
             snippet = r.get("snippet", "")
             title = r.get("title", "")
-            if _re.match(r"https?://(www\.)?facebook\.com/p/[^/?#\s]+", link_clean):
-                found.append((link_clean, snippet, title))
+            page_url, from_content = _page_url_from_link(link)
+            if not page_url:
                 continue
-            if _re.match(r"https?://(www\.)?facebook\.com/people/[^/?#\s]+", link_clean):
-                found.append((link_clean, snippet, title))
+            # Validate as a recognisable Facebook page URL
+            if not (_re.match(r"https?://(www\.)?facebook\.com/p/[^/?#\s]+", page_url) or
+                    _re.match(r"https?://(www\.)?facebook\.com/people/[^/?#\s]+", page_url) or
+                    _re.match(r"https?://(www\.)?facebook\.com/([^/?#\s]+)", page_url)):
                 continue
-            m = _re.match(r"https?://(www\.)?facebook\.com/([^/?#\s]+)", link_clean)
-            if m and m.group(2).lower() not in _SKIP_SLUGS:
-                found.append((link_clean, snippet, title))
+            # Slug-only check for standard URLs
+            slug_m = _re.match(r"https?://(www\.)?facebook\.com/([^/?#\s]+)$", page_url)
+            if slug_m and slug_m.group(2).lower() in _SKIP_SLUGS:
+                continue
+            # KEY FILTER: reject pages whose slug and title share no words with
+            # the company name — catches unrelated pages that merely mentioned
+            # the company in a post (BDL Tauranga sharing a Chaytor post)
+            if not _has_name_signal(page_url, title, name_words):
+                continue
+            found.append((page_url, snippet, title))
         return found
 
     def _alt_names(company_name, page_text):
