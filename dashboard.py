@@ -1,6 +1,7 @@
 import os
+import subprocess
 import requests
-from flask import Flask, render_template_string
+from flask import Flask, render_template_string, redirect, url_for
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -57,8 +58,13 @@ HTML_TEMPLATE = """
     </style>
 </head>
 <body>
-    <h1>PSPLA Security Camera Company Checker</h1>
-    <p class="subtitle">NZ companies found installing security cameras — checked against PSPLA licensing register.</p>
+    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+        <div>
+            <h1>PSPLA Security Camera Company Checker</h1>
+            <p class="subtitle">NZ companies found installing security cameras — checked against PSPLA licensing register.</p>
+        </div>
+        <a href="/history" class="btn btn-dark" style="margin-top:10px; text-decoration:none;">&#x1F4DC; Version History</a>
+    </div>
 
     <div class="stats">
         <div class="stat-box">
@@ -268,6 +274,102 @@ def debug():
         val = c.get("pspla_licensed")
         output += f"{c.get('company_name')}: pspla_licensed={val!r} type={type(val).__name__}<br>"
     return output
+
+
+HISTORY_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Version History</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f4f4f4; }
+        h1 { color: #2c3e50; }
+        .back { color: #2980b9; text-decoration: none; font-size: 14px; }
+        .back:hover { text-decoration: underline; }
+        table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px;
+                overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-top: 20px; }
+        th { background: #2c3e50; color: white; padding: 10px 14px; text-align: left; }
+        td { padding: 10px 14px; border-bottom: 1px solid #eee; font-size: 13px; vertical-align: middle; }
+        tr:hover td { background: #f9f9f9; }
+        .hash { font-family: monospace; color: #888; font-size: 12px; }
+        .current { background: #d4efdf !important; font-weight: bold; }
+        .btn-rollback { background: #e74c3c; color: white; border: none; padding: 6px 12px;
+                        border-radius: 4px; cursor: pointer; font-size: 12px; }
+        .btn-rollback:hover { background: #c0392b; }
+        .btn-current { background: #27ae60; color: white; border: none; padding: 6px 12px;
+                       border-radius: 4px; font-size: 12px; cursor: default; }
+        .warning { background: #fff3cd; border: 1px solid #ffc107; padding: 12px 16px;
+                   border-radius: 6px; margin-top: 15px; font-size: 13px; color: #856404; }
+    </style>
+</head>
+<body>
+    <a href="/" class="back">&larr; Back to Dashboard</a>
+    <h1>Version History</h1>
+    <div class="warning">
+        <strong>Rollback</strong> resets the code to that version. Any uncommitted changes will be lost.
+        The database is not affected — only the code changes.
+    </div>
+    <table>
+        <thead>
+            <tr><th>Commit</th><th>Date</th><th>Message</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+            {% for commit in commits %}
+            <tr {% if loop.first %}class="current"{% endif %}>
+                <td class="hash">{{ commit.hash }}</td>
+                <td>{{ commit.date }}</td>
+                <td>{{ commit.message }}</td>
+                <td>
+                    {% if loop.first %}
+                        <button class="btn-current" disabled>Current</button>
+                    {% else %}
+                        <form method="POST" action="/rollback/{{ commit.hash }}"
+                              onsubmit="return confirm('Roll back to: {{ commit.message }}?')">
+                            <button class="btn-rollback" type="submit">Rollback</button>
+                        </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
+"""
+
+
+@app.route("/history")
+def history():
+    try:
+        result = subprocess.run(
+            ["git", "log", "--pretty=format:%h|%ad|%s", "--date=short", "-20"],
+            capture_output=True, text=True, cwd=os.path.dirname(os.path.abspath(__file__))
+        )
+        commits = []
+        for line in result.stdout.strip().splitlines():
+            parts = line.split("|", 2)
+            if len(parts) == 3:
+                commits.append({"hash": parts[0], "date": parts[1], "message": parts[2]})
+    except Exception as e:
+        commits = []
+        print(f"Git log error: {e}")
+    return render_template_string(HISTORY_TEMPLATE, commits=commits)
+
+
+@app.route("/rollback/<commit_hash>", methods=["POST"])
+def rollback(commit_hash):
+    # Safety check: only allow valid short hashes (7 hex chars)
+    if not all(c in "0123456789abcdef" for c in commit_hash) or len(commit_hash) != 7:
+        return "Invalid commit hash", 400
+    try:
+        subprocess.run(
+            ["git", "reset", "--hard", commit_hash],
+            capture_output=True, text=True, cwd=os.path.dirname(os.path.abspath(__file__))
+        )
+    except Exception as e:
+        return f"Rollback error: {e}", 500
+    return redirect(url_for("history"))
 
 
 if __name__ == "__main__":
