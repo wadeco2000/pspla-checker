@@ -166,7 +166,42 @@ def extract_keywords(company_name):
     return keywords
 
 
-def check_pspla(company_name):
+def verify_pspla_match(website_company, pspla_company, website_region, pspla_address):
+    """Use Claude to verify if a PSPLA match is genuinely the same company."""
+    try:
+        prompt = f"""Are these likely the same company?
+
+Website company name: "{website_company}"
+Website region: "{website_region or 'unknown'}"
+
+PSPLA registered name: "{pspla_company}"
+PSPLA address: "{pspla_address or 'unknown'}"
+
+Consider:
+- Are the names similar enough to be the same company (trading name vs registered name)?
+- Are the locations compatible?
+- Could "Addz Livewire" and "Livewire Electrical Wellington" be the same? No - different cities and different first word.
+- Could "Hines Security" and "Hines Electrical & Security NZ" be the same? Yes - same family name, same type of business.
+
+Return ONLY JSON: {{"match": true or false, "confidence": "high/medium/low", "reason": "brief reason"}}"""
+
+        message = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=150,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        text = message.content[0].text.strip()
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        return json.loads(text.strip())
+    except Exception as e:
+        print(f"  [Verify error] {e}")
+        return {"match": False, "confidence": "low", "reason": "verification error"}
+
+
+def check_pspla(company_name, website_region=None):
     try:
         match_method = None
 
@@ -193,40 +228,44 @@ def check_pspla(company_name):
                     match_method = f"keyword: {keywords[0]}"
 
         if num_found > 0 and docs:
+            # For keyword/partial matches, verify with Claude before trusting
+            if match_method and match_method != "full name":
+                candidate_name = docs[0].get("name_txt") or docs[0].get("caseTitle_s", "")
+                if isinstance(candidate_name, list): candidate_name = candidate_name[0] if candidate_name else ""
+                candidate_address = docs[0].get("registeredOffice_txt") or docs[0].get("townCity_txt", "")
+                if isinstance(candidate_address, list): candidate_address = candidate_address[0] if candidate_address else ""
+
+                verification = verify_pspla_match(company_name, candidate_name, website_region, candidate_address)
+                if not verification.get("match"):
+                    print(f"  [Match rejected] {company_name} vs {candidate_name} - {verification.get('reason')}")
+                    return {"licensed": False, "matched_name": None, "license_type": None, "match_method": f"rejected: {verification.get('reason')}", "pspla_address": None, "pspla_license_number": None, "pspla_license_status": None, "pspla_license_expiry": None}
+                else:
+                    match_method = f"{match_method} (verified: {verification.get('confidence')})"
+
             # Prefer active licenses over expired ones
             def get_status(d):
                 s = d.get("permitStatus_s", "")
                 if isinstance(s, list): s = s[0] if s else ""
                 return s.lower()
+
+            def get_field(d, key):
+                val = d.get(key)
+                if isinstance(val, list): val = val[0] if val else None
+                return val
+
             active_docs = [d for d in docs if get_status(d) == "active"]
-            matched = active_docs[0] if active_docs else docs[0]
-            name_field = matched.get("name_txt") or matched.get("caseTitle_s", company_name)
-            if isinstance(name_field, list):
-                name_field = name_field[0]
+            has_active = len(active_docs) > 0
+            matched = active_docs[0] if has_active else docs[0]
+
+            name_field = get_field(matched, "name_txt") or get_field(matched, "caseTitle_s") or company_name
+            pspla_address = get_field(matched, "registeredOffice_txt") or get_field(matched, "townCity_txt")
+            permit_number = get_field(matched, "permitNumber_txt")
+            permit_status = get_field(matched, "permitStatus_s")
+            permit_expiry = get_field(matched, "permitEndDate_s")
             license_type = "individual" if matched.get("isIndividual_b") else "company"
 
-            pspla_address = matched.get("registeredOffice_txt") or matched.get("townCity_txt")
-            if isinstance(pspla_address, list):
-                pspla_address = pspla_address[0]
-
-            permit_number = matched.get("permitNumber_txt")
-            if isinstance(permit_number, list):
-                permit_number = permit_number[0]
-
-            permit_status = matched.get("permitStatus_s")
-            if isinstance(permit_status, list):
-                permit_status = permit_status[0]
-
-            permit_expiry = matched.get("permitEndDate_s")
-            if isinstance(permit_expiry, list):
-                permit_expiry = permit_expiry[0]
-
-            # Check if license is currently active
-            status_str = permit_status.lower() if permit_status else ""
-            is_active = status_str == "active"
-
             return {
-                "licensed": is_active,
+                "licensed": has_active,
                 "matched_name": name_field,
                 "license_type": license_type,
                 "match_method": match_method,
@@ -392,7 +431,7 @@ def run_search():
                 print(f"  [Company] {company_name}")
 
                 print(f"  [Checking PSPLA] {company_name}")
-                pspla_result = check_pspla(company_name)
+                pspla_result = check_pspla(company_name, website_region=info.get("region") or region)
 
                 co_result = {"name": None, "address": None}
 
