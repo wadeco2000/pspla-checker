@@ -608,6 +608,35 @@ def run_search():
                 if not isinstance(licensed_val, bool):
                     licensed_val = None
 
+                # Build plain-English match reason
+                directors = info.get("director_names") or []
+                reason_parts = []
+                if licensed_val is True:
+                    reason_parts.append(f"Found active PSPLA company license for '{pspla_result.get('matched_name')}'.")
+                    reason_parts.append(f"Match method: {pspla_result.get('match_method')}.")
+                    if pspla_result.get("pspla_license_number"):
+                        reason_parts.append(f"License #{pspla_result.get('pspla_license_number')}, expires {pspla_result.get('pspla_license_expiry') or 'unknown'}.")
+                    if pspla_result.get("pspla_address"):
+                        reason_parts.append(f"PSPLA address: {pspla_result.get('pspla_address')}.")
+                elif individual_license_found:
+                    reason_parts.append(f"No company license found on PSPLA for any of: {', '.join(names_to_try)}.")
+                    if directors:
+                        reason_parts.append(f"Director/owner names found on website: {', '.join(directors)}.")
+                    reason_parts.append(f"Individual PSPLA license found under the name '{individual_license_found}'.")
+                elif (pspla_result.get("pspla_license_status") or "").lower() == "expired":
+                    reason_parts.append(f"Found PSPLA entry for '{pspla_result.get('matched_name')}' but license status is EXPIRED.")
+                    reason_parts.append(f"Match method: {pspla_result.get('match_method')}.")
+                elif "rejected" in (pspla_result.get("match_method") or ""):
+                    reason_parts.append(f"Searched PSPLA for: {', '.join(names_to_try)}.")
+                    reason_parts.append(f"A potential match was found but rejected as a different company: {pspla_result.get('match_method')}.")
+                else:
+                    reason_parts.append(f"Searched PSPLA for: {', '.join(names_to_try)}.")
+                    if directors:
+                        reason_parts.append(f"Also checked individual licenses for directors: {', '.join(directors)}.")
+                    reason_parts.append("No match found.")
+
+                match_reason = " ".join(reason_parts)
+
                 record = {
                     "company_name": company_name,
                     "website": url,
@@ -623,6 +652,7 @@ def run_search():
                     "pspla_license_expiry": pspla_result.get("pspla_license_expiry"),
                     "license_type": pspla_result.get("license_type"),
                     "match_method": pspla_result.get("match_method"),
+                    "match_reason": match_reason,
                     "companies_office_name": co_result.get("name"),
                     "companies_office_address": co_result.get("address"),
                     "individual_license": individual_license_found,

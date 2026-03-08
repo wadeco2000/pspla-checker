@@ -183,9 +183,17 @@ HTML_TEMPLATE = """
             </tr>
             <tr class="detail-row" id="detail-{{ loop.index }}">
                 <td colspan="9">
+                    {% if c.match_reason %}
+                    <div style="background:#eaf4fb; border-left:4px solid #2980b9; padding:10px 14px; margin-bottom:10px; border-radius:4px; font-size:13px;">
+                        <strong style="color:#2471a3;">Why this classification?</strong><br>
+                        {{ c.match_reason }}
+                    </div>
+                    {% endif %}
                     <div class="detail-grid">
                         <div class="detail-item"><label>Website Address</label><span>{{ c.address or '-' }}</span></div>
                         <div class="detail-item"><label>License Type</label><span>{{ c.license_type or '-' }}</span></div>
+                        <div class="detail-item"><label>Directors Found</label><span>{{ c.director_name or '-' }}</span></div>
+                        <div class="detail-item"><label>Individual License</label><span>{{ c.individual_license or '-' }}</span></div>
                         <div class="detail-item"><label>Match Method</label><span>{{ c.match_method or '-' }}</span></div>
                         <div class="detail-item"><label>License Status</label><span>{{ c.pspla_license_status or '-' }}</span></div>
                         <div class="detail-item"><label>Last Checked</label><span>{{ (c.last_checked or '')[:10] }}</span></div>
