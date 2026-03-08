@@ -180,7 +180,7 @@ HTML_TEMPLATE = """
                         <button class="btn" style="background:#1877f2; color:white;"><i class="fa-brands fa-facebook-f"></i> Facebook</button>
                     </form>
                 {% endif %}
-                <form method="POST" action="/dedupe-db" onsubmit="return confirm('Remove duplicate companies (same name + region)? Keeps the best record of each.')">
+                <form method="POST" action="/dedupe-db" onsubmit="return confirm('Merge duplicate company names? Keeps the best record and combines all regions into one entry.')">
                     <button class="btn" style="background:#8e44ad; color:white;"><i class="fa-solid fa-filter"></i> Dedupe DB</button>
                 </form>
                 <button class="btn" style="background:#e74c3c; color:white;"
@@ -1113,39 +1113,60 @@ def start_facebook_search():
 
 @app.route("/dedupe-db", methods=["POST"])
 def dedupe_db():
-    """Remove duplicate rows keeping the best record for each (company_name, region) pair.
-    'Best' = has phone or email > has more data > lowest id."""
+    """Merge duplicate company names into one record, combining all regions.
+    Keeps the record with the most contact info (phone/email), deletes the rest."""
     try:
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        patch_headers = {**headers, "Content-Type": "application/json", "Prefer": "return=minimal"}
+
+        # Fetch all — use high limit to avoid PostgREST default 1000-row cap
         resp = requests.get(
-            f"{SUPABASE_URL}/rest/v1/Companies?select=id,company_name,region,phone,email&order=id.asc",
+            f"{SUPABASE_URL}/rest/v1/Companies?select=id,company_name,region,phone,email&order=id.asc&limit=10000",
             headers=headers)
         rows = resp.json()
 
-        # Group by (normalised_name, normalised_region)
+        # Group by normalised name only
         groups = {}
         for row in rows:
             name = (row.get("company_name") or "").strip().lower()
-            region = (row.get("region") or "").strip().lower()
-            key = (name, region)
-            groups.setdefault(key, []).append(row)
+            groups.setdefault(name, []).append(row)
 
         to_delete = []
-        for key, group in groups.items():
+        to_update = []  # (id, merged_region_string)
+
+        for name_key, group in groups.items():
             if len(group) < 2:
                 continue
-            # Score each: prefer records with phone or email
+
+            # Collect all unique regions across the group (preserving original capitalisation)
+            seen_regions = []
+            for r in group:
+                for reg in (r.get("region") or "").split(","):
+                    reg = reg.strip()
+                    if reg and reg.lower() not in [s.lower() for s in seen_regions]:
+                        seen_regions.append(reg)
+            merged_region = ", ".join(seen_regions)
+
+            # Keep the record with the most contact info, then lowest id
             def score(r):
                 return (1 if r.get("phone") else 0) + (1 if r.get("email") else 0)
             group.sort(key=lambda r: (-score(r), r["id"]))
-            # Keep the first (best), delete the rest
+            keeper = group[0]
+            to_update.append((keeper["id"], merged_region))
             for dup in group[1:]:
                 to_delete.append(dup["id"])
 
+        for rid, merged_region in to_update:
+            requests.patch(
+                f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{rid}",
+                headers=patch_headers,
+                json={"region": merged_region})
+
         for rid in to_delete:
-            requests.delete(f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{rid}", headers={
-                **headers, "Content-Type": "application/json"})
-        msg = f"Deduplication complete — {len(to_delete)} duplicate(s) removed."
+            requests.delete(f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{rid}",
+                            headers={**headers, "Content-Type": "application/json"})
+
+        msg = f"Deduplication complete — {len(to_delete)} duplicate(s) merged and removed."
         return redirect(url_for("index", message=msg, type="success"))
     except Exception as e:
         return redirect(url_for("index", message=f"Dedupe error: {e}", type="error"))

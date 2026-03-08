@@ -522,21 +522,43 @@ def company_name_exists(name):
         return False
 
 
-def company_name_region_exists(name, region):
-    """Check if a company with this name + region already exists (case-insensitive)."""
+def get_company_by_name(name):
+    """Return the existing DB record for this company name (case-insensitive), or None."""
     if not name:
-        return False
+        return None
     headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
     url = (f"{SUPABASE_URL}/rest/v1/Companies"
            f"?company_name=ilike.{requests.utils.quote(name)}"
-           f"&region=ilike.{requests.utils.quote(region or '')}"
-           f"&select=id&limit=1")
+           f"&select=id,region&limit=1")
     try:
         response = requests.get(url, headers=headers)
         data = response.json()
-        return len(data) > 0
+        return data[0] if data else None
     except:
-        return False
+        return None
+
+
+def append_region_to_company(company_id, existing_region, new_region):
+    """Add new_region to the company's region field if it isn't already listed."""
+    if not new_region:
+        return
+    existing = [r.strip() for r in (existing_region or "").split(",") if r.strip()]
+    if any(r.lower() == new_region.lower() for r in existing):
+        return  # already there
+    merged = ", ".join(existing + [new_region])
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    try:
+        requests.patch(
+            f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
+            headers=headers,
+            json={"region": merged})
+    except Exception:
+        pass
 
 
 def check_pspla_individual(name):
@@ -772,9 +794,11 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
     company_name = info["company_name"]
     website_region = info.get("region") or fallback_region
 
-    # Skip if this (name, region) combination already exists
-    if company_name_region_exists(company_name, website_region):
-        print(f"  [Skipped] {company_name} already exists in region '{website_region}'")
+    # If this company name already exists, just add the region and move on
+    existing = get_company_by_name(company_name)
+    if existing:
+        append_region_to_company(existing["id"], existing.get("region", ""), website_region)
+        print(f"  [Skipped] {company_name} already exists — added region '{website_region}' if new")
         return False
 
     # Build list of all names to try on PSPLA
