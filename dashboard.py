@@ -1,7 +1,7 @@
 import os
 import subprocess
 import requests
-from flask import Flask, render_template_string, redirect, url_for
+from flask import Flask, render_template_string, redirect, url_for, request
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -63,8 +63,24 @@ HTML_TEMPLATE = """
             <h1>PSPLA Security Camera Company Checker</h1>
             <p class="subtitle">NZ companies found installing security cameras — checked against PSPLA licensing register.</p>
         </div>
-        <a href="/history" class="btn btn-dark" style="margin-top:10px; text-decoration:none;">&#x1F4DC; Version History</a>
+        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+            <form method="POST" action="/start-search" onsubmit="return confirm('Start a full search? This will run in the background and may take a long time.')">
+                <button class="btn" style="background:#27ae60; color:white;">&#9654; Start Search</button>
+            </form>
+            <form method="POST" action="/clear-db" onsubmit="return confirm('Delete ALL entries from the database? This cannot be undone.')">
+                <button class="btn" style="background:#e74c3c; color:white;">&#x1F5D1; Clear Database</button>
+            </form>
+            <a href="/history" class="btn btn-dark" style="text-decoration:none;">&#x1F4DC; Version History</a>
+        </div>
     </div>
+
+    {% if message %}
+    <div style="padding:12px 16px; border-radius:6px; margin-bottom:15px;
+                background:{{ '#d4efdf' if message_type == 'success' else '#fadbd8' }};
+                color:{{ '#1e8449' if message_type == 'success' else '#c0392b' }}; font-size:14px;">
+        {{ message }}
+    </div>
+    {% endif %}
 
     <div class="stats">
         <div class="stat-box">
@@ -236,6 +252,9 @@ def get_companies():
 
 @app.route("/")
 def index():
+    message = request.args.get("message", "")
+    message_type = request.args.get("type", "success")
+
     companies = get_companies()
 
     total = len(companies)
@@ -262,7 +281,9 @@ def index():
         unlicensed=unlicensed,
         expired=expired,
         unknown=unknown,
-        regions=regions
+        regions=regions,
+        message=message,
+        message_type=message_type
     )
 
 
@@ -370,6 +391,40 @@ def rollback(commit_hash):
     except Exception as e:
         return f"Rollback error: {e}", 500
     return redirect(url_for("history"))
+
+
+@app.route("/start-search", methods=["POST"])
+def start_search():
+    try:
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "searcher.py")
+        subprocess.Popen(
+            ["python", script],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0
+        )
+        msg = "Search started — a new terminal window has opened showing progress."
+        return redirect(url_for("index", message=msg, type="success"))
+    except Exception as e:
+        return redirect(url_for("index", message=f"Failed to start search: {e}", type="error"))
+
+
+@app.route("/clear-db", methods=["POST"])
+def clear_db():
+    try:
+        del_url = f"{SUPABASE_URL}/rest/v1/Companies?id=not.is.null"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json"
+        }
+        response = requests.delete(del_url, headers=headers)
+        if response.status_code in [200, 204]:
+            msg = "Database cleared — all entries deleted."
+            return redirect(url_for("index", message=msg, type="success"))
+        else:
+            return redirect(url_for("index", message=f"Delete failed: {response.text[:200]}", type="error"))
+    except Exception as e:
+        return redirect(url_for("index", message=f"Error: {e}", type="error"))
 
 
 if __name__ == "__main__":
