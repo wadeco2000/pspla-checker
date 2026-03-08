@@ -10,6 +10,8 @@ load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+GITHUB_PAT = os.getenv("GITHUB_PAT")
+GITHUB_REPO = os.getenv("GITHUB_REPO", "wadeco2000/pspla-checker")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PAUSE_FLAG = os.path.join(BASE_DIR, "pause.flag")
@@ -88,6 +90,9 @@ HTML_TEMPLATE = """
             {% endif %}
             <form method="POST" action="/clear-db" onsubmit="return confirm('Delete ALL entries from the database? This cannot be undone.')">
                 <button class="btn" style="background:#e74c3c; color:white;">&#x1F5D1; Clear Database</button>
+            </form>
+            <form method="POST" action="/publish" onsubmit="return confirm('Publish current data to the live GitHub Pages site?')">
+                <button class="btn btn-dark" style="background:#8e44ad;">&#x1F310; Publish Live</button>
             </form>
             <a href="/export.csv" class="btn btn-dark" style="text-decoration:none;">&#x2B07; Export CSV</a>
             <a href="/history" class="btn btn-dark" style="text-decoration:none;">&#x1F4DC; Version History</a>
@@ -478,6 +483,29 @@ def export_csv():
         mimetype="text/csv",
         headers={"Content-Disposition": "attachment; filename=pspla_companies.csv"}
     )
+
+
+@app.route("/publish", methods=["POST"])
+def publish():
+    if not GITHUB_PAT:
+        return redirect(url_for("index", message="GITHUB_PAT not set in .env — cannot trigger publish.", type="error"))
+    try:
+        api_url = f"https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/publish.yml/dispatches"
+        resp = requests.post(
+            api_url,
+            headers={
+                "Authorization": f"Bearer {GITHUB_PAT}",
+                "Accept": "application/vnd.github+json"
+            },
+            json={"ref": "main"}
+        )
+        if resp.status_code == 204:
+            msg = "Publish triggered — GitHub Pages will update in about 1-2 minutes."
+            return redirect(url_for("index", message=msg, type="success"))
+        else:
+            return redirect(url_for("index", message=f"GitHub API error: {resp.status_code} {resp.text[:200]}", type="error"))
+    except Exception as e:
+        return redirect(url_for("index", message=f"Publish error: {e}", type="error"))
 
 
 @app.route("/pause-search", methods=["POST"])
