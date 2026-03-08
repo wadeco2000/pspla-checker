@@ -696,23 +696,23 @@ def run_search():
                         print(f"  [Checking PSPLA] {name}")
                         res = check_pspla(name, website_region=website_region)
                         if res.get("matched_name"):
-                            # Verify ALL matches (active or expired) against the primary company
-                            # name and location — catches cases like "Livewire Electrical" (Auckland)
-                            # incorrectly matching "Addz Livewire Electrical Limited" (Palmerston North).
+                            # Always verify every match against the primary company name and
+                            # location — even if the name appears as a substring of the PSPLA
+                            # name (e.g. "Livewire Electrical" is in "Addz Livewire Electrical
+                            # Limited" but they are completely different companies in different
+                            # cities). The Claude call is cheap; a wrong match is not.
                             matched = res["matched_name"]
-                            needs_verify = company_name.lower() not in matched.lower() and matched.lower() not in company_name.lower()
-                            if needs_verify:
-                                verification = verify_pspla_match(
-                                    company_name, matched, website_region, res.get("pspla_address")
-                                )
-                                if not verification.get("match"):
-                                    print(f"  [Verify rejected] {company_name} vs {matched} - {verification.get('reason')}")
-                                    if pspla_result is None:
-                                        pspla_result = {"licensed": False, "matched_name": None, "license_type": None,
-                                                        "match_method": f"rejected: {verification.get('reason')}",
-                                                        "pspla_address": None, "pspla_license_number": None,
-                                                        "pspla_license_status": None, "pspla_license_expiry": None}
-                                    continue
+                            verification = verify_pspla_match(
+                                company_name, matched, website_region, res.get("pspla_address")
+                            )
+                            if not verification.get("match"):
+                                print(f"  [Verify rejected] {company_name} vs {matched} - {verification.get('reason')}")
+                                if pspla_result is None:
+                                    pspla_result = {"licensed": False, "matched_name": None, "license_type": None,
+                                                    "match_method": f"rejected: {verification.get('reason')}",
+                                                    "pspla_address": None, "pspla_license_number": None,
+                                                    "pspla_license_status": None, "pspla_license_expiry": None}
+                                continue
                             if name != company_name:
                                 print(f"  [Matched via] {name}")
                             pspla_result = res
