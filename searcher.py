@@ -149,7 +149,10 @@ def google_search(query, num_results=10, time_filter=None):
                 })
         elif "error" in data:
             error_msg = data["error"]
-            print(f"  [SerpAPI error] {error_msg}")
+            # "no results" is normal for narrow queries — don't log it as an error
+            no_results = "no results" in error_msg.lower() or "hasn't returned any results" in error_msg.lower()
+            if not no_results:
+                print(f"  [SerpAPI error] {error_msg}")
             if "run out" in error_msg.lower() or "limit" in error_msg.lower() or "credits" in error_msg.lower():
                 return SERPAPI_EXHAUSTED
         return results
