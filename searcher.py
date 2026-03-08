@@ -1678,29 +1678,11 @@ def run_search(triggered_by="manual"):
                         print(f"  [Already in DB] {url}")
                         continue
 
-                    # Check if we already have this domain (national company branch pages)
+                    # Check if we already have this domain
                     root_domain = get_root_domain(url)
                     existing = get_domain_record(root_domain)
-                    if existing and existing.get("pspla_licensed") == "true":
-                        print(f"  [Domain already licensed] {root_domain} - saving branch entry")
-                        branch_record = {
-                            "company_name": existing["company_name"],
-                            "website": url,
-                            "region": region,
-                            "pspla_licensed": existing["pspla_licensed"],
-                            "pspla_name": existing["pspla_name"],
-                            "pspla_address": existing["pspla_address"],
-                            "pspla_license_number": existing["pspla_license_number"],
-                            "pspla_license_status": existing["pspla_license_status"],
-                            "pspla_license_expiry": existing["pspla_license_expiry"],
-                            "license_type": existing["license_type"],
-                            "match_method": "inherited from parent domain",
-                            "root_domain": root_domain,
-                            "source_url": url,
-                            "last_checked": datetime.now(timezone.utc).isoformat(),
-                            "notes": f"Branch of {root_domain}"
-                        }
-                        save_to_supabase(branch_record)
+                    if existing:
+                        print(f"  [Domain already in DB] {root_domain} ({existing.get('company_name')}) — skipping")
                         continue
 
                     print(f"  [Found] {url}")

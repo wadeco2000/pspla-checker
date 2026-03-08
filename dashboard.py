@@ -193,6 +193,7 @@ HTML_TEMPLATE = """
                 </form>
                 <button class="btn btn-dark" onclick="document.getElementById('export-modal').style.display='flex';">&#x2B07; Export CSV</button>
                 <a href="/history" class="btn btn-dark" style="text-decoration:none;">&#x1F4DC; Version History</a>
+                <a href="/duplicates" class="btn btn-dark" style="text-decoration:none; background:#c0392b;">&#x26A0; Duplicates</a>
             </div>
         </div>
     </div>
@@ -1671,6 +1672,96 @@ def recheck_pspla_for_company():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/duplicates")
+def duplicates_page():
+    """Show all records that share the same root_domain (potential duplicates)."""
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    resp = requests.get(
+        f"{SUPABASE_URL}/rest/v1/Companies?select=*&order=root_domain.asc,id.asc&limit=2000",
+        headers=headers,
+    )
+    all_companies = resp.json() if resp.ok else []
+
+    # Group by root_domain
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for c in all_companies:
+        domain = c.get("root_domain") or ""
+        groups[domain].append(c)
+
+    # Only groups with 2+ records and a non-empty domain
+    dup_groups = {d: recs for d, recs in groups.items() if d and len(recs) >= 2}
+
+    return render_template_string(DUPLICATES_TEMPLATE, dup_groups=dup_groups)
+
+
+DUPLICATES_TEMPLATE = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Duplicate Companies</title>
+<style>
+body { font-family: Arial, sans-serif; font-size: 13px; padding: 20px; background: #f5f5f5; }
+h1 { color: #2c3e50; }
+.back { margin-bottom: 16px; display: inline-block; color: #2980b9; text-decoration: none; }
+.group { background: white; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 18px; padding: 14px; }
+.group h3 { margin: 0 0 10px; font-size: 14px; color: #555; }
+table { width: 100%; border-collapse: collapse; }
+th { background: #ecf0f1; text-align: left; padding: 6px 8px; font-size: 12px; }
+td { padding: 6px 8px; border-top: 1px solid #eee; vertical-align: top; }
+.del-btn { padding: 2px 8px; background: #c0392b; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 11px; }
+.keep { background: #eafaf1; }
+</style>
+</head>
+<body>
+<a class="back" href="/">← Back to dashboard</a>
+<h1>Duplicate Records (same website domain)</h1>
+<p>{{ dup_groups|length }} domain(s) with multiple entries. Delete the unwanted record using the ✕ button.</p>
+{% for domain, recs in dup_groups.items() %}
+<div class="group">
+    <h3>{{ domain }} — {{ recs|length }} records</h3>
+    <table>
+        <tr><th>ID</th><th>Company Name</th><th>Website</th><th>Region</th><th>PSPLA</th><th>Found Via</th><th>Delete</th></tr>
+        {% for c in recs %}
+        <tr id="dup-row-{{ c.id }}">
+            <td>{{ c.id }}</td>
+            <td>{{ c.company_name or '-' }}</td>
+            <td style="font-size:11px">{{ c.website or '-' }}</td>
+            <td>{{ c.region or '-' }}</td>
+            <td>{{ 'Licensed' if c.pspla_licensed == true else ('Not licensed' if c.pspla_licensed == false else '?') }}</td>
+            <td style="font-size:11px">{{ c.notes or '-' }}</td>
+            <td><button class="del-btn" onclick="deleteDup({{ c.id }}, '{{ (c.company_name or '') | replace("'", "\\\\'") }}')">✕</button></td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% else %}
+<p style="color: #27ae60; font-weight: bold;">No duplicates found.</p>
+{% endfor %}
+<script>
+function deleteDup(id, name) {
+    if (!confirm('Delete "' + name + '"?')) return;
+    fetch('/delete-company', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: id})
+    })
+    .then(r => r.json())
+    .then(d => {
+        if (d.ok) {
+            var row = document.getElementById('dup-row-' + id);
+            if (row) row.remove();
+        } else {
+            alert('Delete failed: ' + (d.error || 'unknown'));
+        }
+    });
+}
+</script>
+</body>
+</html>
+"""
 
 
 @app.route("/delete-company", methods=["POST"])
