@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from searcher import (
     google_search, extract_company_info, scrape_website,
-    find_email_via_google, get_root_domain, get_domain_record,
+    find_email_via_google, find_facebook_url, get_root_domain, get_domain_record,
     company_exists, process_and_save_company, check_schema,
     write_status, clear_status, append_history, check_pause,
     SKIP_DOMAINS, SERPAPI_EXHAUSTED, run_facebook_search,
@@ -116,14 +116,15 @@ def run_partial(triggered_by="manual"):
 
                     if not info.get("email") and scraped_email:
                         info["email"] = scraped_email
-                    if scraped_facebook:
-                        info["facebook_url"] = scraped_facebook
                     if not info.get("email"):
                         found_email = find_email_via_google(root_domain)
                         if found_email:
                             info["email"] = found_email
 
                     print(f"  [Company] {info['company_name']}")
+                    fb_url = find_facebook_url(info["company_name"])
+                    if fb_url:
+                        info["facebook_url"] = fb_url
                     if process_and_save_company(info, url, root_domain,
                                                 f"partial {term} {region}", region):
                         total_new += 1

@@ -127,31 +127,13 @@ def google_search(query, num_results=10, time_filter=None):
         return []
 
 
-def find_facebook_url(company_name, soup=None, raw_html=""):
-    """Return a facebook.com page URL for the company, or None.
-    Checks the already-scraped website HTML first (free), then falls
-    back to a Google site:facebook.com search (uses SerpAPI quota)."""
+def find_facebook_url(company_name):
+    """Search Google for the company's Facebook page.
+    Uses site:facebook.com query — accurate but costs one SerpAPI credit.
+    Returns the Facebook page URL string or None."""
     import re as _re
-
-    # 1. Look for a facebook.com link in the scraped HTML
-    if soup:
-        for a in soup.find_all("a", href=True):
-            href = a["href"]
-            m = _re.match(r"https?://(www\.)?facebook\.com/([^/?#\s\"']+)", href)
-            if m and m.group(2).lower() not in ("sharer", "share", "sharer.php",
-                                                  "dialog", "login", "home.php", ""):
-                return href.split("?")[0].rstrip("/")
-
-    # 2. Regex scan the raw HTML for facebook.com URLs (catches JS/data attrs)
-    if raw_html:
-        for m in _re.finditer(
-                r"https?://(www\.)?facebook\.com/([A-Za-z0-9._\-]+)", raw_html):
-            slug = m.group(2).lower()
-            if slug not in ("sharer", "share", "sharer.php", "dialog",
-                             "login", "home.php", ""):
-                return m.group(0).split("?")[0].rstrip("/")
-
-    # 3. Google site:facebook.com fallback
+    if not company_name:
+        return None
     try:
         query = f'site:facebook.com "{company_name}" New Zealand'
         results = google_search(query, num_results=3)
@@ -164,7 +146,6 @@ def find_facebook_url(company_name, soup=None, raw_html=""):
                     return link.split("?")[0].rstrip("/")
     except Exception:
         pass
-
     return None
 
 
@@ -200,9 +181,6 @@ def scrape_website(url):
             if m:
                 scraped_email = m.group(1).lower()
 
-        # Extract Facebook URL from the website HTML (no API cost)
-        scraped_facebook = find_facebook_url("", soup=soup, raw_html=response.text)
-
         # Remove chrome (nav/header/footer/sidebar) before capping so actual content isn't crowded out
         for tag in soup.find_all(["nav", "header", "footer",
                                    "script", "style", "noscript"]):
@@ -210,7 +188,7 @@ def scrape_website(url):
         for tag in soup.find_all(True, {"role": ["navigation", "banner", "contentinfo"]}):
             tag.decompose()
         text = " ".join(soup.get_text(separator=" ", strip=True).split())[:5000]
-        return text, scraped_email, scraped_facebook
+        return text, scraped_email, None
     except Exception as e:
         print(f"  [Scrape error] {url}: {e}")
         return "", None, None
@@ -1467,10 +1445,14 @@ def run_search(triggered_by="manual"):
                     if not info.get("email") and scraped_email:
                         info["email"] = scraped_email
                         print(f"  [Email from mailto] {scraped_email}")
-                    if scraped_facebook:
-                        info["facebook_url"] = scraped_facebook
 
                     print(f"  [Company] {info['company_name']}")
+
+                    # Find Facebook page via Google search now that we know the name
+                    fb_url = find_facebook_url(info["company_name"])
+                    if fb_url:
+                        info["facebook_url"] = fb_url
+                        print(f"  [Facebook] {fb_url}")
 
                     # Email fallback: Google search for "@domain" if still no email
                     if not info.get("email"):

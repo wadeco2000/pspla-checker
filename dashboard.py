@@ -141,8 +141,8 @@ HTML_TEMPLATE = """
         .detail-item label { font-weight: bold; color: #555; font-size: 11px; display: block; margin-bottom: 2px; }
         .detail-item span { font-size: 13px; }
         .fb-tag { display:inline-block; background:#1877f2; color:white; border-radius:4px;
-                  padding:2px 6px; font-size:12px; margin-left:6px;
-                  vertical-align:middle; white-space:nowrap; }
+                  padding:2px 6px; font-size:11px; font-weight:bold; margin-left:6px;
+                  vertical-align:middle; white-space:nowrap; text-decoration:none; }
         .status-icon { margin-right:4px; }
     </style>
 </head>
@@ -722,9 +722,9 @@ HTML_TEMPLATE = """
                 <td class="company-cell">
                     {% if c.website %}<a href="{{ c.website }}" target="_blank">{{ c.company_name or '-' }}</a>{% else %}{{ c.company_name or '-' }}{% endif %}
                     {% if c.facebook_url %}
-                        <a href="{{ c.facebook_url }}" target="_blank" class="fb-tag" title="Facebook page"><i class="fa-brands fa-facebook-f"></i></a>
+                        <a href="{{ c.facebook_url }}" target="_blank" class="fb-tag" title="Facebook page"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" width="7" height="11" fill="white" style="vertical-align:middle"><path d="M279.14 288l14.22-92.66h-88.91v-60.13c0-25.35 12.42-50.06 52.24-50.06h40.42V6.26S260.43 0 225.36 0c-73.22 0-121.08 44.38-121.08 124.72v70.62H22.89V288h81.39v224h100.17V288z"/></svg></a>
                     {% elif c.source_url and 'facebook.com' in c.source_url %}
-                        <a href="{{ c.source_url }}" target="_blank" class="fb-tag" title="Found via Facebook"><i class="fa-brands fa-facebook-f"></i></a>
+                        <a href="{{ c.source_url }}" target="_blank" class="fb-tag" title="Found via Facebook"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" width="7" height="11" fill="white" style="vertical-align:middle"><path d="M279.14 288l14.22-92.66h-88.91v-60.13c0-25.35 12.42-50.06 52.24-50.06h40.42V6.26S260.43 0 225.36 0c-73.22 0-121.08 44.38-121.08 124.72v70.62H22.89V288h81.39v224h100.17V288z"/></svg></a>
                     {% endif %}
                 </td>
                 <td>{{ c.region or '-' }}</td>
@@ -781,9 +781,9 @@ HTML_TEMPLATE = """
                         <div class="detail-item"><label>Last Checked</label><span>{{ (c.last_checked or '')[:10] }}</span></div>
                         <div class="detail-item"><label>Found Via</label><span>{{ c.notes or '-' }}</span></div>
                         {% if c.facebook_url %}
-                        <div class="detail-item"><label><i class="fa-brands fa-facebook" style="color:#1877f2;"></i> Facebook Page</label><span><a href="{{ c.facebook_url }}" target="_blank">{{ c.facebook_url }}</a></span></div>
+                        <div class="detail-item"><label><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" width="8" height="12" fill="#1877f2" style="vertical-align:middle;margin-right:3px"><path d="M279.14 288l14.22-92.66h-88.91v-60.13c0-25.35 12.42-50.06 52.24-50.06h40.42V6.26S260.43 0 225.36 0c-73.22 0-121.08 44.38-121.08 124.72v70.62H22.89V288h81.39v224h100.17V288z"/></svg> Facebook Page</label><span><a href="{{ c.facebook_url }}" target="_blank">{{ c.facebook_url }}</a></span></div>
                         {% elif c.source_url and 'facebook.com' in c.source_url %}
-                        <div class="detail-item"><label><i class="fa-brands fa-facebook" style="color:#1877f2;"></i> Facebook Page</label><span><a href="{{ c.source_url }}" target="_blank">{{ c.source_url }}</a></span></div>
+                        <div class="detail-item"><label><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" width="8" height="12" fill="#1877f2" style="vertical-align:middle;margin-right:3px"><path d="M279.14 288l14.22-92.66h-88.91v-60.13c0-25.35 12.42-50.06 52.24-50.06h40.42V6.26S260.43 0 225.36 0c-73.22 0-121.08 44.38-121.08 124.72v70.62H22.89V288h81.39v224h100.17V288z"/></svg> Facebook Page</label><span><a href="{{ c.source_url }}" target="_blank">{{ c.source_url }}</a></span></div>
                         {% endif %}
                     </div>
                 </td>
