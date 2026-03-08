@@ -762,7 +762,7 @@ HTML_TEMPLATE = """
                     {% if c.companies_office_address %}<div class="detail-block">{{ c.companies_office_address }}</div>{% endif %}
                 </td>
                 <td>
-                    <button class="expand-btn" onclick="toggleDetail(this, {{ loop.index }})">▼ more</button>
+                    <button class="expand-btn" onclick="var r=document.getElementById('detail-{{ loop.index }}');if(r){var o=r.classList.toggle('open');this.textContent=o?'\u25b2 less':'\u25bc more';}">&#x25BC; more</button>
                 </td>
             </tr>
             <tr class="detail-row" id="detail-{{ loop.index }}">
@@ -931,24 +931,22 @@ HTML_TEMPLATE = """
             .then(function(r) { return r.json(); })
             .then(function(d) {
                 if (d.ok) {
-                    // Hide the main row and detail row
-                    var mainRow = document.querySelector('.company-row[data-id="' + id + '"]');
-                    var detailRow = document.querySelector('#detail-' + id);
-                    if (mainRow) mainRow.remove();
-                    if (detailRow) detailRow.remove();
+                    // Walk up from the delete button to find and remove both rows
+                    var btn2 = document.querySelector('[data-cid="' + id + '"]');
+                    if (btn2) {
+                        var td = btn2.closest('td');
+                        if (td) {
+                            var detailTr = td.closest('tr');
+                            var mainTr = detailTr ? detailTr.previousElementSibling : null;
+                            if (detailTr) detailTr.remove();
+                            if (mainTr) mainTr.remove();
+                        }
+                    }
                 } else {
                     alert('Delete failed: ' + (d.error || 'unknown error'));
                 }
             })
             .catch(function() { alert('Delete request failed.'); });
-        }
-
-        function toggleDetail(btn, id) {
-            var row = document.getElementById('detail-' + id);
-            if (!row) return;
-            var isOpen = row.classList.contains('open');
-            row.classList.toggle('open');
-            btn.textContent = isOpen ? '▼ more' : '▲ less';
         }
 
         function copyAndOpen(e, licNum) {
