@@ -18,34 +18,47 @@ HTML_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PSPLA Security Camera Checker</title>
     <style>
+        * { box-sizing: border-box; }
         body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f4f4f4; }
-        h1 { color: #2c3e50; }
-        .stats { display: flex; gap: 20px; margin-bottom: 30px; flex-wrap: wrap; }
-        .stat-box { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); min-width: 150px; text-align: center; }
+        h1 { color: #2c3e50; margin-bottom: 5px; }
+        .subtitle { color: #666; margin-bottom: 25px; }
+        .stats { display: flex; gap: 15px; margin-bottom: 25px; flex-wrap: wrap; }
+        .stat-box { background: white; padding: 15px 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); min-width: 130px; text-align: center; }
         .stat-box h2 { margin: 0; font-size: 2em; }
-        .stat-box p { margin: 5px 0 0; color: #666; }
+        .stat-box p { margin: 5px 0 0; color: #666; font-size: 13px; }
         .unlicensed h2 { color: #e74c3c; }
         .licensed h2 { color: #27ae60; }
+        .expired h2 { color: #e67e22; }
         .unknown h2 { color: #f39c12; }
-        .filters { margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .filters { margin-bottom: 15px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
         .filters select, .filters input { padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
-        table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        th { background: #2c3e50; color: white; padding: 12px; text-align: left; }
-        td { padding: 10px 12px; border-bottom: 1px solid #eee; font-size: 13px; }
-        tr:hover { background: #f9f9f9; }
-        .badge { padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .btn-dark { background: #2c3e50; color: white; }
+        .btn-dark:hover { background: #34495e; }
+        table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1); font-size: 13px; }
+        th { background: #2c3e50; color: white; padding: 10px 12px; text-align: left; white-space: nowrap; }
+        td { padding: 8px 12px; border-bottom: 1px solid #eee; vertical-align: top; }
+        tr:hover td { background: #f9f9f9; }
+        .badge { padding: 3px 8px; border-radius: 10px; font-size: 11px; font-weight: bold; white-space: nowrap; }
         .badge-licensed { background: #d4efdf; color: #1e8449; }
         .badge-unlicensed { background: #fadbd8; color: #c0392b; }
-        .badge-unknown { background: #fdebd0; color: #d35400; }
+        .badge-expired { background: #fdebd0; color: #d35400; }
+        .badge-unknown { background: #eaecee; color: #666; }
         a { color: #2980b9; text-decoration: none; }
         a:hover { text-decoration: underline; }
-        .refresh { background: #2c3e50; color: white; padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
-        .refresh:hover { background: #34495e; }
+        .detail-block { font-size: 11px; color: #888; margin-top: 2px; }
+        .company-cell { font-weight: bold; }
+        .expand-btn { background: none; border: none; cursor: pointer; color: #2980b9; font-size: 12px; padding: 0; }
+        .detail-row { display: none; }
+        .detail-row td { background: #f8f9fa; padding: 12px; }
+        .detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+        .detail-item label { font-weight: bold; color: #555; font-size: 11px; display: block; margin-bottom: 2px; }
+        .detail-item span { font-size: 13px; }
     </style>
 </head>
 <body>
     <h1>PSPLA Security Camera Company Checker</h1>
-    <p style="color:#666">NZ companies found installing security cameras, checked against PSPLA licensing register.</p>
+    <p class="subtitle">NZ companies found installing security cameras — checked against PSPLA licensing register.</p>
 
     <div class="stats">
         <div class="stat-box">
@@ -60,9 +73,13 @@ HTML_TEMPLATE = """
             <h2>{{ unlicensed }}</h2>
             <p>Not Licensed</p>
         </div>
+        <div class="stat-box expired">
+            <h2>{{ expired }}</h2>
+            <p>Expired License</p>
+        </div>
         <div class="stat-box unknown">
             <h2>{{ unknown }}</h2>
-            <p>Unknown / Unverified</p>
+            <p>Unverified</p>
         </div>
     </div>
 
@@ -78,50 +95,79 @@ HTML_TEMPLATE = """
             <option value="">All Statuses</option>
             <option value="licensed">Licensed</option>
             <option value="unlicensed">Not Licensed</option>
+            <option value="expired">Expired</option>
             <option value="unknown">Unknown</option>
         </select>
-        <button class="refresh" onclick="window.location.reload()">Refresh</button>
+        <button class="btn btn-dark" onclick="window.location.reload()">Refresh</button>
     </div>
 
     <table id="companyTable">
         <thead>
             <tr>
-                <th>Company Name</th>
+                <th>Company (Website)</th>
                 <th>Region</th>
-                <th>Phone</th>
-                <th>Website</th>
+                <th>Contact</th>
                 <th>PSPLA Status</th>
-                <th>PSPLA Name</th>
-                <th>License Type</th>
-                <th>Match Method</th>
-                <th>Last Checked</th>
+                <th>PSPLA Registered Name</th>
+                <th>License #</th>
+                <th>Expiry</th>
+                <th>Companies Office</th>
+                <th>Details</th>
             </tr>
         </thead>
         <tbody>
             {% for c in companies %}
+            {% set lic = c.pspla_licensed|string|lower %}
+            {% set status_key = 'licensed' if lic == 'true' else ('expired' if c.pspla_license_status and c.pspla_license_status|lower == 'expired' else ('unlicensed' if lic == 'false' else 'unknown')) %}
             <tr class="company-row"
                 data-name="{{ (c.company_name or '') | lower }}"
                 data-region="{{ (c.region or '') | lower }}"
-                data-status="{{ 'licensed' if c.pspla_licensed == true else 'unlicensed' if c.pspla_licensed == false else 'unknown' }}">
-                <td>{{ c.company_name or '-' }}</td>
+                data-status="{{ status_key }}"
+                data-id="{{ loop.index }}">
+                <td class="company-cell">
+                    {% if c.website %}<a href="{{ c.website }}" target="_blank">{{ c.company_name or '-' }}</a>{% else %}{{ c.company_name or '-' }}{% endif %}
+                </td>
                 <td>{{ c.region or '-' }}</td>
-                <td>{{ c.phone or '-' }}</td>
-                <td>{% if c.website %}<a href="{{ c.website }}" target="_blank">Visit</a>{% else %}-{% endif %}</td>
                 <td>
-                    {% if c.pspla_licensed == true %}
+                    {{ c.phone or '' }}
+                    {% if c.email %}<div class="detail-block">{{ c.email }}</div>{% endif %}
+                </td>
+                <td>
+                    {% if lic == 'true' %}
                         <span class="badge badge-licensed">LICENSED</span>
-                    {% elif c.pspla_licensed == false and c.pspla_license_status %}
-                        <span class="badge badge-unlicensed">{{ c.pspla_license_status | upper }}</span>
-                    {% elif c.pspla_licensed == false %}
+                    {% elif c.pspla_license_status and c.pspla_license_status|lower == 'expired' %}
+                        <span class="badge badge-expired">EXPIRED</span>
+                    {% elif lic == 'false' %}
                         <span class="badge badge-unlicensed">NOT LICENSED</span>
                     {% else %}
                         <span class="badge badge-unknown">UNKNOWN</span>
                     {% endif %}
                 </td>
-                <td>{{ c.pspla_name or '-' }}</td>
-                <td>{{ c.license_type or '-' }}</td>
-                <td>{{ c.match_method or '-' }}</td>
-                <td>{{ (c.last_checked or '')[:10] }}</td>
+                <td>
+                    {{ c.pspla_name or '-' }}
+                    {% if c.pspla_address %}<div class="detail-block">{{ c.pspla_address }}</div>{% endif %}
+                </td>
+                <td>{{ c.pspla_license_number or '-' }}</td>
+                <td>{{ c.pspla_license_expiry or '-' }}</td>
+                <td>
+                    {{ c.companies_office_name or '-' }}
+                    {% if c.companies_office_address %}<div class="detail-block">{{ c.companies_office_address }}</div>{% endif %}
+                </td>
+                <td>
+                    <button class="expand-btn" onclick="toggleDetail({{ loop.index }})">▼ more</button>
+                </td>
+            </tr>
+            <tr class="detail-row" id="detail-{{ loop.index }}">
+                <td colspan="9">
+                    <div class="detail-grid">
+                        <div class="detail-item"><label>Website Address</label><span>{{ c.address or '-' }}</span></div>
+                        <div class="detail-item"><label>License Type</label><span>{{ c.license_type or '-' }}</span></div>
+                        <div class="detail-item"><label>Match Method</label><span>{{ c.match_method or '-' }}</span></div>
+                        <div class="detail-item"><label>License Status</label><span>{{ c.pspla_license_status or '-' }}</span></div>
+                        <div class="detail-item"><label>Last Checked</label><span>{{ (c.last_checked or '')[:10] }}</span></div>
+                        <div class="detail-item"><label>Found Via</label><span>{{ c.notes or '-' }}</span></div>
+                    </div>
+                </td>
             </tr>
             {% endfor %}
         </tbody>
@@ -137,8 +183,23 @@ HTML_TEMPLATE = """
                 const nameMatch = !search || row.dataset.name.includes(search);
                 const regionMatch = !region || row.dataset.region.includes(region);
                 const statusMatch = !status || row.dataset.status === status;
-                row.style.display = (nameMatch && regionMatch && statusMatch) ? '' : 'none';
+                const visible = nameMatch && regionMatch && statusMatch;
+                row.style.display = visible ? '' : 'none';
+                const detailRow = document.getElementById('detail-' + row.dataset.id);
+                if (detailRow && !visible) detailRow.style.display = 'none';
             });
+        }
+
+        function toggleDetail(id) {
+            const row = document.getElementById('detail-' + id);
+            const btn = event.target;
+            if (row.style.display === 'table-row') {
+                row.style.display = 'none';
+                btn.textContent = '▼ more';
+            } else {
+                row.style.display = 'table-row';
+                btn.textContent = '▲ less';
+            }
         }
     </script>
 </body>
@@ -154,13 +215,11 @@ def get_companies():
     }
     try:
         response = requests.get(url, headers=headers)
-        print(f"Supabase status: {response.status_code}")
-        print(f"Supabase response: {response.text[:300]}")
         data = response.json()
         if isinstance(data, list):
             return data
         else:
-            print(f"Unexpected response format: {data}")
+            print(f"Supabase error: {data}")
             return []
     except Exception as e:
         print(f"Error fetching companies: {e}")
@@ -172,9 +231,18 @@ def index():
     companies = get_companies()
 
     total = len(companies)
-    licensed = sum(1 for c in companies if c.get("pspla_licensed") is True)
-    unlicensed = sum(1 for c in companies if c.get("pspla_licensed") is False)
-    unknown = total - licensed - unlicensed
+    def is_licensed(c):
+        v = c.get("pspla_licensed")
+        return v is True or v == "true"
+
+    def is_unlicensed(c):
+        v = c.get("pspla_licensed")
+        return v is False or v == "false"
+
+    licensed = sum(1 for c in companies if is_licensed(c))
+    expired = sum(1 for c in companies if is_unlicensed(c) and (c.get("pspla_license_status") or "").lower() == "expired")
+    unlicensed = sum(1 for c in companies if is_unlicensed(c) and (c.get("pspla_license_status") or "").lower() != "expired")
+    unknown = total - licensed - unlicensed - expired
 
     regions = sorted(set(c.get("region", "") for c in companies if c.get("region")))
 
@@ -184,9 +252,20 @@ def index():
         total=total,
         licensed=licensed,
         unlicensed=unlicensed,
+        expired=expired,
         unknown=unknown,
         regions=regions
     )
+
+
+@app.route("/debug")
+def debug():
+    companies = get_companies()
+    output = ""
+    for c in companies[:5]:
+        val = c.get("pspla_licensed")
+        output += f"{c.get('company_name')}: pspla_licensed={val!r} type={type(val).__name__}<br>"
+    return output
 
 
 if __name__ == "__main__":

@@ -79,8 +79,15 @@ def google_search(query, num_results=10):
 
 def scrape_website(url):
     try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-NZ,en;q=0.9",
+        }
         response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 403:
+            print(f"  [Scrape blocked 403] {url} - will use search snippet only")
+            return ""
         soup = BeautifulSoup(response.text, "html.parser")
         text = soup.get_text(separator=" ", strip=True)[:3000]
         return text
@@ -101,11 +108,16 @@ Only extract if this company installs security cameras, CCTV, IP cameras, survei
 If they do not offer these services, return null.
 
 If they do, extract and return JSON with these fields:
-- company_name: the business trading name
+- company_name: the PRIMARY trading name shown on the website (not abbreviations)
+- legal_name: the full legal name including Ltd/Limited if found anywhere on the page
+- other_names: list of any other business names, abbreviations, or trading names found
 - phone: phone number (NZ format)
 - email: email address
 - address: physical address including city
 - region: NZ region or city
+
+Important: Look carefully for the full company name in the footer, about page, contact details, and copyright notices. Companies often use abbreviations in their URL but their full name elsewhere.
+If page content is empty or blocked, try to extract what you can from the URL and search snippet alone.
 
 Return ONLY valid JSON or null."""
 
@@ -116,11 +128,30 @@ Return ONLY valid JSON or null."""
             messages=[{"role": "user", "content": prompt}]
         )
         text = message.content[0].text.strip()
+        # Handle markdown code blocks
         if "```" in text:
             text = text.split("```")[1]
             if text.startswith("json"):
                 text = text[4:]
-        result = json.loads(text.strip())
+        text = text.strip()
+        # Handle "null" response
+        if text.lower().startswith("null"):
+            return None
+        # Extract just the JSON object if there's extra text
+        if "{" in text:
+            start = text.index("{")
+            # Find matching closing brace
+            depth = 0
+            end = start
+            for i, ch in enumerate(text[start:], start):
+                if ch == "{": depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = i
+                        break
+            text = text[start:end+1]
+        result = json.loads(text)
         if isinstance(result, list):
             result = result[0] if result else None
         return result
@@ -430,8 +461,29 @@ def run_search():
                 company_name = info["company_name"]
                 print(f"  [Company] {company_name}")
 
-                print(f"  [Checking PSPLA] {company_name}")
-                pspla_result = check_pspla(company_name, website_region=info.get("region") or region)
+                # Build list of all names to try on PSPLA
+                names_to_try = []
+                if company_name:
+                    names_to_try.append(company_name)
+                if info.get("legal_name") and info["legal_name"] not in names_to_try:
+                    names_to_try.append(info["legal_name"])
+                for other in (info.get("other_names") or []):
+                    if other and other not in names_to_try:
+                        names_to_try.append(other)
+
+                # Try each name on PSPLA until we find a match
+                pspla_result = None
+                website_region = info.get("region") or region
+                for name in names_to_try:
+                    print(f"  [Checking PSPLA] {name}")
+                    result = check_pspla(name, website_region=website_region)
+                    if result.get("licensed"):
+                        pspla_result = result
+                        if name != company_name:
+                            print(f"  [Matched via] {name}")
+                        break
+                    elif pspla_result is None:
+                        pspla_result = result  # keep first result as fallback
 
                 co_result = {"name": None, "address": None}
 
