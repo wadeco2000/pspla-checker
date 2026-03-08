@@ -447,6 +447,52 @@ def pspla_search(query):
     return data.get("response", {}).get("docs", []), data.get("response", {}).get("numFound", 0)
 
 
+def generate_name_variations(company_name):
+    """Return a list of name variants to try against PSPLA, handling:
+    - Hyphens vs spaces:   'On-Guard' → 'On Guard'
+    - Joined compound words: 'Onguard' → 'On guard' (split at pos 2 & 3)
+    - CamelCase:           'OnGuard'  → 'On Guard'
+    - Spaces removed:      'On Guard' → 'OnGuard'
+    All variants are deduplicated and normalised to lowercase."""
+    import re as _re
+    variants = [company_name]
+
+    # Hyphens → spaces
+    if '-' in company_name:
+        variants.append(company_name.replace('-', ' '))
+        variants.append(company_name.replace('-', ''))
+
+    # CamelCase split: 'OnGuard' → 'On Guard'
+    camel = _re.sub(r'([a-z])([A-Z])', r'\1 \2', company_name)
+    if camel != company_name:
+        variants.append(camel)
+
+    # Split each word at position 2 and 3 — catches 'Onguard' → 'On guard',
+    # 'Elguard' → 'El guard', 'Proguard' → 'Pro guard' etc.
+    words = company_name.split()
+    for i, word in enumerate(words):
+        w = word.strip('.,&')
+        if len(w) >= 6:
+            for pos in [2, 3]:
+                prefix, suffix = w[:pos], w[pos:]
+                if len(prefix) >= 2 and len(suffix) >= 3:
+                    new_words = words[:i] + [prefix, suffix] + words[i+1:]
+                    variants.append(' '.join(new_words))
+
+    # Joined (spaces removed): 'On Guard' → 'OnGuard'
+    joined = ''.join(company_name.split())
+    if joined != company_name:
+        variants.append(joined)
+
+    # Dedupe preserving order, normalise whitespace
+    seen = []
+    for v in variants:
+        v = ' '.join(v.split())
+        if v.lower() not in [s.lower() for s in seen]:
+            seen.append(v)
+    return seen
+
+
 def extract_keywords(company_name):
     """Extract meaningful keywords from a company name."""
     stop_words = {"limited", "ltd", "nz", "n.z.", "new", "zealand", "the", "and", "&",
@@ -498,13 +544,17 @@ Return ONLY JSON: {{"match": true or false, "confidence": "high/medium/low", "re
 def check_pspla(company_name, website_region=None):
     try:
         match_method = None
+        docs, num_found = [], 0
 
-        # Try 1: full name search
-        docs, num_found = pspla_search(company_name)
-        if num_found > 0:
-            match_method = "full name"
+        # Try 1: full name + name variations
+        # Handles: 'Onguard' vs 'On Guard', 'On-Guard' vs 'On Guard', CamelCase etc.
+        for variant in generate_name_variations(company_name):
+            docs, num_found = pspla_search(variant)
+            if num_found > 0:
+                match_method = "full name" if variant == company_name else f"name variant: {variant}"
+                break
 
-        # Try 2: keyword search if no results (need at least 2 meaningful keywords)
+        # Try 2: keyword search (need at least 2 meaningful keywords)
         if num_found == 0:
             keywords = extract_keywords(company_name)
             if len(keywords) >= 2:
@@ -513,7 +563,7 @@ def check_pspla(company_name, website_region=None):
                 if num_found > 0:
                     match_method = f"keywords: {keyword_query}"
 
-        # Try 3: first significant word only if it's long enough to be unique (6+ chars)
+        # Try 3: first significant word only (6+ chars)
         if num_found == 0:
             keywords = extract_keywords(company_name)
             if keywords and len(keywords[0]) >= 6:
