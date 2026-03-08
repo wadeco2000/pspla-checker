@@ -562,21 +562,25 @@ def run_search():
                 for name in names_to_try:
                     print(f"  [Checking PSPLA] {name}")
                     res = check_pspla(name, website_region=website_region)
-                    if res.get("licensed"):
-                        # If matched via a non-primary name, verify the PSPLA result
-                        # actually corresponds to the primary company (not a brand they sell)
-                        if name != company_name and res.get("matched_name"):
+                    if res.get("licensed") and res.get("matched_name"):
+                        # Always verify the PSPLA result against the PRIMARY company name.
+                        # This catches cases where e.g. "Livewire" matches "Livewire Electrical Wellington"
+                        # even though the actual company is "Addz Livewire" — a different business.
+                        matched = res["matched_name"]
+                        needs_verify = company_name.lower() not in matched.lower() and matched.lower() not in company_name.lower()
+                        if needs_verify:
                             verification = verify_pspla_match(
-                                company_name, res["matched_name"], website_region, res.get("pspla_address")
+                                company_name, matched, website_region, res.get("pspla_address")
                             )
                             if not verification.get("match"):
-                                print(f"  [Cross-verify rejected] {company_name} vs {res['matched_name']} (found via '{name}') - {verification.get('reason')}")
+                                print(f"  [Verify rejected] {company_name} vs {matched} - {verification.get('reason')}")
                                 if pspla_result is None:
                                     pspla_result = {"licensed": False, "matched_name": None, "license_type": None,
                                                     "match_method": f"rejected: {verification.get('reason')}",
                                                     "pspla_address": None, "pspla_license_number": None,
                                                     "pspla_license_status": None, "pspla_license_expiry": None}
                                 continue
+                        if name != company_name:
                             print(f"  [Matched via] {name}")
                         pspla_result = res
                         break
