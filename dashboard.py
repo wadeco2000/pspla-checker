@@ -141,9 +141,8 @@ HTML_TEMPLATE = """
         .detail-item label { font-weight: bold; color: #555; font-size: 11px; display: block; margin-bottom: 2px; }
         .detail-item span { font-size: 13px; }
         .fb-tag { display:inline-block; background:#1877f2; color:white; border-radius:4px;
-                  padding:1px 5px; font-size:10px; font-weight:bold; margin-left:5px;
+                  padding:2px 6px; font-size:12px; margin-left:6px;
                   vertical-align:middle; white-space:nowrap; }
-        .fb-tag i { font-size:9px; }
         .status-icon { margin-right:4px; }
     </style>
 </head>
@@ -781,7 +780,9 @@ HTML_TEMPLATE = """
                         <div class="detail-item"><label>License Status</label><span>{{ c.pspla_license_status or '-' }}</span></div>
                         <div class="detail-item"><label>Last Checked</label><span>{{ (c.last_checked or '')[:10] }}</span></div>
                         <div class="detail-item"><label>Found Via</label><span>{{ c.notes or '-' }}</span></div>
-                        {% if c.source_url and 'facebook.com' in c.source_url %}
+                        {% if c.facebook_url %}
+                        <div class="detail-item"><label><i class="fa-brands fa-facebook" style="color:#1877f2;"></i> Facebook Page</label><span><a href="{{ c.facebook_url }}" target="_blank">{{ c.facebook_url }}</a></span></div>
+                        {% elif c.source_url and 'facebook.com' in c.source_url %}
                         <div class="detail-item"><label><i class="fa-brands fa-facebook" style="color:#1877f2;"></i> Facebook Page</label><span><a href="{{ c.source_url }}" target="_blank">{{ c.source_url }}</a></span></div>
                         {% endif %}
                     </div>
