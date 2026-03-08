@@ -180,7 +180,7 @@ HTML_TEMPLATE = """
                         <button class="btn" style="background:#1877f2; color:white;"><i class="fa-brands fa-facebook-f"></i> Facebook</button>
                     </form>
                 {% endif %}
-                <form method="POST" action="/dedupe-db" onsubmit="return confirm('Remove duplicate companies (same name)? Keeps the first record of each.')">
+                <form method="POST" action="/dedupe-db" onsubmit="return confirm('Remove duplicate companies (same name + region)? Keeps the best record of each.')">
                     <button class="btn" style="background:#8e44ad; color:white;"><i class="fa-solid fa-filter"></i> Dedupe DB</button>
                 </form>
                 <button class="btn" style="background:#e74c3c; color:white;"
@@ -1113,20 +1113,35 @@ def start_facebook_search():
 
 @app.route("/dedupe-db", methods=["POST"])
 def dedupe_db():
-    """Remove duplicate rows keeping the lowest id for each company_name."""
+    """Remove duplicate rows keeping the best record for each (company_name, region) pair.
+    'Best' = has phone or email > has more data > lowest id."""
     try:
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-        resp = requests.get(f"{SUPABASE_URL}/rest/v1/Companies?select=id,company_name&order=id.asc",
-                            headers=headers)
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/Companies?select=id,company_name,region,phone,email&order=id.asc",
+            headers=headers)
         rows = resp.json()
-        seen = {}
-        to_delete = []
+
+        # Group by (normalised_name, normalised_region)
+        groups = {}
         for row in rows:
             name = (row.get("company_name") or "").strip().lower()
-            if name in seen:
-                to_delete.append(row["id"])
-            else:
-                seen[name] = row["id"]
+            region = (row.get("region") or "").strip().lower()
+            key = (name, region)
+            groups.setdefault(key, []).append(row)
+
+        to_delete = []
+        for key, group in groups.items():
+            if len(group) < 2:
+                continue
+            # Score each: prefer records with phone or email
+            def score(r):
+                return (1 if r.get("phone") else 0) + (1 if r.get("email") else 0)
+            group.sort(key=lambda r: (-score(r), r["id"]))
+            # Keep the first (best), delete the rest
+            for dup in group[1:]:
+                to_delete.append(dup["id"])
+
         for rid in to_delete:
             requests.delete(f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{rid}", headers={
                 **headers, "Content-Type": "application/json"})

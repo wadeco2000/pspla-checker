@@ -5,9 +5,12 @@ import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 import anthropic
-from datetime import datetime
+from datetime import datetime, timezone
 
 load_dotenv()
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TERMS_FILE = os.path.join(BASE_DIR, "search_terms.json")
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 SERPAPI_KEY = os.getenv("SERPAPI_KEY")
@@ -17,13 +20,40 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 NZ_REGIONS = [
+    # Major cities
     "Auckland", "Wellington", "Christchurch", "Hamilton", "Tauranga",
     "Dunedin", "Palmerston North", "Napier", "New Plymouth", "Whangarei",
     "Nelson", "Invercargill", "Gisborne", "Whanganui", "Rotorua",
-    "Hastings", "Blenheim", "Timaru", "Pukekohe", "Taupo"
+    "Hastings", "Blenheim", "Timaru", "Pukekohe", "Taupo",
+    # Northland
+    "Kerikeri", "Kaitaia", "Dargaville",
+    # Wellington region
+    "Lower Hutt", "Upper Hutt", "Porirua", "Paraparaumu",
+    # Waikato
+    "Thames", "Te Awamutu", "Tokoroa",
+    # Bay of Plenty
+    "Whakatane", "Katikati", "Te Puke",
+    # Hawke's Bay
+    "Waipukurau", "Wairoa",
+    # Taranaki
+    "Hawera", "Stratford",
+    # Manawatu
+    "Levin", "Feilding",
+    # Tasman/Nelson
+    "Motueka", "Richmond",
+    # Marlborough
+    "Picton",
+    # West Coast
+    "Greymouth", "Westport",
+    # Canterbury
+    "Rangiora", "Ashburton", "Rolleston",
+    # Otago
+    "Queenstown", "Wanaka", "Oamaru", "Alexandra",
+    # Southland
+    "Gore",
 ]
 
-SEARCH_TERMS = [
+_DEFAULT_GOOGLE_TERMS = [
     "security camera installer",
     "CCTV installer",
     "IP camera installation",
@@ -51,7 +81,7 @@ SKIP_DOMAINS = [
 SERPAPI_EXHAUSTED = "SERPAPI_EXHAUSTED"
 
 
-def google_search(query, num_results=10):
+def google_search(query, num_results=10, time_filter=None):
     url = "https://serpapi.com/search"
     params = {
         "api_key": SERPAPI_KEY,
@@ -61,6 +91,8 @@ def google_search(query, num_results=10):
         "gl": "nz",
         "hl": "en"
     }
+    if time_filter:
+        params["tbs"] = time_filter
     try:
         response = requests.get(url, params=params, timeout=15)
         data = response.json()
@@ -84,6 +116,9 @@ def google_search(query, num_results=10):
 
 
 def scrape_website(url):
+    """Returns (page_text, email_or_None). Extracts mailto: links directly so
+    footer emails are found even though page_text is capped at 3000 chars."""
+    import re
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
@@ -93,13 +128,30 @@ def scrape_website(url):
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 403:
             print(f"  [Scrape blocked 403] {url} - will use search snippet only")
-            return ""
+            return "", None
         soup = BeautifulSoup(response.text, "html.parser")
+
+        # Extract email from mailto: links before truncating text
+        scraped_email = None
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if href.lower().startswith("mailto:"):
+                addr = href[7:].split("?")[0].strip().lower()
+                if "@" in addr and not addr.startswith("@"):
+                    scraped_email = addr
+                    break
+
+        # Also scan raw HTML for mailto: in case they're in JS/data attributes
+        if not scraped_email:
+            m = re.search(r'mailto:([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})', response.text)
+            if m:
+                scraped_email = m.group(1).lower()
+
         text = soup.get_text(separator=" ", strip=True)[:3000]
-        return text
+        return text, scraped_email
     except Exception as e:
         print(f"  [Scrape error] {url}: {e}")
-        return ""
+        return "", None
 
 
 def extract_company_info(url, page_text, search_snippet):
@@ -408,6 +460,22 @@ def save_to_supabase(record):
         return False
 
 
+def find_email_via_google(domain):
+    """Search Google for any email address at this domain (e.g. "@alarmwatch.co.nz")."""
+    import re
+    query = f'"@{domain}"'
+    results = google_search(query, num_results=5)
+    if not results or results == SERPAPI_EXHAUSTED:
+        return None
+    email_pattern = re.compile(r'[a-zA-Z0-9._%+\-]+@' + re.escape(domain), re.IGNORECASE)
+    for r in results:
+        for text in (r.get("snippet", ""), r.get("title", "")):
+            match = email_pattern.search(text)
+            if match:
+                return match.group(0).lower()
+    return None
+
+
 def get_root_domain(url):
     """Extract root domain from URL e.g. https://www.adtsecurity.co.nz/branches/hamilton -> adtsecurity.co.nz"""
     try:
@@ -440,6 +508,35 @@ def get_domain_record(domain):
         return data[0] if data else None
     except:
         return None
+
+
+def company_name_exists(name):
+    """Check if a company with this name already exists (case-insensitive)."""
+    url = f"{SUPABASE_URL}/rest/v1/Companies?company_name=ilike.{requests.utils.quote(name)}&select=id&limit=1"
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    try:
+        response = requests.get(url, headers=headers)
+        data = response.json()
+        return len(data) > 0
+    except:
+        return False
+
+
+def company_name_region_exists(name, region):
+    """Check if a company with this name + region already exists (case-insensitive)."""
+    if not name:
+        return False
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    url = (f"{SUPABASE_URL}/rest/v1/Companies"
+           f"?company_name=ilike.{requests.utils.quote(name)}"
+           f"&region=ilike.{requests.utils.quote(region or '')}"
+           f"&select=id&limit=1")
+    try:
+        response = requests.get(url, headers=headers)
+        data = response.json()
+        return len(data) > 0
+    except:
+        return False
 
 
 def check_pspla_individual(name):
@@ -482,6 +579,8 @@ def check_pspla_individual(name):
 PAUSE_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pause.flag")
 RUNNING_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "running.flag")
 PROGRESS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "search_progress.json")
+STATUS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "search_status.json")
+HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "search_history.json")
 
 # Single source of truth for all columns saved to the Companies table.
 # Add new fields here and they are automatically included in the schema check.
@@ -577,16 +676,532 @@ def clear_progress():
         os.remove(PROGRESS_FILE)
 
 
-def run_search():
+def write_status(phase, region, term, region_idx, term_idx, total_regions, total_terms, total_found, total_new):
+    """Write current search position to status file so the dashboard can show a progress bar."""
+    try:
+        with open(STATUS_FILE, "w") as f:
+            json.dump({
+                "phase": phase,
+                "region": region,
+                "term": term,
+                "region_idx": region_idx,
+                "term_idx": term_idx,
+                "total_regions": total_regions,
+                "total_terms": total_terms,
+                "total_found": total_found,
+                "total_new": total_new,
+            }, f)
+    except Exception:
+        pass
+
+
+def clear_status():
+    if os.path.exists(STATUS_FILE):
+        os.remove(STATUS_FILE)
+
+
+def append_history(run_type, started_iso, total_found, total_new, status="completed", triggered_by="manual"):
+    """Append a run record to search_history.json (newest first, capped at 100)."""
+    finished = datetime.now(timezone.utc)
+    try:
+        started_dt = datetime.fromisoformat(started_iso)
+        duration_minutes = round((finished - started_dt).total_seconds() / 60, 1)
+    except Exception:
+        duration_minutes = None
+    record = {
+        "type": run_type,
+        "started": started_iso,
+        "finished": finished.isoformat(),
+        "duration_minutes": duration_minutes,
+        "total_found": total_found,
+        "total_new": total_new,
+        "status": status,
+        "triggered_by": triggered_by,
+    }
+    history = []
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE) as f:
+                history = json.load(f)
+        except Exception:
+            history = []
+    history.insert(0, record)
+    history = history[:100]
+    try:
+        with open(HISTORY_FILE, "w") as f:
+            json.dump(history, f, indent=2)
+    except Exception as e:
+        print(f"  [History write error] {e}")
+
+
+_DEFAULT_FACEBOOK_TERMS = [
+    "security camera installation",
+    "CCTV installation",
+    "security camera installer",
+    "security alarm installation",
+    "CCTV installer",
+    "security camera company",
+]
+
+
+def _load_search_terms():
+    """Load search terms from JSON file, writing defaults if file is missing."""
+    try:
+        if os.path.exists(TERMS_FILE):
+            with open(TERMS_FILE) as f:
+                data = json.load(f)
+            return (data.get("google") or _DEFAULT_GOOGLE_TERMS,
+                    data.get("facebook") or _DEFAULT_FACEBOOK_TERMS)
+    except Exception:
+        pass
+    # Write defaults on first run
+    try:
+        with open(TERMS_FILE, "w") as f:
+            json.dump({"google": _DEFAULT_GOOGLE_TERMS, "facebook": _DEFAULT_FACEBOOK_TERMS}, f, indent=2)
+    except Exception:
+        pass
+    return _DEFAULT_GOOGLE_TERMS, _DEFAULT_FACEBOOK_TERMS
+
+
+SEARCH_TERMS, FACEBOOK_SEARCH_TERMS = _load_search_terms()
+
+
+def process_and_save_company(info, website_url, root_domain, source_label, fallback_region=""):
+    """Run PSPLA/CO checks on extracted company info and save to DB.
+    Returns True if a new record was saved."""
+    company_name = info["company_name"]
+    website_region = info.get("region") or fallback_region
+
+    # Skip if this (name, region) combination already exists
+    if company_name_region_exists(company_name, website_region):
+        print(f"  [Skipped] {company_name} already exists in region '{website_region}'")
+        return False
+
+    # Build list of all names to try on PSPLA
+    names_to_try = []
+    if company_name:
+        names_to_try.append(company_name)
+    if info.get("legal_name") and info["legal_name"] not in names_to_try:
+        names_to_try.append(info["legal_name"])
+    for other in (info.get("other_names") or []):
+        if other and other not in names_to_try:
+            names_to_try.append(other)
+
+    # Try each name on PSPLA until we find a match
+    pspla_result = None
+    for name in names_to_try:
+        print(f"  [Checking PSPLA] {name}")
+        res = check_pspla(name, website_region=website_region)
+        if res.get("matched_name"):
+            matched = res["matched_name"]
+            verification = verify_pspla_match(
+                company_name, matched, website_region, res.get("pspla_address")
+            )
+            if not verification.get("match"):
+                print(f"  [Verify rejected] {company_name} vs {matched} - {verification.get('reason')}")
+                if pspla_result is None:
+                    pspla_result = {"licensed": False, "matched_name": None, "license_type": None,
+                                    "match_method": f"rejected: {verification.get('reason')}",
+                                    "pspla_address": None, "pspla_license_number": None,
+                                    "pspla_license_status": None, "pspla_license_expiry": None}
+                continue
+            if name != company_name:
+                print(f"  [Matched via] {name}")
+            pspla_result = res
+            if res.get("licensed"):
+                break
+        elif pspla_result is None:
+            pspla_result = res
+
+    # Check for individual license using director names
+    individual_license_found = None
+    if not pspla_result.get("licensed"):
+        directors = info.get("director_names") or []
+        for director in directors:
+            print(f"  [Checking individual license] {director}")
+            ind = check_pspla_individual(director)
+            if ind.get("found"):
+                individual_license_found = ind["name"]
+                print(f"  [Individual license found] {individual_license_found}")
+                break
+        time.sleep(1)
+
+    # Companies Office lookup
+    co_search_name = pspla_result.get("matched_name") or company_name
+    co_result = check_companies_office(co_search_name, pspla_address=pspla_result.get("pspla_address"))
+    time.sleep(2)
+
+    licensed_val = pspla_result.get("licensed")
+    if not isinstance(licensed_val, bool):
+        licensed_val = None
+
+    directors = info.get("director_names") or []
+    reason_parts = []
+    if info.get("_fb_snippet"):
+        reason_parts.append(f"Facebook description: \"{info['_fb_snippet']}\"")
+    reason_parts.append(f"Searched PSPLA for: {', '.join(names_to_try)}.")
+
+    if licensed_val is True:
+        reason_parts.append(f"Active company license found for '{pspla_result.get('matched_name')}' (match method: {pspla_result.get('match_method')}).")
+        if pspla_result.get("pspla_license_number"):
+            reason_parts.append(f"License #{pspla_result.get('pspla_license_number')}, status: {pspla_result.get('pspla_license_status') or 'active'}, expires {pspla_result.get('pspla_license_expiry') or 'unknown'}.")
+        if pspla_result.get("pspla_address"):
+            reason_parts.append(f"PSPLA registered address: {pspla_result.get('pspla_address')}.")
+        if directors:
+            reason_parts.append(f"Director/owner names found on website: {', '.join(directors)} (individual license check not needed).")
+        else:
+            reason_parts.append("No director/owner names found on website.")
+    elif individual_license_found:
+        reason_parts.append("No active company license found on PSPLA.")
+        if directors:
+            reason_parts.append(f"Director/owner names found on website: {', '.join(directors)}.")
+            reason_parts.append(f"Checked individual PSPLA licenses for each — active individual license found under '{individual_license_found}'.")
+        else:
+            reason_parts.append(f"Individual PSPLA license found under '{individual_license_found}'.")
+    elif (pspla_result.get("pspla_license_status") or "").lower() == "expired":
+        reason_parts.append(f"Found PSPLA entry for '{pspla_result.get('matched_name')}' but license status is EXPIRED (match method: {pspla_result.get('match_method')}).")
+        if directors:
+            reason_parts.append(f"Director/owner names found on website: {', '.join(directors)}.")
+            reason_parts.append("Checked individual PSPLA licenses for each — " + (f"active individual license found under '{individual_license_found}'." if individual_license_found else "no active individual license found."))
+        else:
+            reason_parts.append("No director/owner names found on website to check for individual licenses.")
+    elif "rejected" in (pspla_result.get("match_method") or ""):
+        reason_parts.append(f"A potential PSPLA match was found but rejected as a different company: {pspla_result.get('match_method')}.")
+        if directors:
+            reason_parts.append(f"Director/owner names found on website: {', '.join(directors)}.")
+            reason_parts.append("Checked individual PSPLA licenses for each — " + (f"active individual license found under '{individual_license_found}'." if individual_license_found else "no active individual license found."))
+        else:
+            reason_parts.append("No director/owner names found on website to check for individual licenses.")
+    else:
+        reason_parts.append("No match found on PSPLA.")
+        if directors:
+            reason_parts.append(f"Director/owner names found on website: {', '.join(directors)}.")
+            reason_parts.append("Checked individual PSPLA licenses for each — " + (f"active individual license found under '{individual_license_found}'." if individual_license_found else "no active individual license found."))
+        else:
+            reason_parts.append("No director/owner names found on website to check for individual licenses.")
+
+    if co_result.get("name"):
+        reason_parts.append(f"Companies Office search for '{co_search_name}' found: {co_result['name']}" + (f" at {co_result['address']}." if co_result.get("address") else "."))
+    else:
+        reason_parts.append(f"Companies Office search for '{co_search_name}' returned no match.")
+
+    record = {
+        "company_name": company_name,
+        "website": website_url,
+        "phone": info.get("phone"),
+        "email": info.get("email"),
+        "address": info.get("address"),
+        "region": website_region,
+        "pspla_licensed": licensed_val,
+        "pspla_name": pspla_result.get("matched_name"),
+        "pspla_address": pspla_result.get("pspla_address"),
+        "pspla_license_number": pspla_result.get("pspla_license_number"),
+        "pspla_license_status": pspla_result.get("pspla_license_status"),
+        "pspla_license_expiry": pspla_result.get("pspla_license_expiry"),
+        "license_type": pspla_result.get("license_type"),
+        "match_method": pspla_result.get("match_method"),
+        "match_reason": " ".join(reason_parts),
+        "companies_office_name": co_result.get("name"),
+        "companies_office_address": co_result.get("address"),
+        "individual_license": individual_license_found,
+        "director_name": ", ".join(info.get("director_names") or []),
+        "root_domain": root_domain,
+        "source_url": info.get("_fb_url") or website_url,
+        "last_checked": datetime.now(timezone.utc).isoformat(),
+        "notes": f"Found via: {source_label}",
+    }
+
+    # Final dedup guard — catches same company found via different URLs/paths
+    if company_name_exists(company_name):
+        print(f"  [Duplicate name] '{company_name}' already in DB — skipping")
+        return False
+
+    if save_to_supabase(record):
+        if licensed_val is True:
+            status = "LICENSED"
+        elif licensed_val is False:
+            status = "NOT LICENSED"
+        else:
+            status = "UNKNOWN"
+        print(f"  [Saved] PSPLA Status: {status}")
+        return True
+    else:
+        print("  [Error] Failed to save to database")
+        return False
+
+
+def normalise_fb_url(url):
+    """Strip locale/query params from a Facebook URL for deduplication.
+    e.g. facebook.com/anztechltd/?locale=fa_IR -> facebook.com/anztechltd/"""
+    from urllib.parse import urlparse, urlunparse
+    parsed = urlparse(url)
+    return urlunparse(parsed._replace(query="", fragment="")).rstrip("/")
+
+
+def extract_website_from_snippet(snippet):
+    """Pull the first non-Facebook http URL out of a Google search snippet."""
+    import re
+    SOCIAL = ("facebook.com", "instagram.com", "twitter.com", "linkedin.com",
+              "youtube.com", "tiktok.com", "google.com")
+    for m in re.finditer(r'https?://[^\s\)\]"\'<>]+', snippet):
+        url = m.group(0).rstrip(".,;:-")
+        if not any(s in url for s in SOCIAL):
+            return url
+    return None
+
+
+def extract_website_from_facebook(fb_url):
+    """Scrape a Facebook business page and return the company's own website URL, or None."""
+    import re
+    from urllib.parse import unquote
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "en-NZ,en;q=0.9",
+        }
+        response = requests.get(fb_url, headers=headers, timeout=10)
+        html = response.text
+
+        # Facebook encodes outbound links as l.facebook.com/l.php?u=<encoded-url>
+        encoded_links = re.findall(r'l\.facebook\.com/l\.php\?u=([^&"\'>\s]+)', html)
+        for encoded in encoded_links:
+            decoded = unquote(encoded)
+            if decoded.startswith("http") and "facebook.com" not in decoded:
+                clean = decoded.split("?")[0].rstrip("/")
+                if "." in clean:
+                    return clean
+
+        # Fallback: look for direct href links to non-Facebook domains
+        SOCIAL = ("facebook.com", "instagram.com", "twitter.com", "linkedin.com",
+                  "youtube.com", "tiktok.com")
+        soup = BeautifulSoup(html, "html.parser")
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if (href.startswith("http")
+                    and not any(s in href for s in SOCIAL)
+                    and ("." in href.split("//")[-1].split("/")[0])):
+                return href.split("?")[0].rstrip("/")
+    except Exception as e:
+        print(f"  [FB scrape error] {e}")
+    return None
+
+
+def extract_from_fb_snippet(title, snippet, fb_url, region):
+    """Use Claude to extract company info from a Facebook search result snippet."""
+    prompt = f"""Extract NZ security/CCTV company information from this Facebook page search result.
+
+Facebook URL: {fb_url}
+Page title: {title}
+Search snippet: {snippet}
+Region hint: {region}
+
+Only extract if this appears to be an NZ company that installs security cameras, CCTV, or security alarms.
+If not relevant, return null.
+
+Return JSON:
+- company_name: business name (strip "| Facebook" from title)
+- phone: phone number if visible
+- email: email if visible
+- address: physical address if visible
+- region: NZ region/city
+- director_names: list of owner/director names if mentioned
+- other_names: []
+- legal_name: null
+
+Return ONLY valid JSON or null."""
+    try:
+        message = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        text = message.content[0].text.strip()
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        text = text.strip()
+        if text.lower().startswith("null"):
+            return None
+        if "{" in text:
+            start = text.index("{")
+            depth = 0
+            end = start
+            for i, ch in enumerate(text[start:], start):
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = i
+                        break
+            text = text[start:end + 1]
+        return json.loads(text)
+    except Exception as e:
+        print(f"  [Claude FB extract error] {e}")
+        return None
+
+
+def _process_fb_result(result, found_urls_all, fb_total, fb_new, term, fallback_region):
+    """Process a single Facebook search result. Returns updated (fb_total, fb_new)."""
+    skip_paths = ["/groups/", "/marketplace/", "/events/", "/photos/",
+                  "/videos/", "/posts/", "/reels/", "/stories/"]
+    fb_url = result["link"]
+
+    if "facebook.com" not in fb_url:
+        return fb_total, fb_new
+    if any(p in fb_url for p in skip_paths):
+        return fb_total, fb_new
+
+    fb_url_norm = normalise_fb_url(fb_url)
+    if fb_url_norm in found_urls_all:
+        return fb_total, fb_new
+    found_urls_all.add(fb_url_norm)
+
+    if company_exists(fb_url_norm):
+        print(f"  [Already in DB] {fb_url_norm}")
+        return fb_total, fb_new
+
+    print(f"  [FB Page] {fb_url_norm}")
+    fb_total += 1
+
+    website_url = extract_website_from_facebook(fb_url_norm)
+    if not website_url or "facebook.com" in website_url:
+        website_url = extract_website_from_snippet(result.get("snippet", ""))
+    time.sleep(1)
+
+    if website_url and "facebook.com" not in website_url and website_url not in found_urls_all:
+        found_urls_all.add(website_url)
+        root_domain = get_root_domain(website_url)
+
+        if get_domain_record(root_domain):
+            print(f"  [Domain already in DB] {root_domain}")
+            return fb_total, fb_new
+
+        print(f"  [Website found] {website_url}")
+        page_text, scraped_email = scrape_website(website_url)
+        time.sleep(1)
+
+        info = extract_company_info(website_url, page_text, result["snippet"])
+        if not info or not info.get("company_name"):
+            info = extract_from_fb_snippet(result["title"], result["snippet"], fb_url_norm, fallback_region)
+
+        if not info or not info.get("company_name"):
+            print("  [Skipped] Could not extract company name")
+            return fb_total, fb_new
+
+        if not info.get("email") and scraped_email:
+            info["email"] = scraped_email
+        if not info.get("email"):
+            found_email = find_email_via_google(root_domain)
+            if found_email:
+                info["email"] = found_email
+
+    else:
+        info = extract_from_fb_snippet(result["title"], result["snippet"], fb_url_norm, fallback_region)
+        if not info or not info.get("company_name"):
+            print("  [Skipped] Could not extract company name from snippet")
+            return fb_total, fb_new
+        website_url = fb_url_norm
+        root_domain = get_root_domain(fb_url_norm)
+
+    info["_fb_snippet"] = result.get("snippet", "")
+    info["_fb_url"] = fb_url_norm
+    source_label = f"Facebook {term} {fallback_region}".strip()
+    if process_and_save_company(info, website_url, root_domain, source_label, fallback_region):
+        fb_new += 1
+
+    return fb_total, fb_new
+
+
+def run_facebook_search(found_urls_all, regions=None, include_nationwide=True):
+    """Search Facebook for NZ security camera companies. Returns (total_found, total_new).
+    - regions: subset of NZ_REGIONS to search; defaults to all.
+    - include_nationwide: also run a 'New Zealand' wide pass to catch businesses
+      that don't mention a specific town on their Facebook page."""
+    search_regions = regions if regions is not None else NZ_REGIONS
+    print("\n" + "=" * 60)
+    print("  Facebook Search Pass")
+    print("=" * 60)
+
+    fb_total = 0
+    fb_new = 0
+
+    for region in search_regions:
+        check_pause()
+        print(f"\n[Facebook] {region}")
+
+        for term in FACEBOOK_SEARCH_TERMS:
+            check_pause()
+            region_idx = search_regions.index(region) + 1
+            term_idx = FACEBOOK_SEARCH_TERMS.index(term) + 1
+            write_status("facebook", region, term, region_idx, term_idx,
+                         len(search_regions), len(FACEBOOK_SEARCH_TERMS), fb_total, fb_new)
+            query = f'site:facebook.com "{term}" "{region}" New Zealand -group -marketplace -"for sale"'
+            print(f"  Query: {query}")
+
+            results = google_search(query, num_results=10)
+            time.sleep(1)
+
+            if results is SERPAPI_EXHAUSTED:
+                print("\n  [STOPPED] SerpAPI exhausted during Facebook pass.")
+                return fb_total, fb_new
+
+            if not results:
+                continue
+
+            for result in results:
+                check_pause()
+                fb_total, fb_new = _process_fb_result(
+                    result, found_urls_all, fb_total, fb_new, term, region)
+
+    # Nationwide pass — catches NZ businesses that don't mention a specific town
+    if include_nationwide:
+        print("\n[Facebook] NZ-wide pass (no region filter)")
+        total_regions_display = len(search_regions) + 1
+        for term in FACEBOOK_SEARCH_TERMS:
+            check_pause()
+            term_idx = FACEBOOK_SEARCH_TERMS.index(term) + 1
+            write_status("facebook", "NZ nationwide", term,
+                         total_regions_display, term_idx,
+                         total_regions_display, len(FACEBOOK_SEARCH_TERMS),
+                         fb_total, fb_new)
+            query = f'site:facebook.com "{term}" "New Zealand" -group -marketplace -"for sale"'
+            print(f"  Query: {query}")
+
+            results = google_search(query, num_results=10)
+            time.sleep(1)
+
+            if results is SERPAPI_EXHAUSTED:
+                print("\n  [STOPPED] SerpAPI exhausted during nationwide Facebook pass.")
+                return fb_total, fb_new
+
+            if not results:
+                continue
+
+            for result in results:
+                check_pause()
+                fb_total, fb_new = _process_fb_result(
+                    result, found_urls_all, fb_total, fb_new, term, "")
+
+    return fb_total, fb_new
+
+
+def run_search(triggered_by="manual"):
     print("=" * 60)
     print("  PSPLA Security Camera Company Checker")
     print("=" * 60)
+    started_iso = datetime.now(timezone.utc).isoformat()
 
     # Sanity check — abort if the database is missing any required columns
     print("  Checking database schema...")
     if not check_schema():
         print("  Aborting. Add the missing columns to the Companies table in Supabase, then re-run.")
         return
+
+    # Clear any stale pause flag left over from a previous session
+    if os.path.exists(PAUSE_FLAG):
+        os.remove(PAUSE_FLAG)
 
     # Write running flag so dashboard knows search is active
     open(RUNNING_FLAG, "w").close()
@@ -601,6 +1216,8 @@ def run_search():
         print(f"  Resuming — {len(completed_regions)} regions already done: {', '.join(completed_regions)}")
 
     try:
+        found_urls = set()  # tracks all URLs seen across regions + Facebook pass
+
         for region in NZ_REGIONS:
             if region in completed_regions:
                 print(f"\n[Skipping] {region} — already completed")
@@ -608,10 +1225,12 @@ def run_search():
 
             print(f"\nSearching region: {region}")
 
-            found_urls = set()
-
             for term in SEARCH_TERMS:
                 check_pause()
+                region_idx = NZ_REGIONS.index(region) + 1
+                term_idx = SEARCH_TERMS.index(term) + 1
+                write_status("google", region, term, region_idx, term_idx,
+                             len(NZ_REGIONS), len(SEARCH_TERMS), total_found, total_new)
                 query = f"{term} {region} New Zealand"
                 print(f"  Query: {query}")
 
@@ -623,6 +1242,7 @@ def run_search():
                     print(f"  Progress saved — completed regions: {', '.join(completed_regions) or 'none'}")
                     print("  Upgrade your SerpAPI plan or wait for next month, then re-run to resume.")
                     save_progress(completed_regions, total_found, total_new)
+                    append_history("full", started_iso, total_found, total_new, "stopped", triggered_by)
                     return
 
                 for result in results:
@@ -659,7 +1279,7 @@ def run_search():
                             "match_method": "inherited from parent domain",
                             "root_domain": root_domain,
                             "source_url": url,
-                            "last_checked": datetime.utcnow().isoformat(),
+                            "last_checked": datetime.now(timezone.utc).isoformat(),
                             "notes": f"Branch of {root_domain}"
                         }
                         save_to_supabase(branch_record)
@@ -668,7 +1288,7 @@ def run_search():
                     print(f"  [Found] {url}")
                     total_found += 1
 
-                    page_text = scrape_website(url)
+                    page_text, scraped_email = scrape_website(url)
                     time.sleep(1)
 
                     info = extract_company_info(url, page_text, result["snippet"])
@@ -676,178 +1296,39 @@ def run_search():
                         print("  [Skipped] Could not extract company name")
                         continue
 
-                    company_name = info["company_name"]
-                    website_region = info.get("region") or region
-                    print(f"  [Company] {company_name}")
+                    # Use mailto: email from HTML if Claude didn't find one in the text
+                    if not info.get("email") and scraped_email:
+                        info["email"] = scraped_email
+                        print(f"  [Email from mailto] {scraped_email}")
 
-                    # Build list of all names to try on PSPLA
-                    names_to_try = []
-                    if company_name:
-                        names_to_try.append(company_name)
-                    if info.get("legal_name") and info["legal_name"] not in names_to_try:
-                        names_to_try.append(info["legal_name"])
-                    for other in (info.get("other_names") or []):
-                        if other and other not in names_to_try:
-                            names_to_try.append(other)
+                    print(f"  [Company] {info['company_name']}")
 
-                    # Try each name on PSPLA until we find a match
-                    pspla_result = None
-                    for name in names_to_try:
-                        print(f"  [Checking PSPLA] {name}")
-                        res = check_pspla(name, website_region=website_region)
-                        if res.get("matched_name"):
-                            # Always verify every match against the primary company name and
-                            # location — even if the name appears as a substring of the PSPLA
-                            # name (e.g. "Livewire Electrical" is in "Addz Livewire Electrical
-                            # Limited" but they are completely different companies in different
-                            # cities). The Claude call is cheap; a wrong match is not.
-                            matched = res["matched_name"]
-                            verification = verify_pspla_match(
-                                company_name, matched, website_region, res.get("pspla_address")
-                            )
-                            if not verification.get("match"):
-                                print(f"  [Verify rejected] {company_name} vs {matched} - {verification.get('reason')}")
-                                if pspla_result is None:
-                                    pspla_result = {"licensed": False, "matched_name": None, "license_type": None,
-                                                    "match_method": f"rejected: {verification.get('reason')}",
-                                                    "pspla_address": None, "pspla_license_number": None,
-                                                    "pspla_license_status": None, "pspla_license_expiry": None}
-                                continue
-                            if name != company_name:
-                                print(f"  [Matched via] {name}")
-                            pspla_result = res
-                            # Only stop searching on an active license — keep looking if expired,
-                            # in case another name variation finds a current one.
-                            if res.get("licensed"):
-                                break
-                        elif pspla_result is None:
-                            pspla_result = res
+                    # Email fallback: Google search for "@domain" if still no email
+                    if not info.get("email"):
+                        found_email = find_email_via_google(root_domain)
+                        if found_email:
+                            info["email"] = found_email
+                            print(f"  [Email via Google] {found_email}")
 
-                    # If still no company license, check for individual license using director names
-                    individual_license_found = None
-                    if not pspla_result.get("licensed"):
-                        directors = info.get("director_names") or []
-                        for director in directors:
-                            print(f"  [Checking individual license] {director}")
-                            ind = check_pspla_individual(director)
-                            if ind.get("found"):
-                                individual_license_found = ind["name"]
-                                print(f"  [Individual license found] {individual_license_found}")
-                                break
-                        time.sleep(1)
-
-                    # Companies Office lookup
-                    co_search_name = pspla_result.get("matched_name") or company_name
-                    co_result = check_companies_office(co_search_name, pspla_address=pspla_result.get("pspla_address"))
-                    time.sleep(2)
-
-                    # Ensure pspla_licensed is always bool or None
-                    licensed_val = pspla_result.get("licensed")
-                    if not isinstance(licensed_val, bool):
-                        licensed_val = None
-
-                    # Build plain-English match reason
-                    directors = info.get("director_names") or []
-                    reason_parts = []
-
-                    # Always start with what names were searched on PSPLA
-                    reason_parts.append(f"Searched PSPLA for: {', '.join(names_to_try)}.")
-
-                    if licensed_val is True:
-                        reason_parts.append(f"Active company license found for '{pspla_result.get('matched_name')}' (match method: {pspla_result.get('match_method')}).")
-                        if pspla_result.get("pspla_license_number"):
-                            reason_parts.append(f"License #{pspla_result.get('pspla_license_number')}, status: {pspla_result.get('pspla_license_status') or 'active'}, expires {pspla_result.get('pspla_license_expiry') or 'unknown'}.")
-                        if pspla_result.get("pspla_address"):
-                            reason_parts.append(f"PSPLA registered address: {pspla_result.get('pspla_address')}.")
-                        if directors:
-                            reason_parts.append(f"Director/owner names found on website: {', '.join(directors)} (individual license check not needed).")
-                        else:
-                            reason_parts.append("No director/owner names found on website.")
-                    elif individual_license_found:
-                        reason_parts.append("No active company license found on PSPLA.")
-                        if directors:
-                            reason_parts.append(f"Director/owner names found on website: {', '.join(directors)}.")
-                            reason_parts.append(f"Checked individual PSPLA licenses for each — active individual license found under '{individual_license_found}'.")
-                        else:
-                            reason_parts.append(f"Individual PSPLA license found under '{individual_license_found}'.")
-                    elif (pspla_result.get("pspla_license_status") or "").lower() == "expired":
-                        reason_parts.append(f"Found PSPLA entry for '{pspla_result.get('matched_name')}' but license status is EXPIRED (match method: {pspla_result.get('match_method')}).")
-                        if directors:
-                            reason_parts.append(f"Director/owner names found on website: {', '.join(directors)}.")
-                            reason_parts.append("Checked individual PSPLA licenses for each — " + (f"active individual license found under '{individual_license_found}'." if individual_license_found else "no active individual license found."))
-                        else:
-                            reason_parts.append("No director/owner names found on website to check for individual licenses.")
-                    elif "rejected" in (pspla_result.get("match_method") or ""):
-                        reason_parts.append(f"A potential PSPLA match was found but rejected as a different company: {pspla_result.get('match_method')}.")
-                        if directors:
-                            reason_parts.append(f"Director/owner names found on website: {', '.join(directors)}.")
-                            reason_parts.append("Checked individual PSPLA licenses for each — " + (f"active individual license found under '{individual_license_found}'." if individual_license_found else "no active individual license found."))
-                        else:
-                            reason_parts.append("No director/owner names found on website to check for individual licenses.")
-                    else:
-                        reason_parts.append("No match found on PSPLA.")
-                        if directors:
-                            reason_parts.append(f"Director/owner names found on website: {', '.join(directors)}.")
-                            reason_parts.append("Checked individual PSPLA licenses for each — " + (f"active individual license found under '{individual_license_found}'." if individual_license_found else "no active individual license found."))
-                        else:
-                            reason_parts.append("No director/owner names found on website to check for individual licenses.")
-
-                    # Companies Office result
-                    if co_result.get("name"):
-                        reason_parts.append(f"Companies Office search for '{co_search_name}' found: {co_result['name']}" + (f" at {co_result['address']}." if co_result.get("address") else "."))
-                    else:
-                        reason_parts.append(f"Companies Office search for '{co_search_name}' returned no match.")
-
-                    match_reason = " ".join(reason_parts)
-
-                    record = {
-                        "company_name": company_name,
-                        "website": url,
-                        "phone": info.get("phone"),
-                        "email": info.get("email"),
-                        "address": info.get("address"),
-                        "region": website_region,
-                        "pspla_licensed": licensed_val,
-                        "pspla_name": pspla_result.get("matched_name"),
-                        "pspla_address": pspla_result.get("pspla_address"),
-                        "pspla_license_number": pspla_result.get("pspla_license_number"),
-                        "pspla_license_status": pspla_result.get("pspla_license_status"),
-                        "pspla_license_expiry": pspla_result.get("pspla_license_expiry"),
-                        "license_type": pspla_result.get("license_type"),
-                        "match_method": pspla_result.get("match_method"),
-                        "match_reason": match_reason,
-                        "companies_office_name": co_result.get("name"),
-                        "companies_office_address": co_result.get("address"),
-                        "individual_license": individual_license_found,
-                        "director_name": ", ".join(info.get("director_names") or []),
-                        "root_domain": root_domain,
-                        "source_url": url,
-                        "last_checked": datetime.utcnow().isoformat(),
-                        "notes": f"Found via: {term} {region}"
-                    }
-
-                    if save_to_supabase(record):
+                    if process_and_save_company(info, url, root_domain, f"{term} {region}", region):
                         total_new += 1
-                        if pspla_result.get("licensed") is True:
-                            status = "LICENSED"
-                        elif pspla_result.get("licensed") is False:
-                            status = "NOT LICENSED"
-                        else:
-                            status = "UNKNOWN"
-                        print(f"  [Saved] PSPLA Status: {status}")
-                    else:
-                        print("  [Error] Failed to save to database")
 
             # Region complete — save progress so we can resume if interrupted
             completed_regions.append(region)
             save_progress(completed_regions, total_found, total_new)
             print(f"  [Progress saved] {region} done ({len(completed_regions)}/{len(NZ_REGIONS)} regions)")
 
-        # All regions done — clear progress file
+        # All regions done — run Facebook pass then clear progress
+        fb_found, fb_new_count = run_facebook_search(found_urls)
+        total_found += fb_found
+        total_new += fb_new_count
+
         clear_progress()
+        append_history("full", started_iso, total_found, total_new, "completed", triggered_by)
 
     finally:
-        # Always clean up flags when done or crashed
+        # Always clean up flags and status when done or crashed
+        clear_status()
         for flag in [RUNNING_FLAG, PAUSE_FLAG]:
             if os.path.exists(flag):
                 os.remove(flag)
@@ -860,4 +1341,6 @@ def run_search():
 
 
 if __name__ == "__main__":
-    run_search()
+    import sys
+    triggered_by = "scheduled" if "--scheduled" in sys.argv else "manual"
+    run_search(triggered_by=triggered_by)
