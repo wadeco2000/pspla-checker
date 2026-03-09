@@ -92,6 +92,9 @@ SKIP_DOMAINS = [
     "explorewellington.co.nz", "explorechristchurch.co.nz",
     "exploredunedin.co.nz", "exploretauranga.co.nz",
     "nzlocal.co.nz", "localguide.co.nz",
+    # NZ government / council sites — contain IQP registers, contractor lists etc.
+    # not a company's own website
+    "govt.nz", "govt.nz/", "council.govt.nz", "ac.nz",
 ]
 
 # URL path patterns that indicate a listing/directory page rather than a
@@ -113,6 +116,9 @@ def is_directory_listing_url(url):
         from urllib.parse import urlparse
         parsed = urlparse(url)
         path = parsed.path.lower()
+        # Block PDFs — IQP registers, contractor lists, council documents etc.
+        if path.endswith(".pdf") or ".pdf?" in path or ".pdf#" in path:
+            return True
         for pat in _LISTING_PATH_PATTERNS:
             if pat in path:
                 return True
