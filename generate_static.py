@@ -469,8 +469,8 @@ function renderTable(companies) {{
                 '<span><strong>Found via:</strong> ' + esc(c.notes||'-') + '</span>' +
                 '<span><strong>Date added:</strong> ' + esc((c.date_added||'').slice(0,10)||'-') + '</span>' +
                 '<span><strong>Last checked:</strong> ' + esc((c.last_checked||'').slice(0,10)||'-') + '</span>' +
-                (svcTags ? '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><strong>Website Services:</strong> ' + svcTags + '</span>' : '') +
-                (fbSvcTags ? '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><strong>Facebook Services:</strong> ' + fbSvcTags + '</span>' : '') +
+                '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><strong>Website Services:</strong> ' + (svcTags || '<span style="color:#aaa;font-size:11px;">none detected</span>') + '</span>' +
+                '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><strong>Facebook Services:</strong> ' + (fbSvcTags || '<span style="color:#aaa;font-size:11px;">none detected</span>') + '</span>' +
             '</div>';
 
         html +=
