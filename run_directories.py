@@ -23,60 +23,62 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RUNNING_FLAG = os.path.join(BASE_DIR, "running.flag")
 PAUSE_FLAG = os.path.join(BASE_DIR, "pause.flag")
 
-triggered_by = "scheduled" if "--scheduled" in sys.argv else "manual"
-test_mode = "--test" in sys.argv
-nzsa_only = "--nzsa-only" in sys.argv
-linkedin_only = "--linkedin-only" in sys.argv
-limit = 5 if test_mode else None
 
-started_iso = datetime.now(timezone.utc).isoformat()
+if __name__ == "__main__":
+    triggered_by = "scheduled" if "--scheduled" in sys.argv else "manual"
+    test_mode = "--test" in sys.argv
+    nzsa_only = "--nzsa-only" in sys.argv
+    linkedin_only = "--linkedin-only" in sys.argv
+    limit = 5 if test_mode else None
 
-print("=" * 60)
-print("  PSPLA Directory Import (NZSA + LinkedIn)")
-if test_mode:
-    print("  *** TEST MODE — limit 5 per import ***")
-print("=" * 60)
+    started_iso = datetime.now(timezone.utc).isoformat()
 
-print("  Checking database schema...")
-if not check_schema():
-    print("  Aborting — fix missing columns first.")
-    raise SystemExit(1)
+    print("=" * 60)
+    print("  PSPLA Directory Import (NZSA + LinkedIn)")
+    if test_mode:
+        print("  *** TEST MODE — limit 5 per import ***")
+    print("=" * 60)
 
-if os.path.exists(PAUSE_FLAG):
-    os.remove(PAUSE_FLAG)
-reset_session_log()
-open(RUNNING_FLAG, "w").close()
+    print("  Checking database schema...")
+    if not check_schema():
+        print("  Aborting — fix missing columns first.")
+        raise SystemExit(1)
 
-found_urls = set()
-total_found = 0
-total_new = 0
+    if os.path.exists(PAUSE_FLAG):
+        os.remove(PAUSE_FLAG)
+    reset_session_log()
+    open(RUNNING_FLAG, "w").close()
 
-try:
-    if not linkedin_only:
-        nzsa_found, nzsa_new = run_nzsa_import(found_urls, limit=limit)
-        total_found += nzsa_found
-        total_new += nzsa_new
+    found_urls = set()
+    total_found = 0
+    total_new = 0
 
-    if not nzsa_only:
-        li_found, li_new = run_linkedin_import(found_urls, limit=limit)
-        total_found += li_found
-        total_new += li_new
+    try:
+        if not linkedin_only:
+            nzsa_found, nzsa_new = run_nzsa_import(found_urls, limit=limit)
+            total_found += nzsa_found
+            total_new += nzsa_new
 
-    append_history("directories", started_iso, total_found, total_new, "completed", triggered_by)
-    send_search_email("directories", started_iso, total_found, total_new, triggered_by, get_session_log())
+        if not nzsa_only:
+            li_found, li_new = run_linkedin_import(found_urls, limit=limit)
+            total_found += li_found
+            total_new += li_new
 
-except Exception as e:
-    append_history("directories", started_iso, total_found, total_new, f"error: {e}", triggered_by)
-    raise
+        append_history("directories", started_iso, total_found, total_new, "completed", triggered_by)
+        send_search_email("directories", started_iso, total_found, total_new, triggered_by, get_session_log())
 
-finally:
-    clear_status()
-    for flag in [RUNNING_FLAG, PAUSE_FLAG]:
-        if os.path.exists(flag):
-            os.remove(flag)
+    except Exception as e:
+        append_history("directories", started_iso, total_found, total_new, f"error: {e}", triggered_by)
+        raise
 
-print("\n" + "=" * 60)
-print(f"  Directory import complete!")
-print(f"  Companies found:     {total_found}")
-print(f"  New companies added: {total_new}")
-print("=" * 60)
+    finally:
+        clear_status()
+        for flag in [RUNNING_FLAG, PAUSE_FLAG]:
+            if os.path.exists(flag):
+                os.remove(flag)
+
+    print("\n" + "=" * 60)
+    print(f"  Directory import complete!")
+    print(f"  Companies found:     {total_found}")
+    print(f"  New companies added: {total_new}")
+    print("=" * 60)
