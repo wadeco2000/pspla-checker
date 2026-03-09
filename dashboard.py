@@ -2041,12 +2041,16 @@ def _kill_search_processes():
             _search_proc.kill()
     _search_proc = None
     # Also scan for orphaned search processes (e.g. after dashboard restart)
-    search_scripts = {"searcher.py", "run_weekly.py", "run_facebook.py", "run_partial.py", "run_directories.py"}
+    # Match both "run_directories.py" and bare "run_directories" (covers import-style launches)
+    search_scripts = {
+        "searcher.py", "run_weekly.py", "run_facebook.py", "run_partial.py", "run_directories.py",
+        "searcher", "run_weekly", "run_facebook", "run_partial", "run_directories",
+    }
     our_pid = str(os.getpid())
     try:
         result = subprocess.run(
             ["powershell", "-Command",
-             "Get-WmiObject Win32_Process | Where-Object { $_.Name -eq 'python.exe' } "
+             "Get-WmiObject Win32_Process | Where-Object { $_.Name -like 'python*' } "
              "| Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"],
             capture_output=True, text=True, timeout=10)
         if result.stdout.strip():
@@ -2060,7 +2064,7 @@ def _kill_search_processes():
                 if pid == our_pid:
                     continue
                 if any(s in cmd for s in search_scripts):
-                    subprocess.run(["taskkill", "/F", "/PID", pid],
+                    subprocess.run(["powershell", "-Command", f"Stop-Process -Id {pid} -Force"],
                                    capture_output=True, timeout=5)
     except Exception:
         pass
