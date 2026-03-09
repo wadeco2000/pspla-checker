@@ -130,7 +130,7 @@ def is_directory_listing_url(url):
 SERPAPI_EXHAUSTED = "SERPAPI_EXHAUSTED"
 
 
-def google_search(query, num_results=10, time_filter=None):
+def google_search(query, num_results=100, time_filter=None):
     url = "https://serpapi.com/search"
     params = {
         "api_key": SERPAPI_KEY,
@@ -304,10 +304,10 @@ def find_facebook_url(company_name, page_text=""):
         all_candidates = []
 
         for term in search_terms:
-            r1 = google_search(f'site:facebook.com "{term}"', num_results=5)
+            r1 = google_search(f'site:facebook.com "{term}"', num_results=50)
             if r1 and r1 is not SERPAPI_EXHAUSTED:
                 all_candidates += _extract_fb_candidates(r1)
-            r2 = google_search(f'"{term}" facebook', num_results=5)
+            r2 = google_search(f'"{term}" facebook', num_results=50)
             if r2 and r2 is not SERPAPI_EXHAUSTED:
                 all_candidates += _extract_fb_candidates(r2)
 
@@ -333,7 +333,7 @@ def find_facebook_url(company_name, page_text=""):
             return nz_results[0][0]
 
         # No NZ signal found — try one targeted search before giving up
-        r_nz = google_search(f'site:facebook.com "{company_name}" "New Zealand"', num_results=3)
+        r_nz = google_search(f'site:facebook.com "{company_name}" "New Zealand"', num_results=10)
         if r_nz and r_nz is not SERPAPI_EXHAUSTED:
             nz_extra = _extract_fb_candidates(r_nz)
             nz_extra_signal = [(u, s, t) for u, s, t in nz_extra if _nz_bonus(u, s, t) > 0]
@@ -940,7 +940,7 @@ def find_email_via_google(domain):
     """Search Google for any email address at this domain (e.g. "@alarmwatch.co.nz")."""
     import re
     query = f'"@{domain}"'
-    results = google_search(query, num_results=5)
+    results = google_search(query, num_results=10)
     if not results or results == SERPAPI_EXHAUSTED:
         return None
     email_pattern = re.compile(r'[a-zA-Z0-9._%+\-]+@' + re.escape(domain), re.IGNORECASE)
@@ -1680,7 +1680,7 @@ def run_facebook_search(found_urls_all, regions=None, include_nationwide=True):
             query = f'site:facebook.com "{term}" "{region}" New Zealand -group -marketplace -"for sale"'
             print(f"  Query: {query}")
 
-            results = google_search(query, num_results=10)
+            results = google_search(query, num_results=50)
             time.sleep(1)
 
             if results is SERPAPI_EXHAUSTED:

@@ -65,7 +65,7 @@ def run_weekly(triggered_by="manual"):
 
                 query = f"{term} {region} New Zealand"
                 print(f"  Query: {query}")
-                results = google_search(query, num_results=10, time_filter="qdr:w")
+                results = google_search(query, num_results=30, time_filter="qdr:w")
                 time.sleep(1)
 
                 if results is SERPAPI_EXHAUSTED:
