@@ -868,6 +868,12 @@ HTML_TEMPLATE = """
                         <div class="detail-item"><label>Individual License</label><span>{{ c.individual_license or '-' }}</span></div>
                         <div class="detail-item"><label>Match Method</label><span>{{ c.match_method or '-' }}</span></div>
                         <div class="detail-item"><label>License Status</label><span>{{ c.pspla_license_status or '-' }}</span></div>
+                        <div class="detail-item"><label>License Classes</label><span>{{ c.pspla_license_classes or '-' }}</span></div>
+                        <div class="detail-item"><label>License Start Date</label><span>{{ c.pspla_license_start or '-' }}</span></div>
+                        <div class="detail-item"><label>Permit Type</label><span>{{ c.pspla_permit_type or '-' }}</span></div>
+                        <div class="detail-item"><label>CO Status</label><span>{{ c.co_status or '-' }}</span></div>
+                        <div class="detail-item"><label>CO Incorporated</label><span>{{ c.co_incorporated or '-' }}</span></div>
+                        <div class="detail-item"><label>Date Added</label><span>{{ (c.date_added or '')[:10] }}</span></div>
                         <div class="detail-item"><label>Last Checked</label><span>{{ (c.last_checked or '')[:10] }}</span></div>
                         <div class="detail-item"><label>Found Via</label><span>{{ c.notes or '-' }}</span></div>
                         <div class="detail-item" id="pspla-recheck-item-{{ c.id }}">

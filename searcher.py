@@ -1356,7 +1356,26 @@ def check_pspla(company_name, website_region=None, page_text=None, co_result=Non
             permit_number = get_field(matched, "permitNumber_txt")
             permit_status = get_field(matched, "permitStatus_s")
             permit_expiry = get_field(matched, "permitEndDate_s")
+            permit_start = get_field(matched, "permitStartDates_s")
+            permit_type = get_field(matched, "permitTempOrPerm_s")
             license_type = "individual" if matched.get("isIndividual_b") else "company"
+
+            # Build a human-readable list of granted license classes
+            _class_fields = {
+                "securityTechnician_s": "Security Technician",
+                "securityConsultant_s": "Security Consultant",
+                "monitoringOfficer_s": "Monitoring Officer",
+                "propertyGuard_s": "Property Guard",
+                "crowdController_s": "Crowd Controller",
+                "personalGuard_s": "Personal Guard",
+                "privateInvestigator_s": "Private Investigator",
+                "repossessionAgent_s": "Repossession Agent",
+            }
+            granted_classes = [
+                label for field, label in _class_fields.items()
+                if (get_field(matched, field) or "").lower() == "granted"
+            ]
+            license_classes = ", ".join(granted_classes) if granted_classes else None
 
             # Check user corrections — block matches flagged as false positives
             blocked, block_reason = _is_pspla_match_blocked(company_name, name_field)
@@ -1365,7 +1384,9 @@ def check_pspla(company_name, website_region=None, page_text=None, co_result=Non
                 return {"licensed": False, "matched_name": None, "license_type": None,
                         "match_method": "blocked by user correction",
                         "pspla_address": None, "pspla_license_number": None,
-                        "pspla_license_status": None, "pspla_license_expiry": None}
+                        "pspla_license_status": None, "pspla_license_expiry": None,
+                        "pspla_license_start": None, "pspla_permit_type": None,
+                        "pspla_license_classes": None}
 
             return {
                 "licensed": has_active,
@@ -1375,7 +1396,10 @@ def check_pspla(company_name, website_region=None, page_text=None, co_result=Non
                 "pspla_address": pspla_address,
                 "pspla_license_number": permit_number,
                 "pspla_license_status": permit_status,
-                "pspla_license_expiry": permit_expiry
+                "pspla_license_expiry": permit_expiry,
+                "pspla_license_start": permit_start,
+                "pspla_permit_type": permit_type,
+                "pspla_license_classes": license_classes,
             }
         else:
             return {"licensed": False, "matched_name": None, "license_type": None, "match_method": "no match found", "pspla_address": None, "pspla_license_number": None, "pspla_license_status": None, "pspla_license_expiry": None}
@@ -1477,8 +1501,18 @@ def check_companies_office(company_name, pspla_address=None):
                     address = lj
                 if address and company_number:
                     break
+            # Incorporation date appears as "DD Mon YYYY" after "Incorporation Date:" label
+            incorporated = None
+            for j in range(i + 1, min(i + 15, len(lines))):
+                if "Incorporation Date" in lines[j]:
+                    # Date is on the next line
+                    if j + 1 < len(lines):
+                        candidate = lines[j + 1].strip()
+                        if _re.match(r"\d{1,2} \w+ \d{4}", candidate):
+                            incorporated = candidate
+                    break
             return {"name": line.title(), "address": address, "company_number": company_number,
-                    "nzbn": nzbn, "status": status}
+                    "nzbn": nzbn, "status": status, "incorporated": incorporated}
 
         def _find_match(lines, name_upper):
             for i, line in enumerate(lines):
@@ -1564,6 +1598,7 @@ Return ONLY JSON: {{"name": "best match or null", "address": null}}"""
             "company_number": result.get("company_number"),
             "nzbn": result.get("nzbn"),
             "status": result.get("status", "registered"),
+            "incorporated": result.get("incorporated"),
             "successor_name": successor_result.get("name") if successor_result else None,
             "successor_number": successor_result.get("company_number") if successor_result else None,
             "successor_address": successor_result.get("address") if successor_result else None,
@@ -1984,6 +2019,12 @@ RECORD_TEMPLATE = {
     "nzsa_phone": None,
     "nzsa_email": None,
     "nzsa_overview": None,
+    "pspla_license_classes": None,
+    "pspla_license_start": None,
+    "pspla_permit_type": None,
+    "co_status": None,
+    "co_incorporated": None,
+    "date_added": None,
     "root_domain": None,
     "source_url": None,
     "last_checked": None,
@@ -2381,6 +2422,12 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         "companies_office_address": co_result.get("address"),
         "companies_office_number": co_result.get("company_number"),
         "nzbn": co_result.get("nzbn"),
+        "co_status": co_result.get("status"),
+        "co_incorporated": co_result.get("incorporated"),
+        "pspla_license_classes": pspla_result.get("pspla_license_classes"),
+        "pspla_license_start": pspla_result.get("pspla_license_start"),
+        "pspla_permit_type": pspla_result.get("pspla_permit_type"),
+        "date_added": datetime.now(timezone.utc).isoformat(),
         "individual_license": individual_license_found,
         "director_name": ", ".join(directors),
         "facebook_url": info.get("facebook_url"),
