@@ -155,10 +155,11 @@
     <div class="pw-box">
         <h2>PSPLA Checker</h2>
         <p>Enter the password to access this tool.</p>
-        <input type="password" id="pw-input" placeholder="Password"
-               onkeydown="if(event.key==='Enter') checkPassword()">
+        <form onsubmit="checkPassword(); return false;">
+        <input type="password" id="pw-input" placeholder="Password" autocomplete="current-password">
         <div class="pw-error" id="pw-error">Incorrect password. Please try again.</div>
-        <button onclick="checkPassword()">Enter</button>
+        <button type="submit">Enter</button>
+        </form>
     </div>
 </div>
 
@@ -378,7 +379,7 @@ function renderTable(companies) {
         // Licence number
         var licNum = esc(c.pspla_license_number || '');
         var licCell = licNum
-            ? '<a href="#" onclick="copyAndOpen(event,'' + licNum + '')" title="Copy &amp; open PSPLA register">' + licNum + '</a>'
+            ? '<a href="#" onclick="copyAndOpen(event,&quot;' + licNum + '&quot;)" title="Copy &amp; open PSPLA register">' + licNum + '</a>'
             : '-';
 
         // Service data attributes
