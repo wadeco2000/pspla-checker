@@ -612,25 +612,37 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
-    // -- Search Terms Manager --------------------------------------------------
-    var _terms = {"google": [], "facebook": []};
+    var _terms = {google: [], facebook: []};
     var _activeTab = 'google';
-
     function renderTermsList(type) {
         var el = document.getElementById('terms-list-' + type);
         if (!el) return;
-        if (!_terms[type].length) { el.innerHTML = '<span style="color:#aaa;">No terms yet.</span>'; return; }
-        el.innerHTML = _terms[type].map(function(t, i) {
-            return '<div style="display:flex; justify-content:space-between; align-items:center; padding:2px 0; border-bottom:1px solid #f5f5f5;">'
-                + '<span>' + t + '</span>'
-                + '<button onclick="removeTerm(\'' + type + '\',' + i + ')" '
-                + 'style="background:none; border:none; color:#e74c3c; cursor:pointer; font-size:13px; padding:0 4px;" title="Remove">&times;</button>'
-                + '</div>';
-        }).join('');
+        if (!_terms[type].length) {
+            el.innerHTML = '<span style="color:#aaa;">No terms yet.</span>';
+            return;
+        }
+        var html = '';
+        for (var i = 0; i < _terms[type].length; i++) {
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;">'
+                  + '<span>' + _terms[type][i] + '</span>'
+                  + '<button onclick="removeTerm(\'' + type + '\',' + i + ')" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">x</button>'
+                  + '</div>';
+        }
+        el.innerHTML = html;
     }
-
+    function renderPartialTerms() {
+        var el = document.getElementById('partial-term-list');
+        if (!el) return;
+        var html = '';
+        for (var i = 0; i < _terms.google.length; i++) {
+            html += '<label style="display:block;padding:1px 2px;cursor:pointer;">'
+                  + '<input type="checkbox" class="partial-term-cb" value="' + _terms.google[i] + '" checked style="margin-right:4px;">'
+                  + _terms.google[i] + '</label>';
+        }
+        el.innerHTML = html;
+    }
     function loadTerms() {
-        fetch('/search-terms').then(function(r){return r.json();}).then(function(data) {
+        fetch('/search-terms').then(function(r) { return r.json(); }).then(function(data) {
             _terms.google = data.google || [];
             _terms.facebook = data.facebook || [];
             renderTermsList('google');
@@ -638,13 +650,11 @@ HTML_TEMPLATE = """
             renderPartialTerms();
         });
     }
-
     function saveTerms(type) {
         var payload = {};
         payload[type] = _terms[type];
-        fetch('/save-terms', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+        fetch('/save-terms', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
     }
-
     function addTerm(type) {
         var input = document.getElementById('new-term-' + type);
         var val = input.value.trim();
@@ -655,25 +665,12 @@ HTML_TEMPLATE = """
         renderPartialTerms();
         saveTerms(type);
     }
-
     function removeTerm(type, idx) {
         _terms[type].splice(idx, 1);
         renderTermsList(type);
         renderPartialTerms();
         saveTerms(type);
     }
-
-    // -- Partial Search --------------------------------------------------------
-
-    function renderPartialTerms() {
-        var el = document.getElementById('partial-term-list');
-        el.innerHTML = _terms.google.map(function(t) {
-            return '<label style="display:block; padding:1px 2px; cursor:pointer;">'
-                + '<input type="checkbox" class="partial-term-cb" value="' + t + '" checked style="margin-right:4px;">'
-                + t + '</label>';
-        }).join('');
-    }
-
     loadTerms();
     </script>
 
