@@ -1709,7 +1709,7 @@ def run_facebook_search(found_urls_all, regions=None, include_nationwide=True):
             query = f'site:facebook.com "{term}" "New Zealand" -group -marketplace -"for sale"'
             print(f"  Query: {query}")
 
-            results = google_search(query, num_results=10)
+            results = google_search(query, num_results=50)
             time.sleep(1)
 
             if results is SERPAPI_EXHAUSTED:
