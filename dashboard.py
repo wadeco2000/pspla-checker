@@ -461,6 +461,17 @@ HTML_TEMPLATE = """
         <!-- Search Terms Editor -->
         <div style="flex:1; min-width:300px; background:white; border-radius:8px;
                     box-shadow:0 2px 4px rgba(0,0,0,0.1); padding:14px 18px;">
+            <script>
+            function showTermsTab(tab) {
+                if (typeof _activeTab !== 'undefined') _activeTab = tab;
+                document.getElementById('terms-google').style.display = tab === 'google' ? '' : 'none';
+                document.getElementById('terms-facebook').style.display = tab === 'facebook' ? '' : 'none';
+                document.getElementById('tab-btn-google').style.background = tab === 'google' ? '#2c3e50' : 'white';
+                document.getElementById('tab-btn-google').style.color = tab === 'google' ? 'white' : '#555';
+                document.getElementById('tab-btn-facebook').style.background = tab === 'facebook' ? '#1877f2' : 'white';
+                document.getElementById('tab-btn-facebook').style.color = tab === 'facebook' ? 'white' : '#555';
+            }
+            </script>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                 <strong style="color:#2c3e50; font-size:14px;"><i class="fa-solid fa-list-check"></i> Search Terms</strong>
                 <div style="display:flex; gap:4px;">
@@ -604,16 +615,6 @@ HTML_TEMPLATE = """
     // -- Search Terms Manager --------------------------------------------------
     var _terms = {"google": [], "facebook": []};
     var _activeTab = 'google';
-
-    function showTermsTab(tab) {
-        _activeTab = tab;
-        document.getElementById('terms-google').style.display = tab === 'google' ? '' : 'none';
-        document.getElementById('terms-facebook').style.display = tab === 'facebook' ? '' : 'none';
-        document.getElementById('tab-btn-google').style.background = tab === 'google' ? '#2c3e50' : 'white';
-        document.getElementById('tab-btn-google').style.color = tab === 'google' ? 'white' : '#555';
-        document.getElementById('tab-btn-facebook').style.background = tab === 'facebook' ? '#1877f2' : 'white';
-        document.getElementById('tab-btn-facebook').style.color = tab === 'facebook' ? 'white' : '#555';
-    }
 
     function renderTermsList(type) {
         var el = document.getElementById('terms-list-' + type);
