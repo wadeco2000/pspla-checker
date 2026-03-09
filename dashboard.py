@@ -129,9 +129,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PSPLA Security Camera Checker</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
-          integrity="sha512-Avb2QiuDEEvB4bZJYdft2mNjVShBftLdPG8FJ0V7irTLQ8Uum05M9pHhS2Cjx1APTA6wF/hNKF7D5+q/ue5Q=="
-          crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer" />
     <style>
         * { box-sizing: border-box; }
         body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f4f4f4; }
@@ -232,6 +230,7 @@ HTML_TEMPLATE = """
                 <a href="/history" class="btn btn-dark" style="text-decoration:none;">&#x1F4DC; Version History</a>
                 <a href="/duplicates" class="btn btn-dark" style="text-decoration:none; background:#c0392b;">&#x26A0; Duplicates</a>
                 <a href="/audit-log" class="btn btn-dark" style="text-decoration:none; background:#6c3483;">&#x1F4CB; Audit Log</a>
+                <a href="/llm-log" class="btn btn-dark" style="text-decoration:none; background:#1a6e3c;">&#x1F916; LLM Log</a>
             </div>
         </div>
     </div>
@@ -758,6 +757,12 @@ HTML_TEMPLATE = """
             <option value="yes">NZSA Member</option>
             <option value="no">Not NZSA</option>
         </select>
+        <select id="serviceFilter" onchange="filterTable()">
+            <option value="">All Services</option>
+            <option value="alarm_systems">Alarm Systems</option>
+            <option value="cctv">CCTV / Cameras</option>
+            <option value="monitoring">Alarm Monitoring</option>
+        </select>
         <button class="btn btn-dark" onclick="window.location.reload()">Refresh</button>
     </div>
 
@@ -790,6 +795,9 @@ HTML_TEMPLATE = """
                 data-facebook="{{ 'yes' if (c.facebook_url or (c.source_url and 'facebook.com' in c.source_url)) else 'no' }}"
                 data-linkedin="{{ 'yes' if c.linkedin_url else 'no' }}"
                 data-nzsa="{{ 'yes' if c.nzsa_member == 'true' else 'no' }}"
+                data-alarm-systems="{{ 'yes' if c.has_alarm_systems else 'no' }}"
+                data-cctv="{{ 'yes' if c.has_cctv_cameras else 'no' }}"
+                data-monitoring="{{ 'yes' if c.has_alarm_monitoring else 'no' }}"
                 data-id="{{ loop.index }}">
                 <td class="company-cell">
                     {% if c.website %}<a href="{{ c.website }}" target="_blank">{{ c.company_name or '-' }}</a>{% else %}{{ c.company_name or '-' }}{% endif %}
@@ -861,145 +869,225 @@ HTML_TEMPLATE = """
                         {{ c.match_reason }}
                     </div>
                     {% endif %}
-                    <div class="detail-grid">
-                        <div class="detail-item"><label>Website Address</label><span>{{ c.address or '-' }}</span></div>
-                        <div class="detail-item"><label>License Type</label><span>{{ c.license_type or '-' }}</span></div>
-                        <div class="detail-item"><label>Directors Found</label><span>{{ c.director_name or '-' }}</span></div>
-                        <div class="detail-item"><label>Individual License</label><span>{{ c.individual_license or '-' }}</span></div>
-                        <div class="detail-item"><label>Match Method</label><span>{{ c.match_method or '-' }}</span></div>
-                        <div class="detail-item"><label>License Status</label><span>{{ c.pspla_license_status or '-' }}</span></div>
-                        <div class="detail-item"><label>License Classes</label><span>{{ c.pspla_license_classes or '-' }}</span></div>
-                        <div class="detail-item"><label>License Start Date</label><span>{{ c.pspla_license_start or '-' }}</span></div>
-                        <div class="detail-item"><label>Permit Type</label><span>{{ c.pspla_permit_type or '-' }}</span></div>
-                        <div class="detail-item"><label>CO Status</label><span>{{ c.co_status or '-' }}</span></div>
-                        <div class="detail-item"><label>CO Incorporated</label><span>{{ c.co_incorporated or '-' }}</span></div>
-                        <div class="detail-item"><label>Date Added</label><span>{{ (c.date_added or '')[:10] }}</span></div>
-                        <div class="detail-item"><label>Last Checked</label><span>{{ (c.last_checked or '')[:10] }}</span></div>
-                        <div class="detail-item"><label>Found Via</label><span>{{ c.notes or '-' }}</span></div>
-                        <div class="detail-item" id="pspla-recheck-item-{{ c.id }}">
-                            <label><i class="fa-solid fa-shield-halved" style="color:#2980b9;margin-right:3px"></i> PSPLA Re-check</label>
-                            <span id="pspla-recheck-result-{{ c.id }}">
-                                {{ c.pspla_name or ('Licensed' if c.pspla_licensed == true else ('Not licensed' if c.pspla_licensed == false else 'Unknown')) }}
-                            </span>
-                            <input id="pspla-term-{{ c.id }}" type="text"
-                                   value="{{ (c.company_name or '') | replace('"', '&quot;') }}"
-                                   style="margin-left:8px; padding:1px 5px; font-size:11px; border:1px solid #ccc; border-radius:3px; width:160px;"
-                                   title="Edit name if PSPLA uses a different registered name">
-                            <button onclick="recheckPspla({{ c.id }})"
-                                    id="pspla-btn-{{ c.id }}"
-                                    data-directors="{{ (c.director_name or '') | e }}"
-                                    data-region="{{ (c.region or '') | e }}"
-                                    data-coname="{{ (c.companies_office_name or '') | e }}"
-                                    style="margin-left:4px; padding:1px 7px; font-size:11px; background:#2980b9; color:white; border:none; border-radius:3px; cursor:pointer;">
-                                Re-check
-                            </button>
-                        </div>
-                        <div class="detail-item" id="fb-item-{{ c.id }}">
-                            <label><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" width="8" height="12" fill="#1877f2" style="vertical-align:middle;margin-right:3px"><path d="M279.14 288l14.22-92.66h-88.91v-60.13c0-25.35 12.42-50.06 52.24-50.06h40.42V6.26S260.43 0 225.36 0c-73.22 0-121.08 44.38-121.08 124.72v70.62H22.89V288h81.39v224h100.17V288z"/></svg> Facebook Page</label>
-                            <span id="fb-result-{{ c.id }}">
-                                {% if c.facebook_url %}
-                                    <a href="{{ c.facebook_url }}" target="_blank">{{ c.facebook_url }}</a>
-                                {% elif c.source_url and 'facebook.com' in c.source_url %}
-                                    <a href="{{ c.source_url }}" target="_blank">{{ c.source_url }}</a>
-                                {% else %}
-                                    <em style="color:#aaa">not found</em>
-                                {% endif %}
-                            </span>
-                            <input id="fb-term-{{ c.id }}" type="text"
-                                   value="{{ (c.company_name or '') | replace('"', '&quot;') }}"
-                                   style="margin-left:8px; padding:1px 5px; font-size:11px; border:1px solid #ccc; border-radius:3px; width:160px;"
-                                   title="Edit search term if the company uses a different name on Facebook">
-                            <button onclick="lookupFacebook({{ c.id }})"
-                                    id="fb-btn-{{ c.id }}"
-                                    style="margin-left:4px; padding:1px 7px; font-size:11px; background:#1877f2; color:white; border:none; border-radius:3px; cursor:pointer;">
-                                Search
-                            </button>
-                        </div>
-                        {% if c.fb_followers or c.fb_phone or c.fb_email or c.fb_address or c.fb_description or c.fb_category or c.fb_rating %}
-                        <div class="detail-item" style="grid-column: 1 / -1; border-top: 1px solid #e3eaf3; padding-top: 8px; margin-top: 2px;">
-                            <label style="color:#1877f2; font-size:11px; font-weight:bold; display:block; margin-bottom:6px;">
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" width="8" height="12" fill="#1877f2" style="vertical-align:middle;margin-right:4px"><path d="M279.14 288l14.22-92.66h-88.91v-60.13c0-25.35 12.42-50.06 52.24-50.06h40.42V6.26S260.43 0 225.36 0c-73.22 0-121.08 44.38-121.08 124.72v70.62H22.89V288h81.39v224h100.17V288z"/></svg>
-                                Facebook Page Details
-                            </label>
-                            <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap:6px; font-size:12px;">
-                                {% if c.fb_followers %}<div><strong>Followers:</strong> {{ c.fb_followers }}</div>{% endif %}
-                                {% if c.fb_category %}<div><strong>Category:</strong> {{ c.fb_category }}</div>{% endif %}
-                                {% if c.fb_rating %}<div><strong>Rating:</strong> {{ c.fb_rating }}</div>{% endif %}
-                                {% if c.fb_phone %}<div><strong>Phone:</strong> {{ c.fb_phone }}</div>{% endif %}
-                                {% if c.fb_email %}<div><strong>Email:</strong> <a href="mailto:{{ c.fb_email }}">{{ c.fb_email }}</a></div>{% endif %}
-                                {% if c.fb_address %}<div><strong>Address:</strong> {{ c.fb_address }}</div>{% endif %}
-                                {% if c.fb_description %}<div style="grid-column: 1 / -1;"><strong>About:</strong> {{ c.fb_description }}</div>{% endif %}
-                            </div>
-                        </div>
-                        {% endif %}
-                        {% if c.google_rating or c.google_reviews or c.google_phone or c.google_address or c.google_email %}
-                        <div class="detail-item" style="grid-column: 1 / -1; border-top: 1px solid #e3eaf3; padding-top: 8px; margin-top: 2px;">
-                            <label style="color:#4285F4; font-size:11px; font-weight:bold; display:block; margin-bottom:6px;">
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 488 512" width="11" height="12" fill="#4285F4" style="vertical-align:middle;margin-right:4px"><path d="M488 261.8C488 403.3 391.1 504 248 504 110.8 504 0 393.2 0 256S110.8 8 248 8c66.8 0 123 24.5 166.3 64.9l-67.5 64.9C258.5 52.6 94.3 116.6 94.3 256c0 86.5 69.1 156.6 153.7 156.6 98.2 0 135-70.4 140.8-106.9H248v-85.3h236.1c2.3 12.7 3.9 24.9 3.9 41.4z"/></svg>
-                                Google Business Profile
-                            </label>
-                            <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap:6px; font-size:12px;">
-                                {% if c.google_rating %}
-                                <div><strong>Rating:</strong>
-                                    <span style="color:#f39c12;">★</span> {{ c.google_rating }}
-                                    {% if c.google_reviews %}<span style="color:#888;">({{ c.google_reviews }} reviews)</span>{% endif %}
+                    <div style="padding:4px 0;">
+
+                        <!-- TOP ROW: PSPLA + Companies Office -->
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
+
+                            <!-- PSPLA Licence Card -->
+                            <div style="background:#eaf3fb; border:1px solid #aed4f0; border-radius:8px; padding:12px;">
+                                <div style="font-size:12px; font-weight:bold; color:#1a5276; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+                                    <i class="fa-solid fa-shield-halved" style="color:#2980b9;"></i> PSPLA Licence
                                 </div>
-                                {% endif %}
-                                {% if c.google_phone %}<div><strong>Phone:</strong> {{ c.google_phone }}</div>{% endif %}
-                                {% if c.google_email %}<div><strong>Email:</strong> <a href="mailto:{{ c.google_email }}">{{ c.google_email }}</a></div>{% endif %}
-                                {% if c.google_address %}<div style="grid-column: 1 / -1;"><strong>Address:</strong> {{ c.google_address }}</div>{% endif %}
+                                <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; font-size:12px;">
+                                    {% if c.pspla_name %}<div style="grid-column:1/-1;"><span style="color:#888;">Name:</span> <strong>{{ c.pspla_name }}</strong></div>{% endif %}
+                                    {% if c.pspla_license_status %}<div><span style="color:#888;">Status:</span> {{ c.pspla_license_status }}</div>{% endif %}
+                                    {% if c.pspla_license_number %}<div><span style="color:#888;">Number:</span> <a href="https://forms.justice.govt.nz/search/PSPLA/" target="_blank" onclick="copyAndOpen(event,'{{ c.pspla_license_number }}')">{{ c.pspla_license_number }}</a></div>{% endif %}
+                                    {% if c.pspla_license_expiry %}<div><span style="color:#888;">Expires:</span> {{ c.pspla_license_expiry }}</div>{% endif %}
+                                    {% if c.pspla_license_classes %}<div><span style="color:#888;">Classes:</span> {{ c.pspla_license_classes }}</div>{% endif %}
+                                    {% if c.pspla_license_start %}<div><span style="color:#888;">Start:</span> {{ c.pspla_license_start }}</div>{% endif %}
+                                    {% if c.pspla_permit_type %}<div><span style="color:#888;">Permit:</span> {{ c.pspla_permit_type }}</div>{% endif %}
+                                    {% if c.license_type %}<div><span style="color:#888;">Type:</span> {{ c.license_type }}</div>{% endif %}
+                                    {% if c.match_method %}<div><span style="color:#888;">Match:</span> {{ c.match_method }}</div>{% endif %}
+                                    {% if c.individual_license %}<div style="grid-column:1/-1;"><span style="color:#888;">Individual:</span> {{ c.individual_license }}</div>{% endif %}
+                                </div>
+                                <div style="margin-top:8px; padding-top:8px; border-top:1px solid #aed4f0; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                                    <span id="pspla-recheck-result-{{ c.id }}" style="font-size:11px; color:#555;"></span>
+                                    <input id="pspla-term-{{ c.id }}" type="text" value="{{ (c.company_name or '') | replace('"', '&quot;') }}"
+                                           style="padding:2px 6px; font-size:11px; border:1px solid #aed4f0; border-radius:3px; flex:1; min-width:120px; max-width:180px;">
+                                    <button onclick="recheckPspla({{ c.id }})" id="pspla-btn-{{ c.id }}"
+                                            data-directors="{{ (c.director_name or '') | e }}"
+                                            data-region="{{ (c.region or '') | e }}"
+                                            data-coname="{{ (c.companies_office_name or '') | e }}"
+                                            style="padding:2px 10px; font-size:11px; background:#555; color:white; border:none; border-radius:3px; cursor:pointer; white-space:nowrap;">
+                                        Re-check
+                                    </button>
+                                </div>
                             </div>
+
+                            <!-- Companies Office Card -->
+                            <div style="background:#f8f9fa; border:1px solid #dee2e6; border-radius:8px; padding:12px;">
+                                <div style="font-size:12px; font-weight:bold; color:#2c3e50; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+                                    🏢 Companies Office
+                                </div>
+                                <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; font-size:12px;">
+                                    {% if c.companies_office_name %}<div style="grid-column:1/-1;"><span style="color:#888;">Name:</span> <strong>{{ c.companies_office_name }}</strong>{% if c.co_status %} <em style="color:#888;">({{ c.co_status }})</em>{% endif %}</div>{% endif %}
+                                    {% if c.nzbn %}<div><span style="color:#888;">NZBN:</span> {{ c.nzbn }}</div>{% endif %}
+                                    {% if c.co_incorporated %}<div><span style="color:#888;">Incorporated:</span> {{ c.co_incorporated }}</div>{% endif %}
+                                    {% if c.director_name %}<div style="grid-column:1/-1;"><span style="color:#888;">Directors:</span> {{ c.director_name }}</div>{% endif %}
+                                    {% if c.companies_office_address %}<div style="grid-column:1/-1;"><span style="color:#888;">Address:</span> {{ c.companies_office_address }}</div>{% endif %}
+                                </div>
+                                <div style="margin-top:8px; padding-top:8px; border-top:1px solid #dee2e6; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                                    <span id="co-recheck-result-{{ c.id }}" style="font-size:11px; color:#555;"></span>
+                                    <input id="co-term-{{ c.id }}" type="text" value="{{ (c.company_name or '') | replace('"', '&quot;') }}"
+                                           style="padding:2px 6px; font-size:11px; border:1px solid #ddd; border-radius:3px; flex:1; min-width:120px; max-width:180px;">
+                                    <button onclick="recheckCompaniesOffice({{ c.id }})" id="co-btn-{{ c.id }}"
+                                            style="padding:2px 10px; font-size:11px; background:#555; color:white; border:none; border-radius:3px; cursor:pointer; white-space:nowrap;">
+                                        Re-check
+                                    </button>
+                                </div>
+                            </div>
+
                         </div>
-                        {% endif %}
-                        <div class="detail-item" id="li-item-{{ c.id }}">
-                            <label><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" width="10" height="12" fill="#0a66c2" style="vertical-align:middle;margin-right:3px"><path d="M100.28 448H7.4V148.9h92.88zM53.79 108.1C24.09 108.1 0 83.5 0 53.8a53.79 53.79 0 0 1 107.58 0c0 29.7-24.1 54.3-53.79 54.3zM447.9 448h-92.68V302.4c0-34.7-.7-79.2-48.29-79.2-48.29 0-55.69 37.7-55.69 76.7V448h-92.78V148.9h89.08v40.8h1.3c12.4-23.5 42.69-48.3 87.88-48.3 94 0 111.28 61.9 111.28 142.3V448z"/></svg> LinkedIn Page</label>
-                            <span id="li-result-{{ c.id }}">
-                                {% if c.linkedin_url %}
-                                    <a href="{{ c.linkedin_url }}" target="_blank">{{ c.linkedin_url }}</a>
-                                {% else %}
-                                    <em style="color:#aaa">not found</em>
-                                {% endif %}
+
+                        <!-- SECOND ROW: Facebook + NZSA + Google + LinkedIn -->
+                        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:12px;">
+
+                            <!-- Facebook Card -->
+                            <div style="background:#f0f4ff; border:1px solid #c3cef5; border-radius:8px; padding:12px;">
+                                <div style="font-size:12px; font-weight:bold; color:#1877f2; margin-bottom:8px; display:flex; align-items:center; gap:5px;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" width="8" height="12" fill="#1877f2"><path d="M279.14 288l14.22-92.66h-88.91v-60.13c0-25.35 12.42-50.06 52.24-50.06h40.42V6.26S260.43 0 225.36 0c-73.22 0-121.08 44.38-121.08 124.72v70.62H22.89V288h81.39v224h100.17V288z"/></svg>
+                                    Facebook
+                                </div>
+                                <div style="font-size:12px; margin-bottom:6px;">
+                                    <div id="fb-result-{{ c.id }}" style="margin-bottom:4px; word-break:break-all;">
+                                        {% if c.facebook_url %}<a href="{{ c.facebook_url }}" target="_blank">{{ c.facebook_url }}</a>
+                                        {% elif c.source_url and 'facebook.com' in c.source_url %}<a href="{{ c.source_url }}" target="_blank">{{ c.source_url }}</a>
+                                        {% else %}<em style="color:#aaa">Not found</em>{% endif %}
+                                    </div>
+                                    {% if c.fb_followers or c.fb_phone or c.fb_email or c.fb_address or c.fb_category or c.fb_rating %}
+                                    <div style="border-top:1px solid #c3cef5; padding-top:6px; margin-top:4px; display:flex; flex-direction:column; gap:3px; color:#444;">
+                                        {% if c.fb_followers %}<div>👥 {{ c.fb_followers }} followers</div>{% endif %}
+                                        {% if c.fb_category %}<div>🏷️ {{ c.fb_category }}</div>{% endif %}
+                                        {% if c.fb_rating %}<div>⭐ {{ c.fb_rating }}</div>{% endif %}
+                                        {% if c.fb_phone %}<div>📞 {{ c.fb_phone }}</div>{% endif %}
+                                        {% if c.fb_email %}<div>✉️ <a href="mailto:{{ c.fb_email }}">{{ c.fb_email }}</a></div>{% endif %}
+                                        {% if c.fb_address %}<div>📍 {{ c.fb_address }}</div>{% endif %}
+                                        {% if c.fb_description %}<div style="color:#777; font-style:italic; margin-top:2px; font-size:11px;">{{ c.fb_description[:120] }}{% if c.fb_description|length > 120 %}…{% endif %}</div>{% endif %}
+                                    </div>
+                                    {% endif %}
+                                </div>
+                                <div style="padding-top:8px; border-top:1px solid #c3cef5; display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                                    <input id="fb-term-{{ c.id }}" type="text" value="{{ (c.company_name or '') | replace('"', '&quot;') }}"
+                                           style="padding:2px 5px; font-size:11px; border:1px solid #c3cef5; border-radius:3px; flex:1; min-width:80px;">
+                                    <button onclick="lookupFacebook({{ c.id }})" id="fb-btn-{{ c.id }}"
+                                            style="padding:2px 8px; font-size:11px; background:#555; color:white; border:none; border-radius:3px; cursor:pointer; white-space:nowrap;">
+                                        Re-check
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- NZSA Card -->
+                            <div style="background:#fff5f5; border:1px solid #f5c6cb; border-radius:8px; padding:12px;">
+                                <div style="font-size:12px; font-weight:bold; color:#c0392b; margin-bottom:8px; display:flex; align-items:center; gap:5px;">
+                                    <span style="background:#c0392b; color:white; font-size:10px; padding:1px 5px; border-radius:3px; font-weight:bold;">NZSA</span>
+                                    Membership
+                                </div>
+                                <div id="nzsa-result-{{ c.id }}" style="font-size:12px; margin-bottom:6px;">
+                                    {% if c.nzsa_member == 'true' %}
+                                        <strong style="color:#27ae60;">Member</strong>{% if c.nzsa_member_name %} — {{ c.nzsa_member_name }}{% endif %}
+                                        {% if c.nzsa_accredited == 'true' %}<br><em style="color:#888; font-size:11px;">Accredited{% if c.nzsa_grade %}: {{ c.nzsa_grade }}{% endif %}</em>{% endif %}
+                                        {% if c.nzsa_contact_name %}<br>👤 {{ c.nzsa_contact_name }}{% endif %}
+                                        {% if c.nzsa_phone %}<br>📞 {{ c.nzsa_phone }}{% endif %}
+                                        {% if c.nzsa_email %}<br>✉️ <a href="mailto:{{ c.nzsa_email }}">{{ c.nzsa_email }}</a>{% endif %}
+                                        {% if c.nzsa_overview %}<br><span style="color:#777; font-style:italic; font-size:11px;">{{ c.nzsa_overview[:120] }}{% if c.nzsa_overview|length > 120 %}…{% endif %}</span>{% endif %}
+                                    {% else %}
+                                        <em style="color:#aaa">Not a member</em>
+                                    {% endif %}
+                                </div>
+                                <div style="padding-top:8px; border-top:1px solid #f5c6cb; display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                                    <input id="nzsa-term-{{ c.id }}" type="text" value="{{ (c.company_name or '') | replace('"', '&quot;') }}"
+                                           style="padding:2px 5px; font-size:11px; border:1px solid #f5c6cb; border-radius:3px; flex:1; min-width:80px;">
+                                    <button onclick="recheckNzsa({{ c.id }})" id="nzsa-btn-{{ c.id }}"
+                                            style="padding:2px 8px; font-size:11px; background:#555; color:white; border:none; border-radius:3px; cursor:pointer; white-space:nowrap;">
+                                        Re-check
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Google Card -->
+                            <div style="background:#fff8f0; border:1px solid #fce4c3; border-radius:8px; padding:12px;">
+                                <div style="font-size:12px; font-weight:bold; margin-bottom:8px; display:flex; align-items:center; gap:4px;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 488 512" width="11" height="12" style="vertical-align:middle;"><path fill="#4285F4" d="M488 261.8C488 403.3 391.1 504 248 504 110.8 504 0 393.2 0 256S110.8 8 248 8c66.8 0 123 24.5 166.3 64.9l-67.5 64.9C258.5 52.6 94.3 116.6 94.3 256c0 86.5 69.1 156.6 153.7 156.6 98.2 0 135-70.4 140.8-106.9H248v-85.3h236.1c2.3 12.7 3.9 24.9 3.9 41.4z"/></svg>
+                                    <span style="color:#4285F4;">G</span><span style="color:#ea4335;">o</span><span style="color:#fbbc04;">o</span><span style="color:#4285F4;">g</span><span style="color:#34a853;">l</span><span style="color:#ea4335;">e</span>
+                                </div>
+                                <div id="google-recheck-result-{{ c.id }}" style="font-size:12px; margin-bottom:6px;">
+                                    {% if c.google_rating or c.google_phone or c.google_address %}
+                                        {% if c.google_rating %}<div>⭐ {{ c.google_rating }}{% set rev = c.google_reviews | int(default=0) %}{% if rev > 0 %} <span style="color:#888;">({{ rev }} reviews)</span>{% endif %} &nbsp;<a href="https://www.google.com/search?q={{ (c.company_name or '') | urlencode }}" target="_blank" style="font-size:10px; color:#4285F4;">View on Google ↗</a></div>{% endif %}
+                                        {% if c.google_phone %}<div>📞 {{ c.google_phone }}</div>{% endif %}
+                                        {% if c.google_email %}<div>✉️ <a href="mailto:{{ c.google_email }}">{{ c.google_email }}</a></div>{% endif %}
+                                        {% if c.google_address %}<div>📍 {{ c.google_address }}</div>{% endif %}
+                                    {% else %}
+                                        <em style="color:#aaa">Not found</em>
+                                    {% endif %}
+                                </div>
+                                <div style="padding-top:8px; border-top:1px solid #fce4c3; display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                                    <input id="google-term-{{ c.id }}" type="text" value="{{ (c.company_name or '') | replace('"', '&quot;') }}"
+                                           style="padding:2px 5px; font-size:11px; border:1px solid #fce4c3; border-radius:3px; flex:1; min-width:80px;">
+                                    <button onclick="recheckGoogleProfile({{ c.id }})" id="google-btn-{{ c.id }}"
+                                            data-region="{{ (c.region or '') | e }}"
+                                            style="padding:2px 8px; font-size:11px; background:#555; color:white; border:none; border-radius:3px; cursor:pointer; white-space:nowrap;">
+                                        Re-check
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- LinkedIn Card -->
+                            <div style="background:#f0f5ff; border:1px solid #b3c8e8; border-radius:8px; padding:12px;">
+                                <div style="font-size:12px; font-weight:bold; color:#0a66c2; margin-bottom:8px; display:flex; align-items:center; gap:5px;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" width="10" height="12" fill="#0a66c2"><path d="M100.28 448H7.4V148.9h92.88zM53.79 108.1C24.09 108.1 0 83.5 0 53.8a53.79 53.79 0 0 1 107.58 0c0 29.7-24.1 54.3-53.79 54.3zM447.9 448h-92.68V302.4c0-34.7-.7-79.2-48.29-79.2-48.29 0-55.69 37.7-55.69 76.7V448h-92.78V148.9h89.08v40.8h1.3c12.4-23.5 42.69-48.3 87.88-48.3 94 0 111.28 61.9 111.28 142.3V448z"/></svg>
+                                    LinkedIn
+                                </div>
+                                <div id="li-result-{{ c.id }}" style="font-size:12px; margin-bottom:6px; word-break:break-all;">
+                                    {% if c.linkedin_url %}<a href="{{ c.linkedin_url }}" target="_blank">{{ c.linkedin_url }}</a>
+                                    {% else %}<em style="color:#aaa">Not found</em>{% endif %}
+                                    {% if c.linkedin_followers or c.linkedin_industry or c.linkedin_location or c.linkedin_size or c.linkedin_website %}
+                                    <div style="border-top:1px solid #b3c8e8; padding-top:5px; margin-top:4px; display:flex; flex-direction:column; gap:2px; color:#444;">
+                                        {% if c.linkedin_followers %}<div>👥 {{ c.linkedin_followers }} followers</div>{% endif %}
+                                        {% if c.linkedin_industry %}<div>🏭 {{ c.linkedin_industry }}</div>{% endif %}
+                                        {% if c.linkedin_location %}<div>📍 {{ c.linkedin_location }}</div>{% endif %}
+                                        {% if c.linkedin_size %}<div>👤 {{ c.linkedin_size }}</div>{% endif %}
+                                        {% if c.linkedin_website %}<div>🌐 <a href="{{ c.linkedin_website }}" target="_blank">{{ c.linkedin_website }}</a></div>{% endif %}
+                                    </div>
+                                    {% endif %}
+                                    {% if c.linkedin_description %}<div style="color:#777; font-style:italic; font-size:11px; margin-top:4px;">{{ c.linkedin_description[:150] }}{% if c.linkedin_description|length > 150 %}…{% endif %}</div>{% endif %}
+                                </div>
+                                <div style="padding-top:8px; border-top:1px solid #b3c8e8; display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                                    <input id="li-term-{{ c.id }}" type="text" value="{{ (c.company_name or '') | replace('"', '&quot;') }}"
+                                           style="padding:2px 5px; font-size:11px; border:1px solid #b3c8e8; border-radius:3px; flex:1; min-width:80px;">
+                                    <button onclick="lookupLinkedIn({{ c.id }})" id="li-btn-{{ c.id }}"
+                                            style="padding:2px 8px; font-size:11px; background:#555; color:white; border:none; border-radius:3px; cursor:pointer; white-space:nowrap;">
+                                        Re-check
+                                    </button>
+                                </div>
+                            </div>
+
+                        </div>
+
+                        <!-- METADATA ROW -->
+                        <div style="display:flex; flex-wrap:wrap; gap:16px; font-size:11px; color:#888; padding:8px 4px; border-top:1px solid #eee; border-bottom:1px solid #eee; margin-bottom:12px;">
+                            {% if c.website_url %}<span><strong style="color:#555;">Website:</strong> <a href="{{ c.website_url }}" target="_blank" style="color:#2980b9;">{{ c.website_url }}</a></span>{% endif %}
+                            <span><strong style="color:#555;">Found via:</strong> {{ c.notes or '-' }}</span>
+                            <span><strong style="color:#555;">Date added:</strong> {{ (c.date_added or '')[:10] or '-' }}</span>
+                            <span><strong style="color:#555;">Last checked:</strong> {{ (c.last_checked or '')[:10] or '-' }}</span>
+                            <span style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;" id="services-row-{{ c.id }}">
+                                <strong style="color:#555;">Services:</strong>
+                                {% if c.has_alarm_systems %}<span class="svc-tag svc-alarm" style="background:#1a6e3c; color:white; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600;">Alarm Systems</span>{% endif %}
+                                {% if c.has_cctv_cameras %}<span class="svc-tag svc-cctv" style="background:#1a4b8a; color:white; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600;">CCTV / Cameras</span>{% endif %}
+                                {% if c.has_alarm_monitoring %}<span class="svc-tag svc-mon" style="background:#7a3a99; color:white; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600;">Alarm Monitoring</span>{% endif %}
+                                {% if not c.has_alarm_systems and not c.has_cctv_cameras and not c.has_alarm_monitoring %}<span style="color:#bbb; font-size:10px;">none detected</span>{% endif %}
+                                <button onclick="recheckServices({{ c.id }}, this)"
+                                        data-website="{{ (c.website or '') | e }}"
+                                        style="padding:1px 8px; font-size:10px; background:#555; color:white; border:none; border-radius:4px; cursor:pointer; white-space:nowrap;">Re-check</button>
                             </span>
-                            <input id="li-term-{{ c.id }}" type="text"
-                                   value="{{ (c.company_name or '') | replace('"', '&quot;') }}"
-                                   style="margin-left:8px; padding:1px 5px; font-size:11px; border:1px solid #ccc; border-radius:3px; width:160px;"
-                                   title="Edit search term if the company uses a different name on LinkedIn">
-                            <button onclick="lookupLinkedIn({{ c.id }})"
-                                    id="li-btn-{{ c.id }}"
-                                    style="margin-left:4px; padding:1px 7px; font-size:11px; background:#0a66c2; color:white; border:none; border-radius:3px; cursor:pointer;">
-                                Search
+                        </div>
+
+                        <!-- FULL RE-CHECK BANNER -->
+                        <div style="background:#2c3e50; border-radius:8px; padding:10px 16px; margin-bottom:12px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                            <span style="color:white; font-size:12px; font-weight:bold;">🔄 Full Re-check</span>
+                            <span id="full-recheck-result-{{ c.id }}" style="font-size:12px; color:#ecf0f1; flex:1;"></span>
+                            <small style="color:#95a5a6; order:3;">Runs CO + Facebook + Google + PSPLA + NZSA</small>
+                            <button onclick="fullRecheck({{ c.id }})" id="full-recheck-btn-{{ c.id }}"
+                                    data-name="{{ (c.company_name or '') | e }}"
+                                    data-website="{{ (c.website_url or '') | e }}"
+                                    data-region="{{ (c.region or '') | e }}"
+                                    style="padding:5px 16px; font-size:12px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold; order:2; white-space:nowrap;">
+                                Re-check all sources
                             </button>
                         </div>
-                        <div class="detail-item" id="nzsa-item-{{ c.id }}">
-                            <label><span class="nzsa-tag" style="margin-left:0;font-size:10px;">NZSA</span> Membership</label>
-                            <span id="nzsa-result-{{ c.id }}">
-                                {% if c.nzsa_member == 'true' %}
-                                    <strong style="color:#27ae60;">Member</strong> — {{ c.nzsa_member_name }}{% if c.nzsa_accredited == 'true' %} <em>(Accredited{% if c.nzsa_grade %}: {{ c.nzsa_grade }}{% endif %})</em>{% endif %}
-                                    {% if c.nzsa_contact_name or c.nzsa_phone or c.nzsa_email %}
-                                    <br><small style="color:#555;">
-                                        {% if c.nzsa_contact_name %}<strong>Contact:</strong> {{ c.nzsa_contact_name }}{% endif %}
-                                        {% if c.nzsa_phone %} &nbsp;&#128222; {{ c.nzsa_phone }}{% endif %}
-                                        {% if c.nzsa_email %} &nbsp;&#9993; <a href="mailto:{{ c.nzsa_email }}">{{ c.nzsa_email }}</a>{% endif %}
-                                    </small>
-                                    {% endif %}
-                                    {% if c.nzsa_overview %}
-                                    <br><small style="color:#777;font-style:italic;">{{ c.nzsa_overview[:200] }}{% if c.nzsa_overview|length > 200 %}…{% endif %}</small>
-                                    {% endif %}
-                                {% else %}
-                                    <em style="color:#aaa">not found / not a member</em>
-                                {% endif %}
-                            </span>
-                            <input id="nzsa-term-{{ c.id }}" type="text"
-                                   value="{{ (c.company_name or '') | replace('"', '&quot;') }}"
-                                   style="margin-left:8px; padding:1px 5px; font-size:11px; border:1px solid #ccc; border-radius:3px; width:160px;"
-                                   title="Edit name to search NZSA with">
-                            <button onclick="recheckNzsa({{ c.id }})"
-                                    id="nzsa-btn-{{ c.id }}"
-                                    style="margin-left:4px; padding:1px 7px; font-size:11px; background:#c0392b; color:white; border:none; border-radius:3px; cursor:pointer;">
-                                Check
-                            </button>
-                        </div>
-                        <div class="detail-item" style="grid-column: 1 / -1; border-top: 1px solid #ddd; padding-top: 10px; margin-top: 4px;">
+
+                        <!-- AI DECISIONS -->
+                        <div style="border-top:1px solid #ddd; padding-top:10px; margin-bottom:8px;">
                             <label style="font-weight:bold; color:#555; font-size:11px; display:block; margin-bottom:6px;">AI Matching Decisions</label>
                             <div id="ai-decisions-{{ c.id }}" style="font-size:11px;">
                                 <button onclick="loadAIDecisions('{{ c.id }}', this.dataset.name)"
@@ -1010,7 +1098,8 @@ HTML_TEMPLATE = """
                             </div>
                         </div>
 
-                        <div class="detail-item" style="grid-column: 1 / -1; border-top: 1px solid #ddd; padding-top: 10px; margin-top: 4px;">
+                        <!-- EDIT / DELETE / CORRECTION -->
+                        <div style="border-top:1px solid #ddd; padding-top:10px; margin-top:4px;">
                             <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
                                 <button onclick="toggleEditForm({{ c.id }})"
                                         style="padding:3px 12px; font-size:12px; background:#8e44ad; color:white; border:none; border-radius:3px; cursor:pointer;">
@@ -1064,6 +1153,7 @@ HTML_TEMPLATE = """
                                 </div>
                             </div>
                         </div>
+
                     </div>
                 </td>
             </tr>
@@ -1079,6 +1169,7 @@ HTML_TEMPLATE = """
             const facebook = document.getElementById('facebookFilter').value;
             const linkedin = document.getElementById('linkedinFilter').value;
             const nzsa = document.getElementById('nzsaFilter').value;
+            const service = document.getElementById('serviceFilter').value;
             const rows = document.querySelectorAll('.company-row');
             rows.forEach(row => {
                 const nameMatch = !search || row.dataset.name.includes(search);
@@ -1087,7 +1178,11 @@ HTML_TEMPLATE = """
                 const facebookMatch = !facebook || row.dataset.facebook === facebook;
                 const linkedinMatch = !linkedin || row.dataset.linkedin === linkedin;
                 const nzsaMatch = !nzsa || row.dataset.nzsa === nzsa;
-                const visible = nameMatch && regionMatch && statusMatch && facebookMatch && linkedinMatch && nzsaMatch;
+                let serviceMatch = true;
+                if (service === 'alarm_systems') serviceMatch = row.dataset.alarmSystems === 'yes';
+                else if (service === 'cctv') serviceMatch = row.dataset.cctv === 'yes';
+                else if (service === 'monitoring') serviceMatch = row.dataset.monitoring === 'yes';
+                const visible = nameMatch && regionMatch && statusMatch && facebookMatch && linkedinMatch && nzsaMatch && serviceMatch;
                 row.style.display = visible ? '' : 'none';
                 const detailRow = document.getElementById('detail-' + row.dataset.id);
                 if (detailRow && !visible) detailRow.classList.remove('open');
@@ -1101,7 +1196,7 @@ HTML_TEMPLATE = """
             var name = termInput ? termInput.value.trim() : '';
             if (!name) return;
             btn.disabled = true;
-            btn.textContent = 'Searching...';
+            btn.textContent = 'Checking...'; btn.style.background = '#555';
             fetch('/find-facebook', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -1111,16 +1206,13 @@ HTML_TEMPLATE = """
             .then(function(d) {
                 if (d.found && d.url) {
                     result.innerHTML = '<a href="' + d.url + '" target="_blank">' + d.url + '</a>';
-                    btn.textContent = 'Done';
-                    btn.style.background = '#27ae60';
+                    btnSaved(btn);
                 } else if (d.error) {
                     result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
-                    btn.textContent = 'Search';
-                    btn.disabled = false;
+                    btn.textContent = 'Re-check'; btn.disabled = false;
                 } else {
                     result.innerHTML = '<em style="color:#aaa">not found</em>';
-                    btn.textContent = 'Not found';
-                    btn.style.background = '#95a5a6';
+                    btnSaved(btn, '#95a5a6', 'Not found');
                 }
             })
             .catch(function(e) {
@@ -1147,7 +1239,7 @@ HTML_TEMPLATE = """
             .then(function(d) {
                 if (d.error) {
                     result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
-                    btn.textContent = 'Check'; btn.disabled = false;
+                    btn.textContent = 'Re-check'; btn.disabled = false;
                 } else if (d.member) {
                     var txt = '<strong style="color:#27ae60;">Member</strong> — ' + d.member_name;
                     if (d.accredited) { txt += ' <em>(Accredited' + (d.grade ? ': ' + d.grade : '') + ')</em>'; }
@@ -1160,15 +1252,15 @@ HTML_TEMPLATE = """
                     }
                     if (d.overview) { txt += '<br><small style="color:#777;font-style:italic;">' + d.overview.substring(0, 200) + (d.overview.length > 200 ? '…' : '') + '</small>'; }
                     result.innerHTML = txt;
-                    btn.textContent = 'Done'; btn.style.background = '#27ae60';
+                    btnSaved(btn);
                 } else {
                     result.innerHTML = '<em style="color:#aaa">not found / not a member</em>';
-                    btn.textContent = 'Not found'; btn.style.background = '#95a5a6';
+                    btnSaved(btn, '#95a5a6', 'Not found');
                 }
             })
             .catch(function() {
                 result.innerHTML = '<em style="color:#e74c3c">Request failed</em>';
-                btn.textContent = 'Check'; btn.disabled = false;
+                btn.textContent = 'Re-check'; btn.disabled = false;
             });
         }
 
@@ -1179,7 +1271,7 @@ HTML_TEMPLATE = """
             var name = termInput ? termInput.value.trim() : '';
             if (!name) return;
             btn.disabled = true;
-            btn.textContent = 'Searching...';
+            btn.textContent = 'Checking...'; btn.style.background = '#555';
             fetch('/find-linkedin', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -1188,17 +1280,23 @@ HTML_TEMPLATE = """
             .then(function(r) { return r.json(); })
             .then(function(d) {
                 if (d.found && d.url) {
-                    result.innerHTML = '<a href="' + d.url + '" target="_blank">' + d.url + '</a>';
-                    btn.textContent = 'Done';
-                    btn.style.background = '#27ae60';
+                    var html = '<a href="' + d.url + '" target="_blank">' + d.url + '</a>';
+                    var details = '';
+                    if (d.followers) details += '<div>👥 ' + d.followers + ' followers</div>';
+                    if (d.industry) details += '<div>🏭 ' + d.industry + '</div>';
+                    if (d.location) details += '<div>📍 ' + d.location + '</div>';
+                    if (d.size) details += '<div>👤 ' + d.size + '</div>';
+                    if (d.website) details += '<div>🌐 <a href="' + d.website + '" target="_blank">' + d.website + '</a></div>';
+                    if (details) html += '<div style="border-top:1px solid #b3c8e8;padding-top:5px;margin-top:4px;display:flex;flex-direction:column;gap:2px;color:#444;">' + details + '</div>';
+                    if (d.description) html += '<div style="color:#777;font-style:italic;font-size:11px;margin-top:4px;">' + d.description.substring(0, 150) + (d.description.length > 150 ? '…' : '') + '</div>';
+                    result.innerHTML = html;
+                    btnSaved(btn);
                 } else if (d.error) {
                     result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
-                    btn.textContent = 'Search';
-                    btn.disabled = false;
+                    btn.textContent = 'Re-check'; btn.disabled = false;
                 } else {
                     result.innerHTML = '<em style="color:#aaa">not found</em>';
-                    btn.textContent = 'Not found';
-                    btn.style.background = '#95a5a6';
+                    btnSaved(btn, '#95a5a6', 'Not found');
                 }
             })
             .catch(function(e) {
@@ -1228,30 +1326,196 @@ HTML_TEMPLATE = """
             .then(function(d) {
                 if (d.error) {
                     result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
-                    btn.textContent = 'Re-check';
-                    btn.disabled = false;
+                    btn.textContent = 'Re-check'; btn.disabled = false;
                 } else if (d.licensed && d.individual_license && d.pspla_name) {
                     result.innerHTML = '<strong style="color:#e67e22">Exp + Individual</strong> — company: ' + d.pspla_name + ' (' + (d.pspla_license_status || 'expired') + '), individual: ' + d.individual_license;
-                    btn.textContent = 'Done';
-                    btn.style.background = '#e67e22';
+                    btnSaved(btn, '#e67e22');
                 } else if (d.licensed && d.individual_license) {
                     result.innerHTML = '<strong style="color:#e67e22">Individual Only</strong> — ' + d.individual_license;
-                    btn.textContent = 'Done';
-                    btn.style.background = '#e67e22';
+                    btnSaved(btn, '#e67e22');
                 } else if (d.licensed) {
                     result.innerHTML = '<strong style="color:#27ae60">Licensed</strong> — ' + (d.pspla_name || '');
-                    btn.textContent = 'Done';
-                    btn.style.background = '#27ae60';
+                    btnSaved(btn);
                 } else {
                     result.innerHTML = '<em style="color:#e74c3c">Not licensed</em>';
-                    btn.textContent = 'Done';
-                    btn.style.background = '#95a5a6';
+                    btnSaved(btn, '#95a5a6');
                 }
             })
             .catch(function(e) {
                 result.innerHTML = '<em style="color:#e74c3c">Request failed</em>';
                 btn.textContent = 'Re-check';
                 btn.disabled = false;
+            });
+        }
+
+        function btnSaved(btn, color, label) {
+            color = color || '#27ae60';
+            label = label || 'Re-check';
+            btn.textContent = '✓ Saved';
+            btn.style.background = color;
+            btn.disabled = true;
+            setTimeout(function() {
+                btn.textContent = label;
+                btn.style.background = '#555';
+                btn.disabled = false;
+            }, 2000);
+        }
+
+        function recheckServices(id, btn) {
+            var website = btn.dataset.website;
+            if (!website) { alert('No website URL available.'); return; }
+            btn.disabled = true;
+            btn.textContent = 'Checking...';
+            fetch('/recheck-services', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id, website: website})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.error) {
+                    btn.textContent = 'Error'; btn.disabled = false;
+                    return;
+                }
+                // Update the tags inline
+                var row = document.getElementById('services-row-' + id);
+                // Remove existing tags and "none" placeholder
+                row.querySelectorAll('.svc-tag, .svc-none').forEach(function(el) { el.remove(); });
+                var noneEl = row.querySelector('span[style*="bbb"]');
+                if (noneEl) noneEl.remove();
+                var insertBefore = btn;
+                function addTag(label, color, cls) {
+                    var t = document.createElement('span');
+                    t.className = 'svc-tag ' + cls;
+                    t.style.cssText = 'background:' + color + ';color:white;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;';
+                    t.textContent = label;
+                    row.insertBefore(t, insertBefore);
+                }
+                if (d.has_alarm_systems) addTag('Alarm Systems', '#1a6e3c', 'svc-alarm');
+                if (d.has_cctv_cameras) addTag('CCTV / Cameras', '#1a4b8a', 'svc-cctv');
+                if (d.has_alarm_monitoring) addTag('Alarm Monitoring', '#7a3a99', 'svc-mon');
+                if (!d.has_alarm_systems && !d.has_cctv_cameras && !d.has_alarm_monitoring) {
+                    var n = document.createElement('span');
+                    n.style.cssText = 'color:#bbb;font-size:10px;';
+                    n.textContent = 'none detected';
+                    row.insertBefore(n, insertBefore);
+                }
+                btnSaved(btn, '#27ae60', 'Re-check');
+            })
+            .catch(function() { btn.textContent = 'Re-check'; btn.disabled = false; });
+        }
+
+        function recheckCompaniesOffice(id) {
+            var btn = document.getElementById('co-btn-' + id);
+            var result = document.getElementById('co-recheck-result-' + id);
+            var termInput = document.getElementById('co-term-' + id);
+            var name = termInput ? termInput.value.trim() : '';
+            if (!name) return;
+            btn.disabled = true;
+            btn.textContent = 'Checking...';
+            fetch('/recheck-companies-office', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id, name: name})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.error) {
+                    result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
+                    btn.textContent = 'Re-check'; btn.disabled = false;
+                } else if (d.found) {
+                    var txt = '<strong style="color:#27ae60;">Found</strong> — ' + (d.co_name || '');
+                    if (d.co_status) txt += ' <em>(' + d.co_status + ')</em>';
+                    if (d.nzbn) txt += ' &nbsp; NZBN: ' + d.nzbn;
+                    if (d.co_incorporated) txt += '<br><small style="color:#555;">Incorporated: ' + d.co_incorporated + '</small>';
+                    if (d.director_name) txt += '<br><small style="color:#555;">Director: ' + d.director_name + '</small>';
+                    result.innerHTML = txt;
+                    btnSaved(btn);
+                } else {
+                    result.innerHTML = '<em style="color:#aaa">Not found on Companies Register</em>';
+                    btnSaved(btn, '#95a5a6', 'Not found');
+                }
+            })
+            .catch(function() {
+                result.innerHTML = '<em style="color:#e74c3c">Request failed</em>';
+                btn.textContent = 'Re-check'; btn.disabled = false;
+            });
+        }
+
+        function recheckGoogleProfile(id) {
+            var btn = document.getElementById('google-btn-' + id);
+            var result = document.getElementById('google-recheck-result-' + id);
+            var termInput = document.getElementById('google-term-' + id);
+            var name = termInput ? termInput.value.trim() : '';
+            var region = btn.dataset.region || '';
+            if (!name) return;
+            btn.disabled = true;
+            btn.textContent = 'Checking...';
+            fetch('/recheck-google-profile', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id, name: name, region: region})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.error) {
+                    result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
+                    btn.textContent = 'Re-check'; btn.disabled = false;
+                } else if (d.found) {
+                    var txt = '<strong style="color:#27ae60;">Found</strong>';
+                    if (d.google_rating) txt += ' &nbsp; &#9733; ' + d.google_rating + (d.google_reviews ? ' (' + d.google_reviews + ' reviews)' : '');
+                    if (d.google_phone) txt += '<br><small style="color:#555;">&#128222; ' + d.google_phone + '</small>';
+                    if (d.google_address) txt += '<br><small style="color:#555;">&#128205; ' + d.google_address + '</small>';
+                    if (d.google_email) txt += '<br><small style="color:#555;">&#9993; ' + d.google_email + '</small>';
+                    result.innerHTML = txt;
+                    btnSaved(btn);
+                } else {
+                    result.innerHTML = '<em style="color:#aaa">No Google Business Profile found</em>';
+                    btnSaved(btn, '#95a5a6', 'Not found');
+                }
+            })
+            .catch(function() {
+                result.innerHTML = '<em style="color:#e74c3c">Request failed</em>';
+                btn.textContent = 'Re-check'; btn.disabled = false;
+            });
+        }
+
+        function fullRecheck(id) {
+            var btn = document.getElementById('full-recheck-btn-' + id);
+            var result = document.getElementById('full-recheck-result-' + id);
+            var name = btn.dataset.name || '';
+            if (!name) return;
+            btn.disabled = true;
+            btn.textContent = 'Running all checks...';
+            result.innerHTML = '<em style="color:#888;">Running Companies Office → Facebook → Google → PSPLA → NZSA... this may take a minute.</em>';
+            fetch('/full-recheck', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id, name: name})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.error) {
+                    result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
+                    btn.textContent = 'Re-check all'; btn.disabled = false;
+                } else {
+                    var s = d.summary || {};
+                    var txt = '<strong style="color:#27ae60;">Complete</strong>';
+                    if (s.pspla_licensed) {
+                        txt += ' &nbsp; &#10003; PSPLA: <strong>' + (s.pspla_name || 'Licensed') + '</strong>';
+                    } else {
+                        txt += ' &nbsp; &#10007; PSPLA: <em style="color:#e74c3c">Not licensed</em>';
+                    }
+                    if (s.co) txt += '<br><small style="color:#555;">CO: ' + s.co + '</small>';
+                    if (s.google_rating) txt += '<br><small style="color:#555;">Google: &#9733; ' + s.google_rating + '</small>';
+                    if (s.nzsa_member) txt += '<br><small style="color:#555;">NZSA: Member</small>';
+                    result.innerHTML = txt;
+                    btnSaved(btn);
+                }
+            })
+            .catch(function() {
+                result.innerHTML = '<em style="color:#e74c3c">Request failed or timed out</em>';
+                btn.textContent = 'Re-check all'; btn.disabled = false;
             });
         }
 
@@ -1980,6 +2244,120 @@ def audit_log_page():
     return render_template_string(AUDIT_LOG_TEMPLATE)
 
 
+@app.route("/llm-log")
+def llm_log_page():
+    log_path = os.path.join(BASE_DIR, "llm_debug.log")
+    try:
+        content = open(log_path, encoding="utf-8").read() if os.path.exists(log_path) else ""
+    except Exception as e:
+        content = f"Error reading log: {e}"
+    return render_template_string("""<!DOCTYPE html>
+<html>
+<head>
+<title>LLM Debug Log</title>
+<style>
+  body { font-family: monospace; background:#1a1a2e; color:#e0e0e0; margin:0; padding:0; }
+  .toolbar { background:#111; padding:12px 20px; display:flex; align-items:center; gap:16px; position:sticky; top:0; z-index:10; border-bottom:1px solid #333; }
+  .toolbar a { color:#aaa; text-decoration:none; font-size:13px; }
+  .toolbar a:hover { color:white; }
+  h1 { color:#27ae60; margin:0; font-size:18px; }
+  .controls { display:flex; gap:10px; align-items:center; margin-left:auto; }
+  input[type=text] { background:#222; border:1px solid #444; color:white; padding:5px 10px; border-radius:4px; font-size:13px; width:250px; }
+  button { background:#27ae60; color:white; border:none; padding:5px 12px; border-radius:4px; cursor:pointer; font-size:13px; }
+  button.danger { background:#c0392b; }
+  .log { padding:20px; white-space:pre-wrap; font-size:12px; line-height:1.6; }
+  .entry { border:1px solid #333; border-radius:6px; margin-bottom:16px; overflow:hidden; }
+  .entry-header { background:#222; padding:8px 14px; color:#27ae60; font-weight:bold; font-size:12px; }
+  .entry-prompt { background:#1a1a1a; padding:12px 14px; color:#ccc; border-top:1px solid #2a2a2a; }
+  .entry-response { background:#0d1a0d; padding:12px 14px; color:#7fff7f; border-top:1px solid #2a2a2a; }
+  .label { color:#888; font-size:11px; margin-bottom:4px; }
+  .empty { color:#666; text-align:center; padding:60px; font-size:14px; }
+  mark { background:#5a4000; color:#ffe; border-radius:2px; }
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <h1>&#x1F916; LLM Debug Log</h1>
+  <div class="controls">
+    <input type="text" id="search" placeholder="Filter entries..." oninput="filterEntries()">
+    <button onclick="scrollToBottom()">&#x2193; Latest</button>
+    <form method="POST" action="/llm-log/clear" style="margin:0;" onsubmit="return confirm('Clear the log file?')">
+      <button class="danger" type="submit">&#x1F5D1; Clear Log</button>
+    </form>
+    <a href="/">&#x2190; Dashboard</a>
+  </div>
+</div>
+<div class="log" id="log">
+{% if entries %}
+  {% for e in entries %}
+  <div class="entry" data-text="{{ e.header }} {{ e.prompt }} {{ e.response }}">
+    <div class="entry-header">{{ e.header }}</div>
+    <div class="entry-prompt"><div class="label">PROMPT</div>{{ e.prompt }}</div>
+    <div class="entry-response"><div class="label">RESPONSE</div>{{ e.response }}</div>
+  </div>
+  {% endfor %}
+{% else %}
+  <div class="empty">No LLM calls logged yet. Run a search or use a Re-check button to generate entries.</div>
+{% endif %}
+</div>
+<script>
+function filterEntries() {
+  var q = document.getElementById('search').value.toLowerCase();
+  document.querySelectorAll('.entry').forEach(function(el) {
+    el.style.display = !q || el.dataset.text.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+function scrollToBottom() {
+  window.scrollTo(0, document.body.scrollHeight);
+}
+// Auto-scroll to bottom on load (latest entries)
+window.onload = function() { scrollToBottom(); };
+</script>
+</body>
+</html>""", entries=_parse_llm_log(content))
+
+
+def _parse_llm_log(content):
+    """Parse llm_debug.log into a list of {header, prompt, response} dicts."""
+    entries = []
+    if not content.strip():
+        return entries
+    blocks = content.split("\n" + "="*80)
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+        lines = block.splitlines()
+        header = lines[0].strip() if lines else ""
+        prompt, response = "", ""
+        section = None
+        buf = []
+        for line in lines[1:]:
+            if "─" in line and "PROMPT" in line:
+                section = "prompt"; buf = []
+            elif "─" in line and "RESPONSE" in line:
+                if section == "prompt":
+                    prompt = "\n".join(buf).strip()
+                section = "response"; buf = []
+            else:
+                buf.append(line)
+        if section == "response":
+            response = "\n".join(buf).strip()
+        if header:
+            entries.append({"header": header, "prompt": prompt, "response": response})
+    return entries
+
+
+@app.route("/llm-log/clear", methods=["POST"])
+def llm_log_clear():
+    log_path = os.path.join(BASE_DIR, "llm_debug.log")
+    try:
+        open(log_path, "w").close()
+    except Exception:
+        pass
+    return redirect("/llm-log")
+
+
 AUDIT_LOG_TEMPLATE = """<!DOCTYPE html>
 <html>
 <head>
@@ -2117,7 +2495,7 @@ load();
 PROJECT: Automated NZ security company licence checker. Finds NZ security companies
 via Google/Facebook/NZSA/LinkedIn, checks each against PSPLA licence register,
 stores results in Supabase. Flask dashboard for browsing, managing, correcting results.
-Owner: Wade. Location: C:\Users\WadeAdmin\pspla-checker\
+Owner: Wade. Location: C:\\Users\\WadeAdmin\\pspla-checker\\
 
 READ FIRST: CLAUDE.md in the project root — full pipeline, AI functions, DB schema,
 design patterns, common tasks.
@@ -2295,29 +2673,285 @@ def stop_search():
 
 @app.route("/find-facebook", methods=["POST"])
 def find_facebook_for_company():
-    """Look up a Facebook page for a single company by ID and save it."""
+    """Look up a Facebook page URL, scrape its profile data, and save all fb_* fields."""
     from flask import jsonify
     company_id = request.json.get("id")
     company_name = request.json.get("name", "")
     if not company_name:
         return jsonify({"error": "No company name provided"}), 400
     try:
-        from searcher import find_facebook_url
+        from searcher import find_facebook_url, scrape_facebook_page, write_audit
         fb_url = find_facebook_url(company_name)
         if fb_url:
-            headers = {
-                "apikey": SUPABASE_KEY,
-                "Authorization": f"Bearer {SUPABASE_KEY}",
-                "Content-Type": "application/json",
-                "Prefer": "return=minimal",
+            fb_data = scrape_facebook_page(fb_url, company_name=company_name)
+            patch = {
+                "facebook_url": fb_url,
+                "fb_followers": fb_data.get("followers"),
+                "fb_phone":     fb_data.get("phone"),
+                "fb_email":     fb_data.get("email"),
+                "fb_address":   fb_data.get("address"),
+                "fb_description": fb_data.get("description"),
+                "fb_category":  fb_data.get("category"),
+                "fb_rating":    fb_data.get("rating"),
             }
-            requests.patch(
-                f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
-                headers=headers,
-                json={"facebook_url": fb_url},
-            )
-            return jsonify({"found": True, "url": fb_url})
+            patch = {k: v for k, v in patch.items() if v is not None}
+            patch["facebook_url"] = fb_url  # always save URL even if no extra data
+            headers = {
+                "apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
+                "Content-Type": "application/json", "Prefer": "return=minimal",
+            }
+            requests.patch(f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
+                           headers=headers, json=patch)
+            write_audit("updated", company_id, company_name,
+                        changes=f"Facebook recheck: url={fb_url} followers={fb_data.get('followers')}",
+                        triggered_by="manual (dashboard)")
+            return jsonify({"found": True, "url": fb_url, **fb_data})
         return jsonify({"found": False})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/recheck-companies-office", methods=["POST"])
+def recheck_companies_office_for_company():
+    """Re-run Companies Office lookup for a single company and save the result."""
+    from flask import jsonify
+    company_id = request.json.get("id")
+    company_name = request.json.get("name", "")
+    if not company_name:
+        return jsonify({"error": "No company name provided"}), 400
+    try:
+        from searcher import check_companies_office, write_audit
+        result = check_companies_office(company_name)
+        patch = {
+            "companies_office_name":    result.get("name"),
+            "companies_office_address": result.get("address"),
+            "companies_office_number":  result.get("company_number"),
+            "nzbn":                     result.get("nzbn"),
+            "co_status":                result.get("status"),
+            "co_incorporated":          result.get("incorporated"),
+        }
+        directors = result.get("directors") or []
+        if directors:
+            patch["director_name"] = ", ".join(directors)
+        patch = {k: v for k, v in patch.items() if v is not None}
+        if patch:
+            headers = {
+                "apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
+                "Content-Type": "application/json", "Prefer": "return=minimal",
+            }
+            requests.patch(f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
+                           headers=headers, json=patch)
+        write_audit("updated", company_id, company_name,
+                    changes=f"CO recheck: name={result.get('name')} status={result.get('status')} nzbn={result.get('nzbn')}",
+                    triggered_by="manual (dashboard)")
+        return jsonify({
+            "found": bool(result.get("name")),
+            "co_name": result.get("name"),
+            "co_status": result.get("status"),
+            "nzbn": result.get("nzbn"),
+            "co_incorporated": result.get("incorporated"),
+            "director_name": ", ".join(result.get("directors") or []) or None,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/recheck-google-profile", methods=["POST"])
+def recheck_google_profile_for_company():
+    """Re-run Google Business Profile lookup for a single company and save the result."""
+    from flask import jsonify
+    company_id = request.json.get("id")
+    company_name = request.json.get("name", "")
+    company_region = request.json.get("region", "") or ""
+    if not company_name:
+        return jsonify({"error": "No company name provided"}), 400
+    try:
+        from searcher import get_google_business_profile, write_audit
+        result = get_google_business_profile(company_name, company_region)
+        patch = {
+            "google_rating":  result.get("rating"),
+            "google_reviews": result.get("reviews"),
+            "google_phone":   result.get("phone"),
+            "google_address": result.get("address"),
+            "google_email":   result.get("email"),
+        }
+        patch = {k: v for k, v in patch.items() if v is not None}
+        if patch:
+            headers = {
+                "apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
+                "Content-Type": "application/json", "Prefer": "return=minimal",
+            }
+            requests.patch(f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
+                           headers=headers, json=patch)
+        write_audit("updated", company_id, company_name,
+                    changes=f"Google profile recheck: rating={result.get('rating')} reviews={result.get('reviews')} email={result.get('email')}",
+                    triggered_by="manual (dashboard)")
+        return jsonify({
+            "found": bool(result.get("rating") or result.get("phone") or result.get("address")),
+            "google_rating": result.get("rating"),
+            "google_reviews": result.get("reviews"),
+            "google_phone": result.get("phone"),
+            "google_address": result.get("address"),
+            "google_email": result.get("email"),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/full-recheck", methods=["POST"])
+def full_recheck_for_company():
+    """Re-run all checks (CO, Facebook, Google, PSPLA, NZSA) for a single company and save everything."""
+    from flask import jsonify
+    company_id = request.json.get("id")
+    company_name = request.json.get("name", "")
+    website_url = request.json.get("website", "")
+    company_region = request.json.get("region", "") or ""
+    if not company_name:
+        return jsonify({"error": "No company name provided"}), 400
+    try:
+        from searcher import (
+            check_companies_office, check_pspla, check_pspla_individual,
+            check_nzsa, find_facebook_url, scrape_facebook_page,
+            find_linkedin_url, scrape_linkedin_page,
+            get_google_business_profile, write_audit,
+            scrape_website, gather_service_text, detect_services,
+        )
+        summary = {}
+        patch = {}
+        headers = {
+            "apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json", "Prefer": "return=minimal",
+        }
+
+        # 1. Companies Office
+        co_result = check_companies_office(company_name)
+        if co_result.get("name"):
+            patch.update({
+                "companies_office_name":    co_result.get("name"),
+                "companies_office_address": co_result.get("address"),
+                "companies_office_number":  co_result.get("company_number"),
+                "nzbn":                     co_result.get("nzbn"),
+                "co_status":                co_result.get("status"),
+                "co_incorporated":          co_result.get("incorporated"),
+            })
+            if co_result.get("directors"):
+                patch["director_name"] = ", ".join(co_result["directors"])
+            summary["co"] = co_result.get("name")
+
+        # 2. Facebook — find URL if missing, then scrape profile
+        row_resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}&select=facebook_url,linkedin_url,nzsa_member_name,nzsa_grade",
+            headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}, timeout=10
+        )
+        row = row_resp.json()[0] if row_resp.ok and row_resp.json() else {}
+        fb_url = row.get("facebook_url") or find_facebook_url(company_name)
+        if fb_url:
+            patch["facebook_url"] = fb_url
+            fb_data = scrape_facebook_page(fb_url, company_name=company_name)
+            for field in ("followers", "phone", "email", "address", "description", "category", "rating"):
+                if fb_data.get(field):
+                    patch[f"fb_{field}"] = fb_data[field]
+            summary["fb"] = fb_url
+
+        # 2b. LinkedIn — find URL if missing, scrape followers/description
+        li_url = row.get("linkedin_url") or find_linkedin_url(company_name)
+        if li_url:
+            patch["linkedin_url"] = li_url
+            li_data = scrape_linkedin_page(li_url, company_name=company_name)
+            for field in ("followers", "description", "industry", "location", "website", "size"):
+                if li_data.get(field):
+                    patch[f"linkedin_{field}"] = li_data[field]
+            summary["li_followers"] = li_data.get("followers")
+
+        # 3. Google Business Profile
+        gp = get_google_business_profile(company_name, company_region)
+        for field in ("rating", "reviews", "phone", "address", "email"):
+            if gp.get(field):
+                patch[f"google_{field}"] = gp[field]
+        if gp.get("rating"):
+            summary["google_rating"] = gp["rating"]
+
+        # 4. PSPLA — build extra_context from everything gathered so far
+        extra_context = {
+            "facebook_snippet": fb_data.get("description", "") if fb_url else "",
+            "linkedin_url": row.get("linkedin_url") or "",
+            "nzsa_data": {"member_name": row.get("nzsa_member_name"), "grade": row.get("nzsa_grade")}
+                         if row.get("nzsa_member_name") else None,
+        }
+        directors = [d.strip() for d in (patch.get("director_name") or "").split(",") if d.strip()]
+        pspla_result = check_pspla(company_name, website_region=company_region,
+                                   co_result=co_result, directors=directors,
+                                   extra_context=extra_context)
+        if not pspla_result.get("licensed") and co_result.get("name") and co_result["name"] != company_name:
+            co_try = check_pspla(co_result["name"], website_region=company_region,
+                                 co_result=co_result, directors=directors,
+                                 extra_context=extra_context)
+            if co_try.get("matched_name"):
+                pspla_result = co_try
+        licensed = pspla_result.get("licensed")
+        individual_license = None
+        if not licensed:
+            for d in directors[:3]:
+                ind = check_pspla_individual(d)
+                if ind.get("found"):
+                    individual_license = ind["name"]
+                    licensed = True
+                    break
+        patch.update({
+            "pspla_licensed":        licensed,
+            "pspla_name":            pspla_result.get("matched_name"),
+            "pspla_license_number":  pspla_result.get("pspla_license_number"),
+            "pspla_license_status":  pspla_result.get("pspla_license_status"),
+            "pspla_license_expiry":  pspla_result.get("pspla_license_expiry"),
+            "pspla_license_classes": pspla_result.get("pspla_license_classes"),
+            "pspla_license_start":   pspla_result.get("pspla_license_start"),
+            "pspla_permit_type":     pspla_result.get("pspla_permit_type"),
+            "license_type":          pspla_result.get("license_type"),
+            "match_method":          pspla_result.get("match_method"),
+            "individual_license":    individual_license,
+        })
+        summary["pspla_licensed"] = licensed
+        summary["pspla_name"] = pspla_result.get("matched_name")
+
+        # 5. NZSA
+        nzsa_result = check_nzsa(company_name, website=website_url)
+        patch.update({
+            "nzsa_member":       "true" if nzsa_result["member"] else "false",
+            "nzsa_member_name":  nzsa_result["member_name"],
+            "nzsa_accredited":   "true" if nzsa_result["accredited"] else "false",
+            "nzsa_grade":        nzsa_result["grade"],
+            "nzsa_contact_name": nzsa_result.get("contact_name") or None,
+            "nzsa_phone":        nzsa_result.get("phone") or None,
+            "nzsa_email":        nzsa_result.get("email") or None,
+            "nzsa_overview":     nzsa_result.get("overview") or None,
+        })
+        summary["nzsa_member"] = nzsa_result["member"]
+
+        # 6. Service detection — scrape website and detect alarm/CCTV/monitoring mentions
+        if website_url:
+            page_text, _, _, _ = scrape_website(website_url)
+            service_text = gather_service_text(website_url, page_text)
+            services = detect_services(service_text)
+            patch.update({
+                "has_alarm_systems":    services.get("has_alarm_systems"),
+                "has_cctv_cameras":     services.get("has_cctv_cameras"),
+                "has_alarm_monitoring": services.get("has_alarm_monitoring"),
+            })
+            summary["services"] = [k for k, v in services.items() if v]
+
+        # Save everything in one patch
+        from datetime import datetime, timezone
+        patch["last_checked"] = datetime.now(timezone.utc).isoformat()
+        clean_patch = {k: v for k, v in patch.items() if v is not None}
+        clean_patch["pspla_licensed"] = licensed  # always save even if False
+        clean_patch["nzsa_member"] = "true" if nzsa_result["member"] else "false"
+        requests.patch(f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
+                       headers=headers, json=clean_patch)
+
+        write_audit("updated", company_id, company_name,
+                    changes=f"Full recheck: pspla={licensed} co={co_result.get('name')} nzsa={nzsa_result['member']} google_rating={gp.get('rating')}",
+                    triggered_by="manual (dashboard)")
+        return jsonify({"ok": True, "summary": summary})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -2365,6 +2999,37 @@ def recheck_nzsa_for_company():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/recheck-services", methods=["POST"])
+def recheck_services_for_company():
+    """Re-scrape the company website and detect alarm/CCTV/monitoring services."""
+    from flask import jsonify
+    company_id = request.json.get("id")
+    website_url = request.json.get("website", "")
+    if not company_id or not website_url:
+        return jsonify({"error": "Missing id or website"}), 400
+    try:
+        from searcher import scrape_website, gather_service_text, detect_services, write_audit
+        page_text, _, _, _ = scrape_website(website_url)
+        service_text = gather_service_text(website_url, page_text)
+        services = detect_services(service_text)
+        headers = {
+            "apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json", "Prefer": "return=minimal",
+        }
+        requests.patch(
+            f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
+            headers=headers,
+            json={
+                "has_alarm_systems":    services.get("has_alarm_systems"),
+                "has_cctv_cameras":     services.get("has_cctv_cameras"),
+                "has_alarm_monitoring": services.get("has_alarm_monitoring"),
+            },
+        )
+        return jsonify({"ok": True, **services})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/find-linkedin", methods=["POST"])
 def find_linkedin_for_company():
     """Look up a LinkedIn company page for a single company by ID and save it."""
@@ -2374,9 +3039,14 @@ def find_linkedin_for_company():
     if not company_name:
         return jsonify({"error": "No company name provided"}), 400
     try:
-        from searcher import find_linkedin_url, write_audit
+        from searcher import find_linkedin_url, scrape_linkedin_page, write_audit
         li_url = find_linkedin_url(company_name)
         if li_url:
+            li_data = scrape_linkedin_page(li_url, company_name=company_name)
+            patch = {"linkedin_url": li_url}
+            for field in ("followers", "description", "industry", "location", "website", "size"):
+                if li_data.get(field):
+                    patch[f"linkedin_{field}"] = li_data[field]
             headers = {
                 "apikey": SUPABASE_KEY,
                 "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -2386,12 +3056,18 @@ def find_linkedin_for_company():
             requests.patch(
                 f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
                 headers=headers,
-                json={"linkedin_url": li_url},
+                json=patch,
             )
             write_audit("updated", company_id, company_name,
-                        changes=f"LinkedIn found: {li_url}",
+                        changes=f"LinkedIn found: {li_url} followers={li_data.get('followers')} industry={li_data.get('industry')}",
                         triggered_by="manual (dashboard)")
-            return jsonify({"found": True, "url": li_url})
+            return jsonify({"found": True, "url": li_url,
+                            "followers": li_data.get("followers"),
+                            "description": li_data.get("description"),
+                            "industry": li_data.get("industry"),
+                            "location": li_data.get("location"),
+                            "website": li_data.get("website"),
+                            "size": li_data.get("size")})
         return jsonify({"found": False})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -2808,6 +3484,7 @@ if __name__ == "__main__":
     # Directory import (NZSA + LinkedIn): 15th of each month at 4am NZ
     scheduler.add_job(_scheduled_directories, CronTrigger(day=15, hour=4, minute=0),
                       id="directories", name="Directory import (NZSA + LinkedIn)")
+
     scheduler.start()
     print("Dashboard running at http://localhost:5000")
     print("Scheduler started — scheduled searches run automatically when enabled.")

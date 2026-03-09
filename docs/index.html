@@ -1,13 +1,4 @@
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-PAGES_PASSWORD = os.getenv("PAGES_PASSWORD", "")
-
-STATIC_TEMPLATE = """<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -245,9 +236,9 @@ STATIC_TEMPLATE = """<!DOCTYPE html>
 
 <script>
 // ── Config ────────────────────────────────────────────────────────────────────
-const SUPABASE_URL = '{supabase_url}';
-const SUPABASE_KEY = '{supabase_key}';
-const CORRECT_PASSWORD = '{password}';
+const SUPABASE_URL = 'https://qcxdqycxnfcyfraznmrx.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_cEtO1E_vKwHAN73XA_J75Q_h37hQ-OP';
+const CORRECT_PASSWORD = 'criminals!';
 
 // ── Password ──────────────────────────────────────────────────────────────────
 const overlay = document.getElementById('password-overlay');
@@ -381,7 +372,7 @@ function renderTable(companies) {{
         // Licence number
         var licNum = esc(c.pspla_license_number || '');
         var licCell = licNum
-            ? '<a href="#" onclick="copyAndOpen(event,\'' + licNum + '\')" title="Copy &amp; open PSPLA register">' + licNum + '</a>'
+            ? '<a href="#" onclick="copyAndOpen(event,'' + licNum + '')" title="Copy &amp; open PSPLA register">' + licNum + '</a>'
             : '-';
 
         // Service data attributes
@@ -404,7 +395,7 @@ function renderTable(companies) {{
         var liLink = c.linkedin_url ? '<a href="' + esc(c.linkedin_url) + '" target="_blank">' + esc(c.linkedin_url) + '</a>' : '-';
 
         var gRating = c.google_rating ? '&#9733; ' + esc(String(c.google_rating)) : '-';
-        var gRev = c.google_reviews && String(c.google_reviews).match(/^\\d+$/) ? ' (' + c.google_reviews + ' reviews)' : '';
+        var gRev = c.google_reviews && String(c.google_reviews).match(/^\d+$/) ? ' (' + c.google_reviews + ' reviews)' : '';
 
         var detail = reasonBlock +
             '<div class="card-row card-row-2">' +
@@ -527,20 +518,4 @@ function copyAndOpen(e, licNum) {{
 }}
 </script>
 </body>
-</html>"""
-
-
-def generate():
-    print("Generating public page (live Supabase JS fetch)...")
-    html = STATIC_TEMPLATE
-    html = html.replace("{supabase_url}", SUPABASE_URL or "")
-    html = html.replace("{supabase_key}", SUPABASE_KEY or "")
-    html = html.replace("{password}", PAGES_PASSWORD)
-    os.makedirs("docs", exist_ok=True)
-    with open("docs/index.html", "w", encoding="utf-8") as f:
-        f.write(html)
-    print("Generated docs/index.html — data loads live from Supabase in the browser.")
-
-
-if __name__ == "__main__":
-    generate()
+</html>
