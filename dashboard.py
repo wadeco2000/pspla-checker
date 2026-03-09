@@ -3653,6 +3653,7 @@ def _launch(script, args=None, triggered_by="manual"):
     log = open(LOG_FILE, "w", encoding="utf-8", buffering=1)
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     _search_proc = subprocess.Popen(
         cmd, cwd=BASE_DIR,
         stdout=log, stderr=log, env=env,
