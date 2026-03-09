@@ -827,11 +827,58 @@ HTML_TEMPLATE = """
                             </button>
                         </div>
                         <div class="detail-item" style="grid-column: 1 / -1; border-top: 1px solid #ddd; padding-top: 10px; margin-top: 4px;">
-                            <button data-cid="{{ c.id }}" data-cname="{{ (c.company_name or '') | e }}"
-                                    onclick="deleteCompany(this.dataset.cid, this.dataset.cname)"
-                                    style="padding:3px 12px; font-size:12px; background:#c0392b; color:white; border:none; border-radius:3px; cursor:pointer;">
-                                ✕ Delete this record
-                            </button>
+                            <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
+                                <button onclick="toggleEditForm({{ c.id }})"
+                                        style="padding:3px 12px; font-size:12px; background:#8e44ad; color:white; border:none; border-radius:3px; cursor:pointer;">
+                                    ✎ Edit record
+                                </button>
+                                <button onclick="toggleCorrectionForm({{ c.id }})"
+                                        style="padding:3px 12px; font-size:12px; background:#16a085; color:white; border:none; border-radius:3px; cursor:pointer;">
+                                    📝 Corrections / notes
+                                </button>
+                                <button data-cid="{{ c.id }}" data-cname="{{ (c.company_name or '') | e }}"
+                                        onclick="deleteCompany(this.dataset.cid, this.dataset.cname)"
+                                        style="padding:3px 12px; font-size:12px; background:#c0392b; color:white; border:none; border-radius:3px; cursor:pointer;">
+                                    ✕ Delete this record
+                                </button>
+                            </div>
+
+                            <div id="edit-form-{{ c.id }}" style="display:none; background:#f9f0ff; border:1px solid #c39bd3; border-radius:5px; padding:10px; margin-bottom:8px;">
+                                <strong style="font-size:12px; color:#6c3483;">Edit Record Fields</strong>
+                                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:7px;">
+                                    <label style="font-size:11px; color:#555;">Company Name<br>
+                                        <input id="edit-name-{{ c.id }}" value="{{ (c.company_name or '') | e }}" style="width:100%; padding:3px 5px; font-size:12px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
+                                    </label>
+                                    <label style="font-size:11px; color:#555;">Website<br>
+                                        <input id="edit-website-{{ c.id }}" value="{{ (c.website or '') | e }}" style="width:100%; padding:3px 5px; font-size:12px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
+                                    </label>
+                                    <label style="font-size:11px; color:#555;">Email<br>
+                                        <input id="edit-email-{{ c.id }}" value="{{ (c.email or '') | e }}" style="width:100%; padding:3px 5px; font-size:12px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
+                                    </label>
+                                    <label style="font-size:11px; color:#555;">Phone<br>
+                                        <input id="edit-phone-{{ c.id }}" value="{{ (c.phone or '') | e }}" style="width:100%; padding:3px 5px; font-size:12px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
+                                    </label>
+                                    <label style="font-size:11px; color:#555;">Region<br>
+                                        <input id="edit-region-{{ c.id }}" value="{{ (c.region or '') | e }}" style="width:100%; padding:3px 5px; font-size:12px; border:1px solid #ccc; border-radius:3px; box-sizing:border-box;">
+                                    </label>
+                                </div>
+                                <div style="margin-top:8px; display:flex; align-items:center; gap:8px;">
+                                    <button onclick="saveEdit({{ c.id }})" style="padding:3px 12px; font-size:12px; background:#8e44ad; color:white; border:none; border-radius:3px; cursor:pointer;">Save changes</button>
+                                    <button onclick="document.getElementById('edit-form-{{ c.id }}').style.display='none'" style="padding:3px 10px; font-size:12px; background:#95a5a6; color:white; border:none; border-radius:3px; cursor:pointer;">Cancel</button>
+                                    <span id="edit-status-{{ c.id }}" style="font-size:11px;"></span>
+                                </div>
+                            </div>
+
+                            <div id="correction-form-{{ c.id }}" style="display:none; background:#eafaf1; border:1px solid #a9dfbf; border-radius:5px; padding:10px;">
+                                <strong style="font-size:12px; color:#1e8449;">Corrections &amp; notes for improving the system</strong>
+                                <p style="font-size:11px; color:#555; margin:4px 0 6px;">Describe what the system got wrong — wrong website, wrong email, wrong PSPLA match etc. This is saved to a file I can read next session to improve the logic.</p>
+                                <textarea id="correction-text-{{ c.id }}" style="width:100%; height:70px; font-size:12px; padding:5px; border:1px solid #a9dfbf; border-radius:3px; box-sizing:border-box; resize:vertical;" placeholder="e.g. Wrong website — picked up a council PDF instead of the real site sis-ltd.co.nz. Correct email is service@sis-ltd.co.nz"></textarea>
+                                <div style="margin-top:6px; display:flex; align-items:center; gap:8px;">
+                                    <button onclick="saveCorrection({{ c.id }}, '{{ (c.company_name or '') | e }}')" style="padding:3px 12px; font-size:12px; background:#16a085; color:white; border:none; border-radius:3px; cursor:pointer;">Save note</button>
+                                    <button onclick="document.getElementById('correction-form-{{ c.id }}').style.display='none'" style="padding:3px 10px; font-size:12px; background:#95a5a6; color:white; border:none; border-radius:3px; cursor:pointer;">Cancel</button>
+                                    <span id="correction-status-{{ c.id }}" style="font-size:11px;"></span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </td>
@@ -938,6 +985,63 @@ HTML_TEMPLATE = """
                 btn.textContent = 'Re-check';
                 btn.disabled = false;
             });
+        }
+
+        function toggleEditForm(id) {
+            var f = document.getElementById('edit-form-' + id);
+            f.style.display = f.style.display === 'none' ? 'block' : 'none';
+        }
+        function toggleCorrectionForm(id) {
+            var f = document.getElementById('correction-form-' + id);
+            f.style.display = f.style.display === 'none' ? 'block' : 'none';
+        }
+        function saveEdit(id) {
+            var status = document.getElementById('edit-status-' + id);
+            var data = {
+                id: id,
+                company_name: document.getElementById('edit-name-' + id).value.trim(),
+                website: document.getElementById('edit-website-' + id).value.trim(),
+                email: document.getElementById('edit-email-' + id).value.trim(),
+                phone: document.getElementById('edit-phone-' + id).value.trim(),
+                region: document.getElementById('edit-region-' + id).value.trim()
+            };
+            status.style.color = '#888';
+            status.textContent = 'Saving...';
+            fetch('/update-company', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            }).then(function(r){ return r.json(); }).then(function(d) {
+                if (d.ok) {
+                    status.style.color = '#27ae60';
+                    status.textContent = 'Saved!';
+                    setTimeout(function(){ status.textContent = ''; }, 3000);
+                } else {
+                    status.style.color = '#e74c3c';
+                    status.textContent = d.error || 'Error saving.';
+                }
+            }).catch(function(){ status.style.color='#e74c3c'; status.textContent='Request failed.'; });
+        }
+        function saveCorrection(id, companyName) {
+            var status = document.getElementById('correction-status-' + id);
+            var text = document.getElementById('correction-text-' + id).value.trim();
+            if (!text) { status.style.color='#e74c3c'; status.textContent='Please enter a note first.'; return; }
+            status.style.color = '#888';
+            status.textContent = 'Saving...';
+            fetch('/save-correction', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id, company_name: companyName, correction: text})
+            }).then(function(r){ return r.json(); }).then(function(d) {
+                if (d.ok) {
+                    status.style.color = '#27ae60';
+                    status.textContent = 'Saved to corrections log!';
+                    setTimeout(function(){ status.textContent = ''; }, 4000);
+                } else {
+                    status.style.color = '#e74c3c';
+                    status.textContent = d.error || 'Error saving.';
+                }
+            }).catch(function(){ status.style.color='#e74c3c'; status.textContent='Request failed.'; });
         }
 
         function deleteCompany(id, name) {
@@ -1805,6 +1909,54 @@ function deleteDup(id, name) {
 </body>
 </html>
 """
+
+
+@app.route("/update-company", methods=["POST"])
+def update_company():
+    """Update editable fields on a company record."""
+    company_id = request.json.get("id")
+    if not company_id:
+        return jsonify({"error": "No id provided"}), 400
+    allowed = {"company_name", "website", "email", "phone", "region"}
+    update = {k: v for k, v in request.json.items() if k in allowed and v is not None}
+    if not update:
+        return jsonify({"error": "No valid fields to update"}), 400
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    try:
+        requests.patch(
+            f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
+            headers=headers, json=update,
+        )
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+CORRECTIONS_FILE = os.path.join(BASE_DIR, "corrections.md")
+
+
+@app.route("/save-correction", methods=["POST"])
+def save_correction():
+    """Save a user correction note to the local corrections.md file."""
+    company_id = request.json.get("id")
+    company_name = request.json.get("company_name", "Unknown")
+    correction = request.json.get("correction", "").strip()
+    if not correction:
+        return jsonify({"error": "No correction text provided"}), 400
+    try:
+        from datetime import datetime as _dt
+        timestamp = _dt.now().strftime("%Y-%m-%d %H:%M")
+        entry = f"\n## {company_name} (ID: {company_id}) — {timestamp}\n{correction}\n"
+        with open(CORRECTIONS_FILE, "a", encoding="utf-8") as f:
+            f.write(entry)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/delete-company", methods=["POST"])
