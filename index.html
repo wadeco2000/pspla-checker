@@ -206,10 +206,16 @@
             <option value="unknown">Unknown</option>
         </select>
         <select id="serviceFilter" onchange="filterTable()">
-            <option value="">All Services</option>
+            <option value="">All Services (Website)</option>
             <option value="alarm_systems">Alarm Systems</option>
             <option value="cctv">CCTV / Cameras</option>
             <option value="monitoring">Alarm Monitoring</option>
+        </select>
+        <select id="fbServiceFilter" onchange="filterTable()">
+            <option value="">All Services (Facebook)</option>
+            <option value="fb_alarm_systems">Alarm Systems</option>
+            <option value="fb_cctv">CCTV / Cameras</option>
+            <option value="fb_monitoring">Alarm Monitoring</option>
         </select>
     </div>
 
@@ -243,113 +249,113 @@ const CORRECT_PASSWORD = 'criminals!';
 // ── Password ──────────────────────────────────────────────────────────────────
 const overlay = document.getElementById('password-overlay');
 
-function checkPassword() {{
+function checkPassword() {
     var input = document.getElementById('pw-input').value;
-    if (input === CORRECT_PASSWORD) {{
+    if (input === CORRECT_PASSWORD) {
         sessionStorage.setItem('pspla_auth', '1');
         overlay.style.display = 'none';
         loadData();
-    }} else {{
+    } else {
         document.getElementById('pw-error').style.display = 'block';
         document.getElementById('pw-input').value = '';
-    }}
-}}
+    }
+}
 
-if (CORRECT_PASSWORD && sessionStorage.getItem('pspla_auth') !== '1') {{
+if (CORRECT_PASSWORD && sessionStorage.getItem('pspla_auth') !== '1') {
     overlay.style.display = 'flex';
-    setTimeout(function() {{ document.getElementById('pw-input').focus(); }}, 100);
-}} else {{
+    setTimeout(function() { document.getElementById('pw-input').focus(); }, 100);
+} else {
     loadData();
-}}
+}
 
 // ── Countdown + auto-refresh ──────────────────────────────────────────────────
 var secondsLeft = 300;
-setInterval(function() {{
+setInterval(function() {
     secondsLeft--;
-    if (secondsLeft <= 0) {{ loadData(); secondsLeft = 300; return; }}
+    if (secondsLeft <= 0) { loadData(); secondsLeft = 300; return; }
     var m = Math.floor(secondsLeft / 60);
     var s = secondsLeft % 60;
     document.getElementById('countdown').textContent = m + ':' + (s < 10 ? '0' : '') + s;
-}}, 1000);
+}, 1000);
 
 // ── Fetch data from Supabase ──────────────────────────────────────────────────
-function loadData() {{
+function loadData() {
     secondsLeft = 300;
-    fetch(SUPABASE_URL + '/rest/v1/Companies?select=*&order=company_name.asc', {{
-        headers: {{ 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }}
-    }})
-    .then(function(r) {{ return r.json(); }})
-    .then(function(companies) {{
+    fetch(SUPABASE_URL + '/rest/v1/Companies?select=*&order=company_name.asc', {
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY }
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(companies) {
         renderTable(companies);
         renderStats(companies);
         renderRegions(companies);
         document.getElementById('last-updated').textContent = new Date().toLocaleTimeString('en-NZ');
-    }})
-    .catch(function(e) {{
+    })
+    .catch(function(e) {
         document.getElementById('tableBody').innerHTML =
             '<tr><td colspan="9" class="loading" style="color:#e74c3c;">Error loading data. Retrying in 5 minutes.</td></tr>';
-    }});
-}}
+    });
+}
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
-function renderStats(companies) {{
+function renderStats(companies) {
     var total = companies.length;
     var licensed = 0, expired = 0, unlicensed = 0, unknown = 0;
-    companies.forEach(function(c) {{
+    companies.forEach(function(c) {
         var lic = String(c.pspla_licensed || '').toLowerCase();
         var status = String(c.pspla_license_status || '').toLowerCase();
         if (lic === 'true') licensed++;
         else if (lic === 'false' && status === 'expired') expired++;
         else if (lic === 'false') unlicensed++;
         else unknown++;
-    }});
+    });
     document.getElementById('stat-total').textContent = total;
     document.getElementById('stat-licensed').textContent = licensed;
     document.getElementById('stat-unlicensed').textContent = unlicensed;
     document.getElementById('stat-expired').textContent = expired;
     document.getElementById('stat-unknown').textContent = unknown;
-}}
+}
 
 // ── Region filter options ─────────────────────────────────────────────────────
-function renderRegions(companies) {{
-    var regions = [...new Set(companies.map(function(c) {{ return c.region || ''; }}).filter(Boolean))].sort();
+function renderRegions(companies) {
+    var regions = [...new Set(companies.map(function(c) { return c.region || ''; }).filter(Boolean))].sort();
     var sel = document.getElementById('regionFilter');
     var current = sel.value;
     sel.innerHTML = '<option value="">All Regions</option>';
-    regions.forEach(function(r) {{
+    regions.forEach(function(r) {
         var opt = document.createElement('option');
         opt.value = r.toLowerCase(); opt.textContent = r;
         if (r.toLowerCase() === current) opt.selected = true;
         sel.appendChild(opt);
-    }});
-}}
+    });
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function esc(v) {{
+function esc(v) {
     if (!v) return '';
     return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}}
+}
 
-function statusInfo(c) {{
+function statusInfo(c) {
     var lic = String(c.pspla_licensed || '').toLowerCase();
     var status = String(c.pspla_license_status || '').toLowerCase();
     if (lic === 'true')
-        return {{ key: 'licensed',   badge: '<span class="badge badge-licensed"><i class="fa-solid fa-circle-check"></i> LICENSED</span>' }};
+        return { key: 'licensed',   badge: '<span class="badge badge-licensed"><i class="fa-solid fa-circle-check"></i> LICENSED</span>' };
     if (lic === 'false' && status === 'expired')
-        return {{ key: 'expired',    badge: '<span class="badge badge-expired"><i class="fa-solid fa-clock-rotate-left"></i> EXPIRED</span>' }};
+        return { key: 'expired',    badge: '<span class="badge badge-expired"><i class="fa-solid fa-clock-rotate-left"></i> EXPIRED</span>' };
     if (lic === 'false' && c.individual_license)
-        return {{ key: 'unlicensed', badge: '<span class="badge badge-expired"><i class="fa-solid fa-user"></i> INDIVIDUAL ONLY</span>' }};
+        return { key: 'unlicensed', badge: '<span class="badge badge-expired"><i class="fa-solid fa-user"></i> INDIVIDUAL ONLY</span>' };
     if (lic === 'false')
-        return {{ key: 'unlicensed', badge: '<span class="badge badge-unlicensed"><i class="fa-solid fa-circle-xmark"></i> NOT LICENSED</span>' }};
-    return   {{ key: 'unknown',    badge: '<span class="badge badge-unknown"><i class="fa-solid fa-circle-question"></i> UNKNOWN</span>' }};
-}}
+        return { key: 'unlicensed', badge: '<span class="badge badge-unlicensed"><i class="fa-solid fa-circle-xmark"></i> NOT LICENSED</span>' };
+    return   { key: 'unknown',    badge: '<span class="badge badge-unknown"><i class="fa-solid fa-circle-question"></i> UNKNOWN</span>' };
+}
 
-function svcYes(v) {{ return v === true || v === 'true'; }}
+function svcYes(v) { return v === true || v === 'true'; }
 
 // ── Render table ──────────────────────────────────────────────────────────────
-function renderTable(companies) {{
+function renderTable(companies) {
     var html = '';
-    companies.forEach(function(c, i) {{
+    companies.forEach(function(c, i) {
         var id = i + 1;
         var si = statusInfo(c);
 
@@ -376,15 +382,22 @@ function renderTable(companies) {{
             : '-';
 
         // Service data attributes
-        var alarmSys  = svcYes(c.has_alarm_systems)  ? 'yes' : 'no';
-        var cctv      = svcYes(c.has_cctv_cameras)   ? 'yes' : 'no';
-        var monitoring= svcYes(c.has_alarm_monitoring)? 'yes' : 'no';
+        var alarmSys   = svcYes(c.has_alarm_systems)   ? 'yes' : 'no';
+        var cctv       = svcYes(c.has_cctv_cameras)    ? 'yes' : 'no';
+        var monitoring = svcYes(c.has_alarm_monitoring) ? 'yes' : 'no';
+        var fbAlarmSys = svcYes(c.fb_alarm_systems)    ? 'yes' : 'no';
+        var fbCctv     = svcYes(c.fb_cctv_cameras)     ? 'yes' : 'no';
+        var fbMonitor  = svcYes(c.fb_alarm_monitoring) ? 'yes' : 'no';
 
         // Service tags for detail
         var svcTags = '';
-        if (svcYes(c.has_alarm_systems))   svcTags += '<span class="svc-tag" style="background:#1a6e3c;">Alarm Systems</span> ';
-        if (svcYes(c.has_cctv_cameras))    svcTags += '<span class="svc-tag" style="background:#1a4b8a;">CCTV / Cameras</span> ';
+        if (svcYes(c.has_alarm_systems))    svcTags += '<span class="svc-tag" style="background:#1a6e3c;">Alarm Systems</span> ';
+        if (svcYes(c.has_cctv_cameras))     svcTags += '<span class="svc-tag" style="background:#1a4b8a;">CCTV / Cameras</span> ';
         if (svcYes(c.has_alarm_monitoring)) svcTags += '<span class="svc-tag" style="background:#7a3a99;">Alarm Monitoring</span> ';
+        var fbSvcTags = '';
+        if (svcYes(c.fb_alarm_systems))    fbSvcTags += '<span class="svc-tag" style="background:#1a6e3c;">Alarm Systems</span> ';
+        if (svcYes(c.fb_cctv_cameras))     fbSvcTags += '<span class="svc-tag" style="background:#1a4b8a;">CCTV / Cameras</span> ';
+        if (svcYes(c.fb_alarm_monitoring)) fbSvcTags += '<span class="svc-tag" style="background:#7a3a99;">Alarm Monitoring</span> ';
 
         // Detail panel
         var reasonBlock = c.match_reason
@@ -446,7 +459,8 @@ function renderTable(companies) {{
                 '<span><strong>Found via:</strong> ' + esc(c.notes||'-') + '</span>' +
                 '<span><strong>Date added:</strong> ' + esc((c.date_added||'').slice(0,10)||'-') + '</span>' +
                 '<span><strong>Last checked:</strong> ' + esc((c.last_checked||'').slice(0,10)||'-') + '</span>' +
-                (svcTags ? '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><strong>Services:</strong> ' + svcTags + '</span>' : '') +
+                (svcTags ? '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><strong>Website Services:</strong> ' + svcTags + '</span>' : '') +
+                (fbSvcTags ? '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><strong>Facebook Services:</strong> ' + fbSvcTags + '</span>' : '') +
             '</div>';
 
         html +=
@@ -457,6 +471,9 @@ function renderTable(companies) {{
                 ' data-alarm-systems="' + alarmSys + '"' +
                 ' data-cctv="' + cctv + '"' +
                 ' data-monitoring="' + monitoring + '"' +
+                ' data-fb-alarm-systems="' + fbAlarmSys + '"' +
+                ' data-fb-cctv="' + fbCctv + '"' +
+                ' data-fb-monitoring="' + fbMonitor + '"' +
                 ' data-id="' + id + '">' +
                 '<td class="company-cell">' + nameCell + '</td>' +
                 '<td>' + esc(c.region||'-') + '</td>' +
@@ -471,51 +488,56 @@ function renderTable(companies) {{
             '<tr class="detail-row" id="detail-' + id + '">' +
                 '<td colspan="9">' + detail + '</td>' +
             '</tr>';
-    }});
+    });
     document.getElementById('tableBody').innerHTML = html || '<tr><td colspan="9" class="loading">No companies found.</td></tr>';
     filterTable();
-}}
+}
 
 // ── Filter ────────────────────────────────────────────────────────────────────
-function filterTable() {{
-    var search  = document.getElementById('searchBox').value.toLowerCase();
-    var region  = document.getElementById('regionFilter').value.toLowerCase();
-    var status  = document.getElementById('statusFilter').value;
-    var service = document.getElementById('serviceFilter').value;
-    document.querySelectorAll('.company-row').forEach(function(row) {{
+function filterTable() {
+    var search    = document.getElementById('searchBox').value.toLowerCase();
+    var region    = document.getElementById('regionFilter').value.toLowerCase();
+    var status    = document.getElementById('statusFilter').value;
+    var service   = document.getElementById('serviceFilter').value;
+    var fbService = document.getElementById('fbServiceFilter').value;
+    document.querySelectorAll('.company-row').forEach(function(row) {
         var svcMatch = true;
-        if (service === 'alarm_systems') svcMatch = row.dataset.alarmSystems === 'yes';
-        else if (service === 'cctv')     svcMatch = row.dataset.cctv === 'yes';
+        if (service === 'alarm_systems')  svcMatch = row.dataset.alarmSystems === 'yes';
+        else if (service === 'cctv')       svcMatch = row.dataset.cctv === 'yes';
         else if (service === 'monitoring') svcMatch = row.dataset.monitoring === 'yes';
+        var fbSvcMatch = true;
+        if (fbService === 'fb_alarm_systems')  fbSvcMatch = row.dataset.fbAlarmSystems === 'yes';
+        else if (fbService === 'fb_cctv')       fbSvcMatch = row.dataset.fbCctv === 'yes';
+        else if (fbService === 'fb_monitoring') fbSvcMatch = row.dataset.fbMonitoring === 'yes';
         var visible = (!search || row.dataset.name.includes(search))
                    && (!region || row.dataset.region.includes(region))
                    && (!status || row.dataset.status === status)
-                   && svcMatch;
+                   && svcMatch && fbSvcMatch;
         row.style.display = visible ? '' : 'none';
         var dr = document.getElementById('detail-' + row.dataset.id);
         if (dr && !visible) dr.classList.remove('open');
-    }});
-}}
+    });
+}
 
 // ── Toggle detail row ─────────────────────────────────────────────────────────
-function toggleDetail(id) {{
+function toggleDetail(id) {
     var row = document.getElementById('detail-' + id);
     var btn = event.target.closest('button');
-    if (row.classList.contains('open')) {{
+    if (row.classList.contains('open')) {
         row.classList.remove('open');
         btn.innerHTML = '<i class="fa-solid fa-chevron-down"></i> Details';
-    }} else {{
+    } else {
         row.classList.add('open');
         btn.innerHTML = '<i class="fa-solid fa-chevron-up"></i> Close';
-    }}
-}}
+    }
+}
 
 // ── Copy licence + open PSPLA ─────────────────────────────────────────────────
-function copyAndOpen(e, licNum) {{
+function copyAndOpen(e, licNum) {
     e.preventDefault();
-    navigator.clipboard.writeText(licNum).catch(function(){{}});
+    navigator.clipboard.writeText(licNum).catch(function(){});
     window.open('https://forms.justice.govt.nz/search/PSPLA/', '_blank');
-}}
+}
 </script>
 </body>
 </html>
