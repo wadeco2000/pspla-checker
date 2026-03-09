@@ -33,22 +33,43 @@ LOG_FILE = os.path.join(BASE_DIR, "search_log.txt")
 START_FILE = os.path.join(BASE_DIR, "search_start.json")
 
 NZ_REGIONS = [
+    # Major cities
     "Auckland", "Wellington", "Christchurch", "Hamilton", "Tauranga",
     "Dunedin", "Palmerston North", "Napier", "New Plymouth", "Whangarei",
     "Nelson", "Invercargill", "Gisborne", "Whanganui", "Rotorua",
     "Hastings", "Blenheim", "Timaru", "Pukekohe", "Taupo",
+    # Auckland suburbs / districts
+    "North Shore", "Henderson", "Manukau", "Papakura",
+    "Howick", "Onehunga", "Manurewa", "Botany",
+    "Pakuranga", "Waitakere", "Orewa", "Silverdale",
+    "Takapuna", "Albany", "Glenfield", "Kumeu",
+    # Northland
     "Kerikeri", "Kaitaia", "Dargaville",
+    # Wellington region
     "Lower Hutt", "Upper Hutt", "Porirua", "Paraparaumu",
+    # Waikato
     "Thames", "Te Awamutu", "Tokoroa",
+    # Bay of Plenty
     "Whakatane", "Katikati", "Te Puke",
+    # Tauranga suburbs
+    "Mount Maunganui", "Papamoa",
+    # Hawke's Bay
     "Waipukurau", "Wairoa",
+    # Taranaki
     "Hawera", "Stratford",
+    # Manawatu
     "Levin", "Feilding",
+    # Tasman/Nelson
     "Motueka", "Richmond",
+    # Marlborough
     "Picton",
+    # West Coast
     "Greymouth", "Westport",
-    "Rangiora", "Ashburton", "Rolleston",
+    # Canterbury / Christchurch suburbs
+    "Rangiora", "Ashburton", "Rolleston", "Hornby", "Papanui",
+    # Otago
     "Queenstown", "Wanaka", "Oamaru", "Alexandra",
+    # Southland
     "Gore",
 ]
 
