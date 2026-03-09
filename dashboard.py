@@ -915,6 +915,23 @@ HTML_TEMPLATE = """
                                 Search
                             </button>
                         </div>
+                        {% if c.fb_followers or c.fb_phone or c.fb_email or c.fb_address or c.fb_description or c.fb_category or c.fb_rating %}
+                        <div class="detail-item" style="grid-column: 1 / -1; border-top: 1px solid #e3eaf3; padding-top: 8px; margin-top: 2px;">
+                            <label style="color:#1877f2; font-size:11px; font-weight:bold; display:block; margin-bottom:6px;">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" width="8" height="12" fill="#1877f2" style="vertical-align:middle;margin-right:4px"><path d="M279.14 288l14.22-92.66h-88.91v-60.13c0-25.35 12.42-50.06 52.24-50.06h40.42V6.26S260.43 0 225.36 0c-73.22 0-121.08 44.38-121.08 124.72v70.62H22.89V288h81.39v224h100.17V288z"/></svg>
+                                Facebook Page Details
+                            </label>
+                            <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap:6px; font-size:12px;">
+                                {% if c.fb_followers %}<div><strong>Followers:</strong> {{ c.fb_followers }}</div>{% endif %}
+                                {% if c.fb_category %}<div><strong>Category:</strong> {{ c.fb_category }}</div>{% endif %}
+                                {% if c.fb_rating %}<div><strong>Rating:</strong> {{ c.fb_rating }}</div>{% endif %}
+                                {% if c.fb_phone %}<div><strong>Phone:</strong> {{ c.fb_phone }}</div>{% endif %}
+                                {% if c.fb_email %}<div><strong>Email:</strong> <a href="mailto:{{ c.fb_email }}">{{ c.fb_email }}</a></div>{% endif %}
+                                {% if c.fb_address %}<div><strong>Address:</strong> {{ c.fb_address }}</div>{% endif %}
+                                {% if c.fb_description %}<div style="grid-column: 1 / -1;"><strong>About:</strong> {{ c.fb_description }}</div>{% endif %}
+                            </div>
+                        </div>
+                        {% endif %}
                         <div class="detail-item" id="li-item-{{ c.id }}">
                             <label><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" width="10" height="12" fill="#0a66c2" style="vertical-align:middle;margin-right:3px"><path d="M100.28 448H7.4V148.9h92.88zM53.79 108.1C24.09 108.1 0 83.5 0 53.8a53.79 53.79 0 0 1 107.58 0c0 29.7-24.1 54.3-53.79 54.3zM447.9 448h-92.68V302.4c0-34.7-.7-79.2-48.29-79.2-48.29 0-55.69 37.7-55.69 76.7V448h-92.78V148.9h89.08v40.8h1.3c12.4-23.5 42.69-48.3 87.88-48.3 94 0 111.28 61.9 111.28 142.3V448z"/></svg> LinkedIn Page</label>
                             <span id="li-result-{{ c.id }}">

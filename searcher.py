@@ -412,6 +412,144 @@ def find_facebook_url(company_name, page_text=""):
     return None
 
 
+def scrape_facebook_page(fb_url):
+    """Scrape a public Facebook business page for contact/profile data.
+
+    Tries the mobile site (m.facebook.com) which exposes more raw HTML.
+    All fields may be None — caller must handle gracefully.
+
+    Returns dict with keys:
+        followers, phone, email, address, description, category, rating
+    """
+    import re as _re
+
+    result = {
+        "followers": None, "phone": None, "email": None,
+        "address": None, "description": None, "category": None,
+        "rating": None,
+    }
+
+    # Convert to mobile URL slug
+    slug = _re.sub(r"^https?://(www\.)?facebook\.com/", "", fb_url.rstrip("/"))
+    mobile_about = f"https://m.facebook.com/{slug}/about/"
+    mobile_main = f"https://m.facebook.com/{slug}/"
+
+    # Mobile iPhone UA — renders simpler HTML with more raw text
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-NZ,en;q=0.9",
+    }
+
+    raw = ""
+    for url in [mobile_about, mobile_main]:
+        try:
+            resp = requests.get(url, headers=headers, timeout=12, allow_redirects=True)
+            if (resp.status_code == 200
+                    and "login" not in resp.url
+                    and len(resp.text) > 500):
+                raw = resp.text
+                break
+        except Exception:
+            pass
+
+    if not raw:
+        return result
+
+    # --- Followers ---
+    for pat in [
+        r'"follower_count"\s*:\s*(\d+)',
+        r'"page_likers"\s*:\s*\{"count"\s*:\s*(\d+)',
+        r'(\d[\d,]+)\s+(?:Followers|followers)',
+        r'"subscriber_count"\s*:\s*(\d+)',
+    ]:
+        m = _re.search(pat, raw)
+        if m:
+            result["followers"] = m.group(1).replace(",", "")
+            break
+
+    # --- Phone ---
+    for pat in [
+        r'"label"\s*:\s*"Phone"[^}]{0,200}"text"\s*:\s*"([^"]+)"',
+        r'(?:Phone|phone|tel)[:\s]*(\+?\d[\d\s\-().]{6,20})',
+    ]:
+        m = _re.search(pat, raw)
+        if m:
+            candidate = m.group(1).strip()
+            if _re.search(r'\d{6,}', candidate.replace(" ", "").replace("-", "")):
+                result["phone"] = candidate
+                break
+
+    # --- Email ---
+    for pat in [
+        r'"label"\s*:\s*"Email"[^}]{0,200}"text"\s*:\s*"([^"@\s]{1,60}@[^"@\s]{1,60})"',
+        r'mailto:([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})',
+    ]:
+        m = _re.search(pat, raw)
+        if m:
+            email = m.group(1).strip().lower()
+            # Reject internal Facebook/tracking addresses
+            if "@" in email and not any(x in email for x in ["facebook", "sentry", "example"]):
+                result["email"] = email
+                break
+
+    # --- Address ---
+    for pat in [
+        r'"label"\s*:\s*"Address"[^}]{0,400}"text"\s*:\s*"([^"]{5,120})"',
+        r'"location"\s*:\s*\{[^}]*?"city"\s*:\s*"([^"]+)"[^}]*?"country"\s*:\s*"([^"]+)"',
+    ]:
+        m = _re.search(pat, raw)
+        if m:
+            if m.lastindex and m.lastindex >= 2:
+                result["address"] = f"{m.group(1)}, {m.group(2)}"
+            else:
+                result["address"] = m.group(1).strip()
+            break
+
+    # --- Description (About text) ---
+    for pat in [
+        r'"description"\s*:\s*"([^"]{20,500})"',
+        r'<meta[^>]+property="og:description"[^>]+content="([^"]{20,500})"',
+        r'<meta[^>]+name="description"[^>]+content="([^"]{20,500})"',
+    ]:
+        m = _re.search(pat, raw, _re.IGNORECASE)
+        if m:
+            desc = m.group(1).strip()
+            if len(desc) > 30 and "facebook" not in desc.lower()[:30]:
+                result["description"] = desc[:500]
+                break
+
+    # --- Category ---
+    for pat in [
+        r'"category_name"\s*:\s*"([^"]{3,60})"',
+        r'"category"\s*:\s*"([^"]{3,60})"',
+    ]:
+        m = _re.search(pat, raw)
+        if m:
+            cat = m.group(1).strip()
+            # Skip generic/internal category keys
+            if not _re.match(r'^[A-Z_]+$', cat):
+                result["category"] = cat
+                break
+
+    # --- Rating / reviews ---
+    for pat in [
+        r'"overall_star_rating"\s*:\s*([\d.]+)',
+        r'([\d.]+)\s*out of\s*5',
+        r'(\d+(?:\.\d+)?)\s+(?:rating|stars)',
+        r'(\d+)\s*%\s*recommend',
+    ]:
+        m = _re.search(pat, raw, _re.IGNORECASE)
+        if m:
+            result["rating"] = m.group(1)
+            break
+
+    return result
+
+
 def find_linkedin_url(company_name, page_text=""):
     """Search Google for the company's LinkedIn company page.
     Returns a linkedin.com/company/... URL or None."""
@@ -2025,6 +2163,13 @@ RECORD_TEMPLATE = {
     "co_status": None,
     "co_incorporated": None,
     "date_added": None,
+    "fb_followers": None,
+    "fb_phone": None,
+    "fb_email": None,
+    "fb_address": None,
+    "fb_description": None,
+    "fb_category": None,
+    "fb_rating": None,
     "root_domain": None,
     "source_url": None,
     "last_checked": None,
@@ -2200,6 +2345,19 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         print(f"  [Skipped] {company_name} already exists — added region '{website_region}' if new")
         return False
 
+    # Scrape Facebook page for contact/profile data if we have a URL
+    fb_page_data = {}
+    if info.get("facebook_url"):
+        print(f"  [Facebook scrape] {info['facebook_url']}")
+        fb_page_data = scrape_facebook_page(info["facebook_url"])
+        if any(v for v in fb_page_data.values()):
+            print(f"  [Facebook data] followers={fb_page_data.get('followers')} "
+                  f"phone={fb_page_data.get('phone')} email={fb_page_data.get('email')}")
+        # Backfill email if we don't have one yet
+        if not info.get("email") and fb_page_data.get("email"):
+            info["email"] = fb_page_data["email"]
+            print(f"  [Email from FB] {info['email']}")
+
     # Build list of all names to try on PSPLA
     names_to_try = []
     if company_name:
@@ -2212,8 +2370,12 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
 
     # Try each name on PSPLA until we find a match
     page_text = info.get("_page_text", "")
+    # Build Facebook context: prefer scraped description over snippet
+    fb_context_text = (fb_page_data.get("description")
+                       or fb_page_data.get("category")
+                       or info.get("_fb_snippet", ""))
     extra_context = {
-        "facebook_snippet": info.get("_fb_snippet", ""),
+        "facebook_snippet": fb_context_text,
         "linkedin_url": info.get("linkedin_url", ""),
         "nzsa_data": info.get("_nzsa_data"),
     }
@@ -2431,6 +2593,13 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         "individual_license": individual_license_found,
         "director_name": ", ".join(directors),
         "facebook_url": info.get("facebook_url"),
+        "fb_followers": fb_page_data.get("followers"),
+        "fb_phone": fb_page_data.get("phone"),
+        "fb_email": fb_page_data.get("email"),
+        "fb_address": fb_page_data.get("address"),
+        "fb_description": fb_page_data.get("description"),
+        "fb_category": fb_page_data.get("category"),
+        "fb_rating": fb_page_data.get("rating"),
         "linkedin_url": info.get("linkedin_url"),
         "nzsa_member": "true" if nzsa_result["member"] else "false",
         "nzsa_member_name": nzsa_result["member_name"],
