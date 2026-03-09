@@ -206,10 +206,16 @@
             <option value="unknown">Unknown</option>
         </select>
         <select id="serviceFilter" onchange="filterTable()">
-            <option value="">All Services</option>
+            <option value="">All Services (Website)</option>
             <option value="alarm_systems">Alarm Systems</option>
             <option value="cctv">CCTV / Cameras</option>
             <option value="monitoring">Alarm Monitoring</option>
+        </select>
+        <select id="fbServiceFilter" onchange="filterTable()">
+            <option value="">All Services (Facebook)</option>
+            <option value="fb_alarm_systems">Alarm Systems</option>
+            <option value="fb_cctv">CCTV / Cameras</option>
+            <option value="fb_monitoring">Alarm Monitoring</option>
         </select>
     </div>
 
@@ -376,15 +382,22 @@ function renderTable(companies) {{
             : '-';
 
         // Service data attributes
-        var alarmSys  = svcYes(c.has_alarm_systems)  ? 'yes' : 'no';
-        var cctv      = svcYes(c.has_cctv_cameras)   ? 'yes' : 'no';
-        var monitoring= svcYes(c.has_alarm_monitoring)? 'yes' : 'no';
+        var alarmSys   = svcYes(c.has_alarm_systems)   ? 'yes' : 'no';
+        var cctv       = svcYes(c.has_cctv_cameras)    ? 'yes' : 'no';
+        var monitoring = svcYes(c.has_alarm_monitoring) ? 'yes' : 'no';
+        var fbAlarmSys = svcYes(c.fb_alarm_systems)    ? 'yes' : 'no';
+        var fbCctv     = svcYes(c.fb_cctv_cameras)     ? 'yes' : 'no';
+        var fbMonitor  = svcYes(c.fb_alarm_monitoring) ? 'yes' : 'no';
 
         // Service tags for detail
         var svcTags = '';
-        if (svcYes(c.has_alarm_systems))   svcTags += '<span class="svc-tag" style="background:#1a6e3c;">Alarm Systems</span> ';
-        if (svcYes(c.has_cctv_cameras))    svcTags += '<span class="svc-tag" style="background:#1a4b8a;">CCTV / Cameras</span> ';
+        if (svcYes(c.has_alarm_systems))    svcTags += '<span class="svc-tag" style="background:#1a6e3c;">Alarm Systems</span> ';
+        if (svcYes(c.has_cctv_cameras))     svcTags += '<span class="svc-tag" style="background:#1a4b8a;">CCTV / Cameras</span> ';
         if (svcYes(c.has_alarm_monitoring)) svcTags += '<span class="svc-tag" style="background:#7a3a99;">Alarm Monitoring</span> ';
+        var fbSvcTags = '';
+        if (svcYes(c.fb_alarm_systems))    fbSvcTags += '<span class="svc-tag" style="background:#1a6e3c;">Alarm Systems</span> ';
+        if (svcYes(c.fb_cctv_cameras))     fbSvcTags += '<span class="svc-tag" style="background:#1a4b8a;">CCTV / Cameras</span> ';
+        if (svcYes(c.fb_alarm_monitoring)) fbSvcTags += '<span class="svc-tag" style="background:#7a3a99;">Alarm Monitoring</span> ';
 
         // Detail panel
         var reasonBlock = c.match_reason
@@ -446,7 +459,8 @@ function renderTable(companies) {{
                 '<span><strong>Found via:</strong> ' + esc(c.notes||'-') + '</span>' +
                 '<span><strong>Date added:</strong> ' + esc((c.date_added||'').slice(0,10)||'-') + '</span>' +
                 '<span><strong>Last checked:</strong> ' + esc((c.last_checked||'').slice(0,10)||'-') + '</span>' +
-                (svcTags ? '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><strong>Services:</strong> ' + svcTags + '</span>' : '') +
+                (svcTags ? '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><strong>Website Services:</strong> ' + svcTags + '</span>' : '') +
+                (fbSvcTags ? '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><strong>Facebook Services:</strong> ' + fbSvcTags + '</span>' : '') +
             '</div>';
 
         html +=
@@ -457,6 +471,9 @@ function renderTable(companies) {{
                 ' data-alarm-systems="' + alarmSys + '"' +
                 ' data-cctv="' + cctv + '"' +
                 ' data-monitoring="' + monitoring + '"' +
+                ' data-fb-alarm-systems="' + fbAlarmSys + '"' +
+                ' data-fb-cctv="' + fbCctv + '"' +
+                ' data-fb-monitoring="' + fbMonitor + '"' +
                 ' data-id="' + id + '">' +
                 '<td class="company-cell">' + nameCell + '</td>' +
                 '<td>' + esc(c.region||'-') + '</td>' +
@@ -478,19 +495,24 @@ function renderTable(companies) {{
 
 // ── Filter ────────────────────────────────────────────────────────────────────
 function filterTable() {{
-    var search  = document.getElementById('searchBox').value.toLowerCase();
-    var region  = document.getElementById('regionFilter').value.toLowerCase();
-    var status  = document.getElementById('statusFilter').value;
-    var service = document.getElementById('serviceFilter').value;
+    var search    = document.getElementById('searchBox').value.toLowerCase();
+    var region    = document.getElementById('regionFilter').value.toLowerCase();
+    var status    = document.getElementById('statusFilter').value;
+    var service   = document.getElementById('serviceFilter').value;
+    var fbService = document.getElementById('fbServiceFilter').value;
     document.querySelectorAll('.company-row').forEach(function(row) {{
         var svcMatch = true;
-        if (service === 'alarm_systems') svcMatch = row.dataset.alarmSystems === 'yes';
-        else if (service === 'cctv')     svcMatch = row.dataset.cctv === 'yes';
+        if (service === 'alarm_systems')  svcMatch = row.dataset.alarmSystems === 'yes';
+        else if (service === 'cctv')       svcMatch = row.dataset.cctv === 'yes';
         else if (service === 'monitoring') svcMatch = row.dataset.monitoring === 'yes';
+        var fbSvcMatch = true;
+        if (fbService === 'fb_alarm_systems')  fbSvcMatch = row.dataset.fbAlarmSystems === 'yes';
+        else if (fbService === 'fb_cctv')       fbSvcMatch = row.dataset.fbCctv === 'yes';
+        else if (fbService === 'fb_monitoring') fbSvcMatch = row.dataset.fbMonitoring === 'yes';
         var visible = (!search || row.dataset.name.includes(search))
                    && (!region || row.dataset.region.includes(region))
                    && (!status || row.dataset.status === status)
-                   && svcMatch;
+                   && svcMatch && fbSvcMatch;
         row.style.display = visible ? '' : 'none';
         var dr = document.getElementById('detail-' + row.dataset.id);
         if (dr && !visible) dr.classList.remove('open');
