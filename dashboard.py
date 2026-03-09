@@ -155,21 +155,19 @@ HTML_TEMPLATE = """
         </div>
         <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end; margin-top:10px;">
             <div style="display:flex; gap:6px; align-items:center; flex-wrap:nowrap;">
-                {% if search_running %}
+                <span id="btns-running" style="display:{{ 'contents' if search_running else 'none' }};">
                     <span style="font-size:12px; color:#27ae60; font-weight:bold; white-space:nowrap;"><i class="fa-solid fa-circle" style="font-size:9px;"></i> Search running</span>
-                    {% if search_paused %}
-                        <form method="POST" action="/resume-search">
-                            <button class="btn" style="background:#27ae60; color:white;"><i class="fa-solid fa-play"></i> Resume</button>
-                        </form>
-                    {% else %}
-                        <form method="POST" action="/pause-search">
-                            <button class="btn" style="background:#e67e22; color:white;"><i class="fa-solid fa-pause"></i> Pause</button>
-                        </form>
-                    {% endif %}
+                    <form method="POST" action="/resume-search" id="btn-resume" style="display:{{ 'inline' if search_paused else 'none' }};">
+                        <button class="btn" style="background:#27ae60; color:white;"><i class="fa-solid fa-play"></i> Resume</button>
+                    </form>
+                    <form method="POST" action="/pause-search" id="btn-pause" style="display:{{ 'none' if search_paused else 'inline' }};">
+                        <button class="btn" style="background:#e67e22; color:white;"><i class="fa-solid fa-pause"></i> Pause</button>
+                    </form>
                     <form method="POST" action="/stop-search" onsubmit="return confirm('Stop the running search? Progress so far will be saved.')">
                         <button class="btn" style="background:#c0392b; color:white;"><i class="fa-solid fa-stop"></i> Stop</button>
                     </form>
-                {% else %}
+                </span>
+                <span id="btns-idle" style="display:{{ 'none' if search_running else 'contents' }};">
                     <form method="POST" action="/start-search" onsubmit="return confirm('Start a full search? This will run in the background and may take a long time.')">
                         <button class="btn" style="background:#27ae60; color:white;">&#9654; Full Search</button>
                     </form>
@@ -179,7 +177,7 @@ HTML_TEMPLATE = """
                     <form method="POST" action="/start-facebook-search" onsubmit="return confirm('Run Facebook-only search? This adds Facebook-sourced companies on top of existing data.')">
                         <button class="btn" style="background:#1877f2; color:white;"><i class="fa-brands fa-facebook-f"></i> Facebook</button>
                     </form>
-                {% endif %}
+                </span>
                 <form method="POST" action="/dedupe-db" onsubmit="return confirm('Merge duplicate company names? Keeps the best record and combines all regions into one entry.')">
                     <button class="btn" style="background:#8e44ad; color:white;"><i class="fa-solid fa-filter"></i> Dedupe DB</button>
                 </form>
@@ -280,16 +278,30 @@ HTML_TEMPLATE = """
         var counts = document.getElementById('progress-counts');
         var termEl = document.getElementById('progress-term');
 
+        var btnsRunning = document.getElementById('btns-running');
+        var btnsIdle = document.getElementById('btns-idle');
+        var btnPause = document.getElementById('btn-pause');
+        var btnResume = document.getElementById('btn-resume');
+
         function poll() {
             fetch('/search-status')
                 .then(function(r) { return r.json(); })
                 .then(function(s) {
-                    if (!s.running) { wrap.style.display = 'none'; return; }
+                    if (!s.running) {
+                        wrap.style.display = 'none';
+                        if (btnsRunning) btnsRunning.style.display = 'none';
+                        if (btnsIdle) btnsIdle.style.display = 'contents';
+                        return;
+                    }
                     wrap.style.display = 'block';
+                    if (btnsRunning) btnsRunning.style.display = 'contents';
+                    if (btnsIdle) btnsIdle.style.display = 'none';
+                    if (btnPause) btnPause.style.display = s.paused ? 'none' : 'inline';
+                    if (btnResume) btnResume.style.display = s.paused ? 'inline' : 'none';
                     var phase = s.phase === 'facebook' ? 'Facebook' : 'Google';
-                    var paused = s.paused ? ' — PAUSED' : '';
+                    var paused = s.paused ? ' - PAUSED' : '';
                     if (s.region_idx != null && s.total_regions != null) {
-                        label.textContent = phase + ' search: region ' + s.region_idx + ' of ' + s.total_regions + ' — ' + (s.region || '') + paused;
+                        label.textContent = phase + ' search: region ' + s.region_idx + ' of ' + s.total_regions + ' - ' + (s.region || '') + paused;
                         var pct = Math.round((s.region_idx - 1) / s.total_regions * 100);
                         bar.style.width = pct + '%';
                         termEl.textContent = 'Term ' + s.term_idx + ' of ' + s.total_terms + ': ' + (s.term || '');
@@ -478,12 +490,13 @@ HTML_TEMPLATE = """
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                         <label style="font-size:12px; font-weight:bold; color:#555;"><i class="fa-solid fa-location-dot"></i> Regions</label>
                         <span style="font-size:11px;">
-                            <a href="#" onclick="partialSelectAllRegions(); return false;" style="color:#2980b9;">All</a> /
-                            <a href="#" onclick="partialClearRegions(); return false;" style="color:#2980b9;">None</a>
+                            <a href="#" onclick="document.querySelectorAll('.partial-region-cb').forEach(function(cb){cb.checked=true;}); return false;" style="color:#2980b9;">All</a> /
+                            <a href="#" onclick="document.querySelectorAll('.partial-region-cb').forEach(function(cb){cb.checked=false;}); return false;" style="color:#2980b9;">None</a>
                         </span>
                     </div>
                     <div id="partial-region-list"
                         style="max-height:190px; overflow-y:auto; border:1px solid #ddd; border-radius:4px; padding:5px; font-size:12px;">
+                    {% for r in nz_regions %}<label style="display:block;padding:1px 2px;cursor:pointer;"><input type="checkbox" class="partial-region-cb" value="{{ r }}" checked style="margin-right:4px;">{{ r }}</label>{% endfor %}
                     </div>
                 </div>
 
@@ -492,8 +505,8 @@ HTML_TEMPLATE = """
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                         <label style="font-size:12px; font-weight:bold; color:#555;"><i class="fa-solid fa-magnifying-glass"></i> Terms</label>
                         <span style="font-size:11px;">
-                            <a href="#" onclick="partialSelectAllTerms(); return false;" style="color:#2980b9;">All</a> /
-                            <a href="#" onclick="partialClearTerms(); return false;" style="color:#2980b9;">None</a>
+                            <a href="#" onclick="document.querySelectorAll('.partial-term-cb').forEach(function(cb){cb.checked=true;}); return false;" style="color:#2980b9;">All</a> /
+                            <a href="#" onclick="document.querySelectorAll('.partial-term-cb').forEach(function(cb){cb.checked=false;}); return false;" style="color:#2980b9;">None</a>
                         </span>
                     </div>
                     <div id="partial-term-list"
@@ -516,6 +529,45 @@ HTML_TEMPLATE = """
                     <input type="checkbox" id="partial-facebook-nz" style="margin-right:4px;">
                     <i class="fa-brands fa-facebook-f" style="color:#1877f2;"></i> Facebook (NZ-wide, no town)
                 </label>
+                <script>
+                function runPartialSearch() {
+                    var regions = Array.from(document.querySelectorAll('.partial-region-cb:checked')).map(function(cb){ return cb.value; });
+                    var terms = Array.from(document.querySelectorAll('.partial-term-cb:checked')).map(function(cb){ return cb.value; });
+                    var extraRaw = document.getElementById('partial-extra-terms').value.trim();
+                    var extraTerms = extraRaw ? extraRaw.split('\\n').map(function(t){ return t.trim(); }).filter(Boolean) : [];
+                    var allTerms = terms.concat(extraTerms);
+                    var includeFb = document.getElementById('partial-facebook').checked;
+                    var includeFbNw = document.getElementById('partial-facebook-nz').checked;
+                    if (!regions.length) { alert('Please select at least one region.'); return; }
+                    if (!allTerms.length && !includeFb && !includeFbNw) { alert('Please select at least one term or enable Facebook search.'); return; }
+                    var statusEl = document.getElementById('partial-status');
+                    statusEl.style.color = '#888';
+                    statusEl.textContent = 'Starting...';
+                    fetch('/start-partial-search', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({regions: regions, google_terms: allTerms, include_facebook: includeFb, include_nationwide: includeFbNw})
+                    }).then(function(r){ return r.json(); }).then(function(d) {
+                        if (d.ok) {
+                            statusEl.style.color = '#27ae60';
+                            statusEl.textContent = 'Search started! Scroll up to see the log.';
+                            var wrap = document.getElementById('progress-wrap');
+                            if (wrap) {
+                                wrap.style.display = 'block';
+                                var logPanel = document.getElementById('log-panel');
+                                if (logPanel) logPanel.style.display = '';
+                                var logBtn = document.getElementById('log-toggle-btn');
+                                if (logBtn) logBtn.textContent = 'Hide log';
+                                wrap.scrollIntoView({behavior: 'smooth', block: 'start'});
+                            }
+                            setTimeout(function(){ statusEl.textContent = ''; }, 8000);
+                        } else {
+                            statusEl.style.color = '#e74c3c';
+                            statusEl.textContent = d.error || 'Error starting search.';
+                        }
+                    }).catch(function(){ statusEl.style.color = '#e74c3c'; statusEl.textContent = 'Request failed.'; });
+                }
+                </script>
                 <button onclick="runPartialSearch()"
                     style="padding:7px 18px; background:#8e44ad; color:white; border:none; border-radius:5px;
                            cursor:pointer; font-size:13px; font-weight:bold;">
@@ -528,8 +580,8 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
-    // ── Search Terms Manager ──────────────────────────────────────────────────
-    var _terms = {{ init_terms | tojson }};
+    // -- Search Terms Manager --------------------------------------------------
+    var _terms = {"google": [], "facebook": []};
     var _activeTab = 'google';
 
     function showTermsTab(tab) {
@@ -589,17 +641,7 @@ HTML_TEMPLATE = """
         saveTerms(type);
     }
 
-    // ── Partial Search ────────────────────────────────────────────────────────
-    var _allRegions = {{ nz_regions | tojson }};
-
-    function renderPartialRegions() {
-        var el = document.getElementById('partial-region-list');
-        el.innerHTML = _allRegions.map(function(r) {
-            return '<label style="display:block; padding:1px 2px; cursor:pointer;">'
-                + '<input type="checkbox" class="partial-region-cb" value="' + r + '" checked style="margin-right:4px;">'
-                + r + '</label>';
-        }).join('');
-    }
+    // -- Partial Search --------------------------------------------------------
 
     function renderPartialTerms() {
         var el = document.getElementById('partial-term-list');
@@ -610,50 +652,7 @@ HTML_TEMPLATE = """
         }).join('');
     }
 
-    function partialSelectAllRegions() {
-        document.querySelectorAll('.partial-region-cb').forEach(function(cb){ cb.checked = true; });
-    }
-    function partialClearRegions() {
-        document.querySelectorAll('.partial-region-cb').forEach(function(cb){ cb.checked = false; });
-    }
-    function partialSelectAllTerms() {
-        document.querySelectorAll('.partial-term-cb').forEach(function(cb){ cb.checked = true; });
-    }
-    function partialClearTerms() {
-        document.querySelectorAll('.partial-term-cb').forEach(function(cb){ cb.checked = false; });
-    }
-
-    function runPartialSearch() {
-        var regions = Array.from(document.querySelectorAll('.partial-region-cb:checked')).map(function(cb){ return cb.value; });
-        var terms = Array.from(document.querySelectorAll('.partial-term-cb:checked')).map(function(cb){ return cb.value; });
-        var extraRaw = document.getElementById('partial-extra-terms').value.trim();
-        var extraTerms = extraRaw ? extraRaw.split('\n').map(function(t){ return t.trim(); }).filter(Boolean) : [];
-        var allTerms = terms.concat(extraTerms);
-        var includeFb = document.getElementById('partial-facebook').checked;
-        var includeFbNw = document.getElementById('partial-facebook-nz').checked;
-
-        if (!regions.length) { alert('Please select at least one region.'); return; }
-        if (!allTerms.length && !includeFb && !includeFbNw) { alert('Please select at least one term or enable Facebook search.'); return; }
-
-        var statusEl = document.getElementById('partial-status');
-        statusEl.textContent = 'Starting...';
-
-        fetch('/start-partial-search', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({regions: regions, google_terms: allTerms, include_facebook: includeFb, include_nationwide: includeFbNw})
-        }).then(function(r){ return r.json(); }).then(function(d) {
-            if (d.ok) {
-                statusEl.textContent = 'Search started!';
-                setTimeout(function(){ statusEl.textContent = ''; }, 4000);
-            } else {
-                statusEl.textContent = d.error || 'Error starting search.';
-            }
-        }).catch(function(){ statusEl.textContent = 'Request failed.'; });
-    }
-
     loadTerms();
-    renderPartialRegions();
     </script>
 
     <div class="stats">
@@ -733,7 +732,9 @@ HTML_TEMPLATE = """
                 <td>{{ c.phone or '-' }}</td>
                 <td>{% if c.email %}<a href="mailto:{{ c.email }}">{{ c.email }}</a>{% else %}-{% endif %}</td>
                 <td>
-                    {% if lic == 'true' %}
+                    {% if lic == 'true' and c.individual_license and (not c.pspla_license_status or c.pspla_license_status|lower != 'active') %}
+                        <span class="badge badge-expired"><i class="fa-solid fa-user-check status-icon"></i>INDIVIDUAL ONLY</span>
+                    {% elif lic == 'true' %}
                         <span class="badge badge-licensed"><i class="fa-solid fa-circle-check status-icon"></i>LICENSED</span>
                     {% elif c.pspla_license_status and c.pspla_license_status|lower == 'expired' %}
                         <span class="badge badge-expired"><i class="fa-solid fa-triangle-exclamation status-icon"></i>EXPIRED</span>
@@ -793,6 +794,9 @@ HTML_TEMPLATE = """
                                    title="Edit name if PSPLA uses a different registered name">
                             <button onclick="recheckPspla({{ c.id }})"
                                     id="pspla-btn-{{ c.id }}"
+                                    data-directors="{{ (c.director_name or '') | e }}"
+                                    data-region="{{ (c.region or '') | e }}"
+                                    data-coname="{{ (c.companies_office_name or '') | e }}"
                                     style="margin-left:4px; padding:1px 7px; font-size:11px; background:#2980b9; color:white; border:none; border-radius:3px; cursor:pointer;">
                                 Re-check
                             </button>
@@ -893,10 +897,13 @@ HTML_TEMPLATE = """
             if (!name) return;
             btn.disabled = true;
             btn.textContent = 'Checking...';
+            var directors = btn.dataset.directors || '';
+            var region = btn.dataset.region || '';
+            var coname = btn.dataset.coname || '';
             fetch('/recheck-pspla', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({id: id, name: name})
+                body: JSON.stringify({id: id, name: name, directors: directors, region: region, co_name: coname})
             })
             .then(function(r) { return r.json(); })
             .then(function(d) {
@@ -922,7 +929,7 @@ HTML_TEMPLATE = """
         }
 
         function deleteCompany(id, name) {
-            if (!confirm('Delete "' + name + '"?\nThis cannot be undone.')) return;
+            if (!confirm('Delete "' + name + '"?\\nThis cannot be undone.')) return;
             fetch('/delete-company', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -1633,13 +1640,33 @@ def recheck_pspla_for_company():
     from flask import jsonify
     company_id = request.json.get("id")
     company_name = request.json.get("name", "")
+    company_region = request.json.get("region", "") or None
+    co_name = request.json.get("co_name", "") or None
     if not company_name:
         return jsonify({"error": "No company name provided"}), 400
     try:
-        from searcher import check_pspla
-        result = check_pspla(company_name)
+        from searcher import check_pspla, check_pspla_individual
+        result = check_pspla(company_name, website_region=company_region)
+        # If no active licensed match found and we have a Companies Office name, try that too
+        if not result.get("licensed") and co_name and co_name != company_name:
+            co_result = check_pspla(co_name, website_region=company_region)
+            if co_result.get("matched_name"):
+                result = co_result
         licensed = result.get("licensed")
         pspla_name = result.get("matched_name")
+
+        # If no active company license, check individual license using the stored director names
+        individual_license = None
+        if not licensed:
+            director_str = request.json.get("directors", "")
+            directors = [d.strip() for d in director_str.split(",") if d.strip()] if director_str else []
+            for director in directors:
+                ind = check_pspla_individual(director)
+                if ind.get("found"):
+                    individual_license = ind["name"]
+                    licensed = True
+                    break
+
         update = {
             "pspla_licensed": licensed,
             "pspla_name": pspla_name,
@@ -1649,10 +1676,11 @@ def recheck_pspla_for_company():
             "pspla_license_expiry": result.get("pspla_license_expiry"),
             "license_type": result.get("license_type"),
             "match_method": result.get("match_method"),
+            "individual_license": individual_license,
         }
         # Remove None values to avoid overwriting good data with null
         update = {k: v for k, v in update.items() if v is not None}
-        # Always save pspla_licensed even if False
+        # Always save pspla_licensed even if False/None
         update["pspla_licensed"] = licensed
         headers = {
             "apikey": SUPABASE_KEY,

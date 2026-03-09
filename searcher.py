@@ -542,6 +542,23 @@ def extract_keywords(company_name):
 
 def verify_pspla_match(website_company, pspla_company, website_region, pspla_address):
     """Use Claude to verify if a PSPLA match is genuinely the same company."""
+    import re as _re
+    # Hard pre-check: every significant word in the website company name must appear
+    # as an EXACT whole word in the PSPLA name.  Catches "coast" vs "coastal",
+    # "guard" vs "guardian", etc. without a Claude call.
+    _GENERIC = {'limited', 'security', 'services', 'solutions', 'systems', 'group',
+                'new', 'zealand', 'national', 'management', 'alarm', 'alarms',
+                'install', 'installer', 'surveillance', 'protection'}
+    company_sig = [w for w in _re.findall(r'[a-z]+', website_company.lower())
+                   if len(w) >= 4 and w not in _GENERIC]
+    pspla_exact = set(_re.findall(r'[a-z]+', pspla_company.lower()))
+    if company_sig:
+        missing = [w for w in company_sig if w not in pspla_exact]
+        if missing and len(missing) == len(company_sig):
+            # Every distinctive word is absent — definitely not the same company
+            return {"match": False, "confidence": "high",
+                    "reason": f"Distinctive word(s) {missing} not found as exact words in PSPLA name"}
+
     try:
         prompt = f"""Are these likely the same company?
 
@@ -552,10 +569,15 @@ PSPLA registered name: "{pspla_company}"
 PSPLA address: "{pspla_address or 'unknown'}"
 
 Consider:
-- Are the names similar enough to be the same company (trading name vs registered name)?
-- Are the locations compatible?
-- Could "Addz Livewire" and "Livewire Electrical Wellington" be the same? No - different cities and different first word.
-- Could "Hines Security" and "Hines Electrical & Security NZ" be the same? Yes - same family name, same type of business.
+- Trading name vs registered name: a shorter name can be the same company as a longer registered name.
+- If the website name appears word-for-word inside the PSPLA name, that is a strong match signal.
+- Location/region compatibility matters: if the region matches a word in the PSPLA name, that confirms the match.
+- Word differences matter: "Coast" and "Coastal" are DIFFERENT words. Only match if the exact words from the website name appear in the PSPLA name.
+- Examples:
+  - "Coast Security" vs "Kapiti Coast Security Limited" (region: Kapiti) → YES — "Coast Security" words appear in the PSPLA name and region "Kapiti" matches.
+  - "Coast Security" vs "Coastal Security Limited" → NO — "coast" does not appear as a whole word in "Coastal Security Limited".
+  - "Addz Livewire" vs "Livewire Electrical Wellington" → NO — different first word, different city.
+  - "Hines Security" vs "Hines Electrical & Security NZ" → YES — same family name, same business type.
 
 Return ONLY JSON: {{"match": true or false, "confidence": "high/medium/low", "reason": "brief reason"}}"""
 
@@ -629,15 +651,55 @@ def check_pspla(company_name, website_region=None):
                 if isinstance(val, list): val = val[0] if val else None
                 return val
 
-            active_docs = [d for d in docs if _get_status(d) == "active"]
-            has_active = len(active_docs) > 0
+            def _date_sort_key(d):
+                """Parse permitEndDate_s for sorting — most recent date = lower key value."""
+                raw = get_field(d, "permitEndDate_s") or ""
+                for fmt in ("%d-%b-%Y", "%Y-%m-%d", "%d/%m/%Y"):
+                    try:
+                        from datetime import datetime as _dt2
+                        return -int(_dt2.strptime(str(raw), fmt).timestamp())
+                    except ValueError:
+                        pass
+                return 0  # unknown date sorts last
+
+            _STATUS_SORT = {"active": 0, "expired": 1, "withdrawn": 2}
+
+            def _best_doc_for_permit(all_docs, permit_num):
+                """Return the best-status doc among all docs sharing the same permit number."""
+                same_permit = [d for d in all_docs if get_field(d, "permitNumber_txt") == permit_num]
+                if not same_permit:
+                    return None
+                return sorted(same_permit,
+                              key=lambda d: (_STATUS_SORT.get(_get_status(d), 99), _date_sort_key(d)))[0]
 
             # For keyword/partial/variant matches, verify with Claude before trusting.
-            # Verify against the best candidate (active first), trying each in turn
-            # until one passes — avoids rejecting the whole result because docs[0]
-            # happens to be a different company with a high keyword score.
-            if match_method and match_method != "full name":
-                candidates = (active_docs or docs)[:5]
+            # Use Solr's original text-score order, but boost candidates whose PSPLA name
+            # contains whole-word matches from the website region (e.g. "Kapiti Coast" in
+            # "KAPITI COAST SECURITY LIMITED") — without disturbing cases with no region match.
+            def _region_boost(d):
+                """Sort key: number of region words NOT found as whole words in PSPLA name (lower = better)."""
+                if not website_region:
+                    return 0
+                cname_words = set((get_field(d, "name_txt") or get_field(d, "caseTitle_s") or "").lower().split())
+                region_words = [w for w in website_region.lower().split() if len(w) >= 4]
+                return -sum(1 for rw in region_words if rw in cname_words)
+
+            # Determine whether Solr returned results for multiple distinct companies.
+            # If all docs share the same permit number it's genuinely one company and we
+            # can trust docs[0] without verification.  If there are multiple permit numbers
+            # (e.g. "Coast Security" matches Coastal Security AND Kapiti Coast Security)
+            # we must verify even for a "full name" match — Solr fuzzy matching can put
+            # the wrong company first.
+            permit_nums_in_results = set(
+                get_field(d, "permitNumber_txt") for d in docs
+                if get_field(d, "permitNumber_txt")
+            )
+            multi_company_results = len(permit_nums_in_results) > 1
+
+            needs_verification = (match_method and match_method != "full name") or multi_company_results
+
+            if needs_verification:
+                candidates = sorted(docs[:5], key=_region_boost)  # region-boosted, else Solr order
                 verified_doc = None
                 for cand in candidates:
                     cname = get_field(cand, "name_txt") or get_field(cand, "caseTitle_s") or ""
@@ -649,17 +711,50 @@ def check_pspla(company_name, website_region=None):
                         break
                     print(f"  [Match rejected] {company_name} vs {cname} - {verification.get('reason')}")
 
+                if verified_doc is None and website_region:
+                    # Fallback: try region-augmented searches (e.g. "Kapiti Coast Security"
+                    # for "Coast Security" in Kapiti region) to find the correct company
+                    # when the generic name is ambiguous.
+                    region_words = [w for w in website_region.replace('/', ' ').split()
+                                    if len(w) >= 4]
+                    for rw in region_words:
+                        augmented = f"{rw} {company_name}"
+                        aug_docs, aug_found = pspla_search(augmented)
+                        if aug_found > 0:
+                            for cand in aug_docs[:3]:
+                                cname = get_field(cand, "name_txt") or get_field(cand, "caseTitle_s") or ""
+                                caddr = get_field(cand, "registeredOffice_txt") or get_field(cand, "townCity_txt") or ""
+                                verification = verify_pspla_match(company_name, cname, website_region, caddr)
+                                if verification.get("match"):
+                                    verified_doc = cand
+                                    match_method = f"region-augmented ({augmented}, verified: {verification.get('confidence')})"
+                                    break
+                        if verified_doc:
+                            break
+
                 if verified_doc is None:
                     return {"licensed": False, "matched_name": None, "license_type": None,
                             "match_method": "rejected: no candidate passed verification",
                             "pspla_address": None, "pspla_license_number": None,
                             "pspla_license_status": None, "pspla_license_expiry": None}
 
-                # Re-evaluate active status from the verified doc only
-                has_active = _get_status(verified_doc) == "active"
-                matched = verified_doc
+                # Upgrade: find the best-status doc for the same permit number
+                permit_num = get_field(verified_doc, "permitNumber_txt")
+                if permit_num:
+                    matched = _best_doc_for_permit(docs, permit_num) or verified_doc
+                else:
+                    matched = verified_doc
             else:
-                matched = active_docs[0] if has_active else docs[0]
+                # Single company in results and full-name match — no verification needed.
+                # Upgrade to best-status doc for that permit number (e.g. Active renewal).
+                candidate = docs[0]
+                permit_num = get_field(candidate, "permitNumber_txt")
+                if permit_num:
+                    matched = _best_doc_for_permit(docs, permit_num) or candidate
+                else:
+                    matched = candidate
+
+            has_active = _get_status(matched) == "active"
 
             name_field = get_field(matched, "name_txt") or get_field(matched, "caseTitle_s") or company_name
             pspla_address = get_field(matched, "registeredOffice_txt") or get_field(matched, "townCity_txt")
@@ -1227,6 +1322,17 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
     co_result = check_companies_office(co_search_name, pspla_address=pspla_result.get("pspla_address"))
     time.sleep(2)
 
+    # If CO found the exact legal name and PSPLA isn't licensed yet, retry PSPLA with the CO name.
+    # This resolves cases where the trading name is too generic (e.g. "Coast Security" →
+    # CO returns "KAPITI COAST SECURITY LIMITED" → exact PSPLA hit).
+    co_registered_name = co_result.get("name")
+    if co_registered_name and not pspla_result.get("licensed") and co_registered_name not in names_to_try:
+        print(f"  [Checking PSPLA with CO name] {co_registered_name}")
+        co_pspla_res = check_pspla(co_registered_name, website_region=website_region)
+        if co_pspla_res.get("matched_name"):
+            pspla_result = co_pspla_res
+            names_to_try.append(co_registered_name)
+
     licensed_val = pspla_result.get("licensed")
     if not isinstance(licensed_val, bool):
         licensed_val = None
@@ -1255,7 +1361,7 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         reason_parts.append(f"Facebook description: \"{info['_fb_snippet']}\"")
     reason_parts.append(f"Searched PSPLA for: {', '.join(names_to_try)}.")
 
-    if licensed_val is True:
+    if pspla_result.get("licensed"):
         reason_parts.append(f"Active company license found for '{pspla_result.get('matched_name')}' (match method: {pspla_result.get('match_method')}).")
         if pspla_result.get("pspla_license_number"):
             reason_parts.append(f"License #{pspla_result.get('pspla_license_number')}, status: {pspla_result.get('pspla_license_status') or 'active'}, expires {pspla_result.get('pspla_license_expiry') or 'unknown'}.")
@@ -1266,7 +1372,13 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         else:
             reason_parts.append("No director/owner names found on website.")
     elif individual_license_found:
-        reason_parts.append("No active company license found on PSPLA.")
+        if pspla_result.get("matched_name"):
+            _co_status = (pspla_result.get("pspla_license_status") or "inactive").upper()
+            reason_parts.append(f"Company license found for '{pspla_result.get('matched_name')}' but status is {_co_status} (match method: {pspla_result.get('match_method')}).")
+            if pspla_result.get("pspla_license_number"):
+                reason_parts.append(f"License #{pspla_result.get('pspla_license_number')}, status: {_co_status}, expires {pspla_result.get('pspla_license_expiry') or 'unknown'}.")
+        else:
+            reason_parts.append("No company license found on PSPLA.")
         if directors:
             reason_parts.append(f"Director/owner names found on website: {', '.join(directors)}.")
             reason_parts.append(f"Checked individual PSPLA licenses for each — active individual license found under '{individual_license_found}'.")
