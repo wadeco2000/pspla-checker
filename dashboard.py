@@ -114,6 +114,14 @@ def _load_terms():
 
 app = Flask(__name__)
 
+# On startup, clear any stale flag files left over from a previous session that
+# was killed mid-search.  If the app just started, no search can be running.
+for _stale in [RUNNING_FLAG, PAUSE_FLAG, PID_FILE]:
+    try:
+        os.remove(_stale)
+    except FileNotFoundError:
+        pass
+
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
