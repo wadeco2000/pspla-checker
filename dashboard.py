@@ -932,6 +932,24 @@ HTML_TEMPLATE = """
                             </div>
                         </div>
                         {% endif %}
+                        {% if c.google_rating or c.google_reviews or c.google_phone or c.google_address %}
+                        <div class="detail-item" style="grid-column: 1 / -1; border-top: 1px solid #e3eaf3; padding-top: 8px; margin-top: 2px;">
+                            <label style="color:#4285F4; font-size:11px; font-weight:bold; display:block; margin-bottom:6px;">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 488 512" width="11" height="12" fill="#4285F4" style="vertical-align:middle;margin-right:4px"><path d="M488 261.8C488 403.3 391.1 504 248 504 110.8 504 0 393.2 0 256S110.8 8 248 8c66.8 0 123 24.5 166.3 64.9l-67.5 64.9C258.5 52.6 94.3 116.6 94.3 256c0 86.5 69.1 156.6 153.7 156.6 98.2 0 135-70.4 140.8-106.9H248v-85.3h236.1c2.3 12.7 3.9 24.9 3.9 41.4z"/></svg>
+                                Google Business Profile
+                            </label>
+                            <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap:6px; font-size:12px;">
+                                {% if c.google_rating %}
+                                <div><strong>Rating:</strong>
+                                    <span style="color:#f39c12;">★</span> {{ c.google_rating }}
+                                    {% if c.google_reviews %}<span style="color:#888;">({{ c.google_reviews }} reviews)</span>{% endif %}
+                                </div>
+                                {% endif %}
+                                {% if c.google_phone %}<div><strong>Phone:</strong> {{ c.google_phone }}</div>{% endif %}
+                                {% if c.google_address %}<div style="grid-column: 1 / -1;"><strong>Address:</strong> {{ c.google_address }}</div>{% endif %}
+                            </div>
+                        </div>
+                        {% endif %}
                         <div class="detail-item" id="li-item-{{ c.id }}">
                             <label><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" width="10" height="12" fill="#0a66c2" style="vertical-align:middle;margin-right:3px"><path d="M100.28 448H7.4V148.9h92.88zM53.79 108.1C24.09 108.1 0 83.5 0 53.8a53.79 53.79 0 0 1 107.58 0c0 29.7-24.1 54.3-53.79 54.3zM447.9 448h-92.68V302.4c0-34.7-.7-79.2-48.29-79.2-48.29 0-55.69 37.7-55.69 76.7V448h-92.78V148.9h89.08v40.8h1.3c12.4-23.5 42.69-48.3 87.88-48.3 94 0 111.28 61.9 111.28 142.3V448z"/></svg> LinkedIn Page</label>
                             <span id="li-result-{{ c.id }}">

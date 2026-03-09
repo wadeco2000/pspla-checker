@@ -52,7 +52,10 @@ Every company found — whether via Google, Facebook, or a directory — passes 
 - `get_company_by_name()` — if company name already in DB, just append the new region and return
 - `company_name_exists()` — final dedup guard at the end before save
 
-### 2. Facebook page scrape (if `facebook_url` is known)
+### 2. Google Business Profile — `get_google_business_profile(company_name, region)`
+One targeted SerpAPI search per company (`"Company Name" region New Zealand`). Parses `knowledge_graph` and `local_results` sections from the SerpAPI JSON response — these are returned alongside organic results at no extra quota cost. Extracts rating, reviews count, phone, address. Phone is backfilled to company's main phone field if not found elsewhere. Results stored in `google_rating`, `google_reviews`, `google_phone`, `google_address`.
+
+### 3. Facebook page scrape (if `facebook_url` is known)
 `scrape_facebook_page(fb_url)` — three-tier approach:
 - **Tier 1** (no FB hit): parse Google/SerpAPI snippet from `_FB_SNIPPET_CACHE` — populated when `find_facebook_url` picks the winner URL. Extracts followers, phone, category, rating from Google's snippet text.
 - **Tier 2** (minimal FB hit): stream only first 8 KB of the page HEAD to extract `og:description` meta tag. Survives login wall.
@@ -206,6 +209,9 @@ Dashboard "AI Matching Decisions" button in each company's detail row fetches `l
 
 ### Facebook
 `facebook_url`, `fb_followers`, `fb_phone`, `fb_email`, `fb_address`, `fb_description`, `fb_category`, `fb_rating`
+
+### Google Business Profile
+`google_rating`, `google_reviews`, `google_phone`, `google_address`
 
 ### Other social
 `linkedin_url`

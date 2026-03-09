@@ -228,6 +228,91 @@ def google_search(query, num_results=100, time_filter=None):
         return []
 
 
+def get_google_business_profile(company_name, region=""):
+    """Fetch Google Business Profile data (rating, reviews, phone, address) via SerpAPI.
+
+    SerpAPI returns knowledge_graph and local_results sections alongside organic results
+    at no extra cost per search. We run one targeted query per company and parse those
+    sections. All fields may be None if no business profile exists.
+
+    Returns dict: rating, reviews, phone, address
+    """
+    result = {"rating": None, "reviews": None, "phone": None, "address": None}
+
+    query = f'"{company_name}"'
+    if region:
+        query += f" {region}"
+    query += " New Zealand"
+
+    try:
+        response = requests.get(
+            "https://serpapi.com/search",
+            params={
+                "api_key": SERPAPI_KEY,
+                "engine": "google",
+                "q": query,
+                "num": 5,           # minimal organic results — we want the panel data
+                "gl": "nz",
+                "hl": "en",
+            },
+            timeout=15,
+        )
+        data = response.json()
+    except Exception as e:
+        print(f"  [Google profile error] {e}")
+        return result
+
+    if "error" in data:
+        return result
+
+    # ── Knowledge Graph (the right-side business panel) ─────────────────────
+    kg = data.get("knowledge_graph", {})
+    if kg:
+        if kg.get("rating") is not None:
+            result["rating"] = str(kg["rating"])
+        if kg.get("reviews") is not None:
+            result["reviews"] = str(kg["reviews"])
+        # Phone — may be in root or nested under contact info
+        phone = kg.get("phone") or kg.get("main_phone")
+        if phone:
+            result["phone"] = str(phone)
+        # Address
+        addr = kg.get("address")
+        if addr:
+            result["address"] = str(addr)
+
+    # ── Local Results (map pack — business listings) ─────────────────────────
+    # Use as fallback when knowledge graph didn't have all fields
+    local_results = data.get("local_results", [])
+    if isinstance(local_results, dict):
+        # SerpAPI sometimes nests it: {"places": [...]}
+        local_results = local_results.get("places", [])
+
+    for place in local_results[:3]:
+        # Match: place title must share a significant word with the company name
+        place_title = (place.get("title") or "").lower()
+        name_words = [w for w in company_name.lower().split() if len(w) >= 4
+                      and w not in {"limited", "security", "services", "solutions"}]
+        if name_words and not any(w in place_title for w in name_words):
+            continue  # wrong business
+
+        if not result["rating"] and place.get("rating") is not None:
+            result["rating"] = str(place["rating"])
+        if not result["reviews"] and place.get("reviews") is not None:
+            result["reviews"] = str(place["reviews"])
+        if not result["phone"] and place.get("phone"):
+            result["phone"] = str(place["phone"])
+        if not result["address"] and place.get("address"):
+            result["address"] = str(place["address"])
+        break  # first matching place is enough
+
+    if any(v for v in result.values()):
+        print(f"  [Google profile] rating={result['rating']} reviews={result['reviews']} "
+              f"phone={result['phone']}")
+
+    return result
+
+
 # Cache: fb_url -> Google snippet text (populated by find_facebook_url, consumed by scrape_facebook_page)
 _FB_SNIPPET_CACHE: dict = {}
 
@@ -2269,6 +2354,10 @@ RECORD_TEMPLATE = {
     "fb_description": None,
     "fb_category": None,
     "fb_rating": None,
+    "google_rating": None,
+    "google_reviews": None,
+    "google_phone": None,
+    "google_address": None,
     "root_domain": None,
     "source_url": None,
     "last_checked": None,
@@ -2456,6 +2545,14 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         if not info.get("email") and fb_page_data.get("email"):
             info["email"] = fb_page_data["email"]
             print(f"  [Email from FB] {info['email']}")
+
+    # Fetch Google Business Profile (rating, reviews, phone, address from knowledge graph)
+    print(f"  [Google profile] Looking up: {company_name}")
+    google_profile = get_google_business_profile(company_name, website_region)
+    # Backfill phone if we don't have one yet
+    if not info.get("phone") and google_profile.get("phone"):
+        info["phone"] = google_profile["phone"]
+        print(f"  [Phone from Google] {info['phone']}")
 
     # Build list of all names to try on PSPLA
     names_to_try = []
@@ -2699,6 +2796,10 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         "fb_description": fb_page_data.get("description"),
         "fb_category": fb_page_data.get("category"),
         "fb_rating": fb_page_data.get("rating"),
+        "google_rating": google_profile.get("rating"),
+        "google_reviews": google_profile.get("reviews"),
+        "google_phone": google_profile.get("phone"),
+        "google_address": google_profile.get("address"),
         "linkedin_url": info.get("linkedin_url"),
         "nzsa_member": "true" if nzsa_result["member"] else "false",
         "nzsa_member_name": nzsa_result["member_name"],
