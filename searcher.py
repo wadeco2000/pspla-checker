@@ -1396,32 +1396,79 @@ def check_companies_office(company_name, pspla_address=None):
         company_name_upper = company_name.upper()
         import re as _re
 
-        def _find_match(lines, name_upper):
+        def _parse_co_result(lines, i, line):
+            """Parse company number, NZBN, address and status from lines following a company name."""
             address_words = ["road", "street", "avenue", "drive", "place", "lane", "way", "rd ", "st ", "ave "]
+            address = None
+            company_number = None
+            nzbn = None
+            status = "registered"  # default
+            for j in range(i + 1, min(i + 10, len(lines))):
+                lj = lines[j]
+                m = _re.match(r"\((\d{6,8})\)", lj)
+                if m and not company_number:
+                    company_number = m.group(1)
+                nzbn_m = _re.search(r"NZBN:\s*(\d+)", lj)
+                if nzbn_m and not nzbn:
+                    nzbn = nzbn_m.group(1)
+                # Status appears in the same line as the company number or a standalone line
+                lj_lower = lj.lower()
+                if "removed" in lj_lower:
+                    status = "removed"
+                elif "deregistered" in lj_lower:
+                    status = "deregistered"
+                if any(w in lj_lower for w in address_words) and len(lj) > 10 and not address:
+                    address = lj
+                if address and company_number:
+                    break
+            return {"name": line.title(), "address": address, "company_number": company_number,
+                    "nzbn": nzbn, "status": status}
+
+        def _find_match(lines, name_upper):
             for i, line in enumerate(lines):
                 if name_upper in line:
-                    address = None
-                    company_number = None
-                    nzbn = None
-                    for j in range(i + 1, min(i + 8, len(lines))):
-                        lj = lines[j]
-                        # Company number looks like "(9364441)" or "(9364441) (NZBN:9429039...)"
-                        m = _re.match(r"\((\d{6,8})\)", lj)
-                        if m and not company_number:
-                            company_number = m.group(1)
-                        nzbn_m = _re.search(r"NZBN:\s*(\d+)", lj)
-                        if nzbn_m and not nzbn:
-                            nzbn = nzbn_m.group(1)
-                        if any(w in lj.lower() for w in address_words) and len(lj) > 10 and not address:
-                            address = lj
-                        if address and company_number:
-                            break
-                    return {"name": line.title(), "address": address, "company_number": company_number, "nzbn": nzbn}
+                    return _parse_co_result(lines, i, line)
             return None
+
+        def _find_all_co_results(lines):
+            """Return all company entries found in the CO search result page."""
+            results = []
+            for i, line in enumerate(lines):
+                # CO company names appear in ALL CAPS with 5+ chars and contain "LIMITED" or "LTD"
+                if (line.isupper() and len(line) >= 5
+                        and any(w in line for w in ["LIMITED", "LTD", "TRUST", "INCORPORATED"])):
+                    results.append(_parse_co_result(lines, i, line))
+            return results
 
         result = _find_match(lines, company_name_upper)
 
-        # If no exact match, try Claude
+        # If the matched company is removed/deregistered, search more broadly for an active successor.
+        # e.g. "Tarnix Security Limited" (Removed) → broader search "Tarnix" → finds "Tarnix Limited" (Registered)
+        successor_result = None
+        if result and result.get("status") in ("removed", "deregistered"):
+            print(f"  [Companies Office] '{result['name']}' is {result['status']} — searching for active successor")
+            # Build a shorter keyword from the first 1-2 distinctive words
+            distinctive = [w for w in non_generic[:2] if len(w) >= 4]
+            if distinctive:
+                broad_term = " ".join(distinctive[:1])  # just the most distinctive word
+                broad_params = {**params, "q": broad_term}
+                try:
+                    broad_resp = requests.get(url, params=broad_params, headers=co_headers, timeout=15)
+                    broad_soup = BeautifulSoup(broad_resp.text, "html.parser")
+                    broad_lines = [l.strip() for l in broad_soup.get_text(separator="\n", strip=True).split("\n") if l.strip()]
+                    all_results = _find_all_co_results(broad_lines)
+                    # Find active companies from the broader search that share distinctive words
+                    for r in all_results:
+                        if r.get("status") == "registered":
+                            r_words = set(r["name"].lower().split())
+                            if any(w.lower() in r_words for w in distinctive):
+                                successor_result = r
+                                print(f"  [Companies Office] Active successor found: {r['name']} ({r.get('company_number')})")
+                                break
+                except Exception as broad_e:
+                    print(f"  [Companies Office broad search error] {broad_e}")
+
+        # If no exact match at all, try Claude
         if result is None:
             candidates = [l for l in lines if l.isupper() and len(l) > 5][:20]
             if candidates and pspla_address:
@@ -1444,12 +1491,14 @@ Return ONLY JSON: {{"name": "best match or null", "address": null}}"""
                 result = json.loads(raw.strip())
 
         if result is None:
-            return {"name": None, "address": None, "company_number": None, "nzbn": None, "directors": []}
+            return {"name": None, "address": None, "company_number": None, "nzbn": None,
+                    "status": None, "successor_name": None, "directors": []}
 
-        # Fetch directors from the detail page if we have a company number
+        # Fetch directors — prefer successor if original is removed
+        active_result = successor_result if successor_result else result
         directors = []
-        if result.get("company_number"):
-            directors = _co_fetch_directors(result["company_number"], co_headers)
+        if active_result.get("company_number"):
+            directors = _co_fetch_directors(active_result["company_number"], co_headers)
             if directors:
                 print(f"  [Companies Office directors] {directors}")
 
@@ -1458,6 +1507,10 @@ Return ONLY JSON: {{"name": "best match or null", "address": null}}"""
             "address": result.get("address"),
             "company_number": result.get("company_number"),
             "nzbn": result.get("nzbn"),
+            "status": result.get("status", "registered"),
+            "successor_name": successor_result.get("name") if successor_result else None,
+            "successor_number": successor_result.get("company_number") if successor_result else None,
+            "successor_address": successor_result.get("address") if successor_result else None,
             "directors": directors,
         }
 
@@ -2126,6 +2179,29 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         if co_pspla_res.get("matched_name") and (co_pspla_res.get("licensed") or not pspla_result.get("matched_name")):
             pspla_result = co_pspla_res
             names_to_try.append(co_registered_name)
+
+    # If the CO company is removed/deregistered and CO found an active successor, try the
+    # successor name on PSPLA.  This catches sold businesses that re-registered under a new name
+    # (e.g. "Tarnix Security Limited" removed → "Tarnix Limited" registered → Active PSPLA licence).
+    co_successor_name = co_result.get("successor_name")
+    if co_successor_name and not pspla_result.get("licensed") and co_successor_name not in names_to_try:
+        print(f"  [CO company removed — trying successor] {co_successor_name}")
+        successor_co = {
+            "name": co_successor_name,
+            "address": co_result.get("successor_address"),
+            "company_number": co_result.get("successor_number"),
+            "directors": co_result.get("directors") or [],
+        }
+        succ_pspla_res = check_pspla(co_successor_name, website_region=website_region,
+                                     page_text=page_text, co_result=successor_co,
+                                     directors=co_result.get("directors") or info.get("director_names") or [],
+                                     extra_context=extra_context)
+        if succ_pspla_res.get("matched_name") and (succ_pspla_res.get("licensed") or not pspla_result.get("matched_name")):
+            print(f"  [Successor match] {co_successor_name} -> PSPLA: {succ_pspla_res.get('matched_name')}")
+            pspla_result = succ_pspla_res
+            names_to_try.append(co_successor_name)
+            # Update CO result to reflect the active successor company
+            co_result = {**co_result, **successor_co}
 
     licensed_val = pspla_result.get("licensed")
     if not isinstance(licensed_val, bool):
