@@ -28,6 +28,7 @@ HISTORY_FILE = os.path.join(BASE_DIR, "search_history.json")
 SCHEDULE_FLAG = os.path.join(BASE_DIR, "schedule_enabled.flag")
 TERMS_FILE = os.path.join(BASE_DIR, "search_terms.json")
 PARTIAL_CONFIG_FILE = os.path.join(BASE_DIR, "partial_config.json")
+RECHECK_CONFIG_FILE = os.path.join(BASE_DIR, "recheck_config.json")
 PROGRESS_FILE = os.path.join(BASE_DIR, "search_progress.json")
 PID_FILE = os.path.join(BASE_DIR, "search_pid.txt")
 LOG_FILE = os.path.join(BASE_DIR, "search_log.txt")
@@ -770,6 +771,62 @@ HTML_TEMPLATE = """
 
     </div>
 
+    <!-- Bulk Recheck Panel -->
+    <div id="bulkRecheckPanel" style="background:#1e1e2e; border:1px solid #333; border-radius:6px; padding:14px 18px; margin-bottom:14px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="toggleBulkPanel()">
+        <strong style="color:#e0e0e0; font-size:13px;"><i class="fa-solid fa-rotate"></i> Bulk Recheck</strong>
+        <span id="bulkPanelToggle" style="color:#aaa; font-size:11px;">&#9660; expand</span>
+      </div>
+      <div id="bulkPanelBody" style="display:none; margin-top:12px;">
+        <div style="margin-bottom:10px; font-size:12px; color:#aaa;">Re-run selected checks against existing companies in the database.</div>
+
+        <!-- Check type selection -->
+        <div style="margin-bottom:10px;">
+          <strong style="color:#ccc; font-size:12px; display:block; margin-bottom:6px;">Checks to run:</strong>
+          <div style="display:flex; flex-wrap:wrap; gap:10px;">
+            <label style="color:#ddd; font-size:12px; display:flex; align-items:center; gap:5px; cursor:pointer;">
+              <input type="checkbox" id="rc-facebook" value="facebook"> <i class="fa-brands fa-facebook-f" style="color:#1877f2"></i> Facebook
+            </label>
+            <label style="color:#ddd; font-size:12px; display:flex; align-items:center; gap:5px; cursor:pointer;">
+              <input type="checkbox" id="rc-google" value="google"> <i class="fa-brands fa-google" style="color:#ea4335"></i> Google
+            </label>
+            <label style="color:#ddd; font-size:12px; display:flex; align-items:center; gap:5px; cursor:pointer;">
+              <input type="checkbox" id="rc-linkedin" value="linkedin"> <i class="fa-brands fa-linkedin-in" style="color:#0a66c2"></i> LinkedIn
+            </label>
+            <label style="color:#ddd; font-size:12px; display:flex; align-items:center; gap:5px; cursor:pointer;">
+              <input type="checkbox" id="rc-nzsa" value="nzsa"> <span style="color:#c0392b; font-weight:bold; font-size:11px;">NZSA</span>
+            </label>
+            <label style="color:#ddd; font-size:12px; display:flex; align-items:center; gap:5px; cursor:pointer;">
+              <input type="checkbox" id="rc-co" value="companies_office"> <i class="fa-solid fa-landmark"></i> Companies Office
+            </label>
+            <label style="color:#ddd; font-size:12px; display:flex; align-items:center; gap:5px; cursor:pointer;">
+              <input type="checkbox" id="rc-pspla" value="pspla"> <i class="fa-solid fa-shield-halved"></i> PSPLA
+            </label>
+          </div>
+        </div>
+
+        <!-- Scope selection -->
+        <div style="margin-bottom:12px;">
+          <strong style="color:#ccc; font-size:12px; display:block; margin-bottom:6px;">Apply to:</strong>
+          <div style="display:flex; gap:12px; align-items:center;">
+            <label style="color:#ddd; font-size:12px; cursor:pointer;">
+              <input type="radio" name="rcScope" id="rc-scope-all" value="all" checked onchange="updateBulkScope()"> All companies
+            </label>
+            <label style="color:#ddd; font-size:12px; cursor:pointer;">
+              <input type="radio" name="rcScope" id="rc-scope-selected" value="selected" onchange="updateBulkScope()"> Selected companies
+            </label>
+            <span id="rcSelectedCount" style="color:#e67e22; font-size:12px; display:none;"></span>
+            <button onclick="toggleRowSelection()" id="rcSelectToggle" style="display:none; padding:3px 10px; font-size:11px; background:#333; color:#ddd; border:1px solid #555; border-radius:3px; cursor:pointer;">Show checkboxes</button>
+          </div>
+        </div>
+
+        <button onclick="startBulkRecheck()" id="rcStartBtn" style="padding:6px 18px; background:#27ae60; color:white; border:none; border-radius:4px; font-size:13px; cursor:pointer; font-weight:bold;">
+          <i class="fa-solid fa-rotate"></i> Run Recheck
+        </button>
+        <span id="rcStatus" style="margin-left:12px; font-size:12px; color:#aaa;"></span>
+      </div>
+    </div>
+
     <div class="stats">
         <div class="stat-box">
             <h2>{{ total }}</h2>
@@ -847,6 +904,7 @@ HTML_TEMPLATE = """
     <table id="companyTable">
         <thead>
             <tr>
+                <th style="width:24px; padding:4px;"><input type="checkbox" id="selectAllRows" onchange="toggleSelectAll(this)" title="Select all" style="display:none;"></th>
                 <th><i class="fa-solid fa-building"></i> Company (Website)</th>
                 <th><i class="fa-solid fa-location-dot"></i> Region</th>
                 <th><i class="fa-solid fa-phone"></i> Phone</th>
@@ -881,7 +939,9 @@ HTML_TEMPLATE = """
                 data-fb-cctv="{{ 'yes' if c.fb_cctv_cameras else 'no' }}"
                 data-fb-monitoring="{{ 'yes' if c.fb_alarm_monitoring else 'no' }}"
                 data-date="{{ c.date_added or '' }}"
-                data-id="{{ loop.index }}">
+                data-id="{{ loop.index }}"
+                data-company-id="{{ c.id }}">
+                <td style="width:24px; padding:4px; text-align:center;"><input type="checkbox" class="row-select" value="{{ c.id }}" style="display:none;" onchange="updateSelectedCount()"></td>
                 <td class="company-cell">
                     {% if c.website %}<a href="{{ c.website }}" target="_blank">{{ c.company_name or '-' }}</a>{% else %}{{ c.company_name or '-' }}{% endif %}
                 </td>
@@ -946,7 +1006,7 @@ HTML_TEMPLATE = """
                 </td>
             </tr>
             <tr class="detail-row" id="detail-{{ loop.index }}">
-                <td colspan="14">
+                <td colspan="15">
                     {% if c.match_reason %}
                     <div style="background:#eaf4fb; border-left:4px solid #2980b9; padding:10px 14px; margin-bottom:10px; border-radius:4px; font-size:13px;">
                         <strong style="color:#2471a3;">Why this classification?</strong><br>
@@ -1306,6 +1366,121 @@ HTML_TEMPLATE = """
                 if (detailRow) tbody.appendChild(detailRow);
             });
         }
+
+        // ── Bulk Recheck ─────────────────────────────────────────────────────────────
+        function toggleBulkPanel() {
+            var body = document.getElementById('bulkPanelBody');
+            var toggle = document.getElementById('bulkPanelToggle');
+            var open = body.style.display === 'none';
+            body.style.display = open ? 'block' : 'none';
+            toggle.textContent = open ? '\u25b2 collapse' : '\u25bc expand';
+        }
+
+        function updateBulkScope() {
+            var sel = document.querySelector('input[name="rcScope"]:checked').value;
+            var countEl = document.getElementById('rcSelectedCount');
+            var toggleBtn = document.getElementById('rcSelectToggle');
+            if (sel === 'selected') {
+                countEl.style.display = '';
+                toggleBtn.style.display = '';
+                updateSelectedCount();
+            } else {
+                countEl.style.display = 'none';
+                toggleBtn.style.display = 'none';
+            }
+        }
+
+        var _rowSelectVisible = false;
+        function toggleRowSelection() {
+            _rowSelectVisible = !_rowSelectVisible;
+            document.querySelectorAll('.row-select').forEach(function(cb) {
+                cb.style.display = _rowSelectVisible ? '' : 'none';
+            });
+            var hdr = document.getElementById('selectAllRows');
+            if (hdr) hdr.style.display = _rowSelectVisible ? '' : 'none';
+            document.getElementById('rcSelectToggle').textContent = _rowSelectVisible ? 'Hide checkboxes' : 'Show checkboxes';
+            updateSelectedCount();
+        }
+
+        function toggleSelectAll(masterCb) {
+            document.querySelectorAll('.row-select').forEach(function(cb) {
+                cb.checked = masterCb.checked;
+            });
+            updateSelectedCount();
+        }
+
+        function updateSelectedCount() {
+            var checked = document.querySelectorAll('.row-select:checked').length;
+            var el = document.getElementById('rcSelectedCount');
+            if (el) el.textContent = checked + ' selected';
+        }
+
+        function startBulkRecheck() {
+            var checks = [];
+            ['facebook','google','linkedin','nzsa','co','pspla'].forEach(function(id) {
+                var cb = document.getElementById('rc-' + id);
+                if (cb && cb.checked) checks.push(cb.value);
+            });
+            if (checks.length === 0) {
+                alert('Please select at least one check to run.');
+                return;
+            }
+
+            var scope = document.querySelector('input[name="rcScope"]:checked').value;
+            var company_ids = 'all';
+            if (scope === 'selected') {
+                var ids = Array.from(document.querySelectorAll('.row-select:checked')).map(function(cb) {
+                    return parseInt(cb.value);
+                });
+                if (ids.length === 0) {
+                    alert('No companies selected. Please check some rows or switch to "All companies".');
+                    return;
+                }
+                company_ids = ids;
+            }
+
+            var btn = document.getElementById('rcStartBtn');
+            var status = document.getElementById('rcStatus');
+            btn.disabled = true;
+            btn.textContent = 'Starting...';
+            status.textContent = '';
+
+            fetch('/start-bulk-recheck', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({checks: checks, company_ids: company_ids})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.ok) {
+                    status.textContent = d.message || 'Started!';
+                    status.style.color = '#27ae60';
+                    btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Run Recheck';
+                    btn.disabled = false;
+                    var wrap = document.getElementById('progress-wrap');
+                    if (wrap) {
+                        wrap.style.display = 'block';
+                        var logPanel = document.getElementById('log-panel');
+                        if (logPanel) logPanel.style.display = '';
+                        wrap.scrollIntoView({behavior: 'smooth', block: 'start'});
+                    }
+                    loadSearchProgress();
+                    setTimeout(function(){ status.textContent = ''; }, 8000);
+                } else {
+                    status.textContent = 'Error: ' + (d.error || 'unknown');
+                    status.style.color = '#e74c3c';
+                    btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Run Recheck';
+                    btn.disabled = false;
+                }
+            })
+            .catch(function(e) {
+                status.textContent = 'Request failed';
+                status.style.color = '#e74c3c';
+                btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Run Recheck';
+                btn.disabled = false;
+            });
+        }
+        // ── End Bulk Recheck ──────────────────────────────────────────────────────────
 
         function lookupFacebook(id) {
             var btn = document.getElementById('fb-btn-' + id);
@@ -2355,6 +2530,24 @@ def start_partial_search():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/start-bulk-recheck", methods=["POST"])
+def start_bulk_recheck():
+    from flask import jsonify
+    if os.path.exists(RUNNING_FLAG):
+        return jsonify({"ok": False, "error": "A search is already running."}), 409
+    data = request.get_json(silent=True) or {}
+    checks = data.get("checks", [])
+    company_ids = data.get("company_ids", "all")
+    if not checks:
+        return jsonify({"error": "No checks selected"}), 400
+    config = {"checks": checks, "company_ids": company_ids}
+    with open(RECHECK_CONFIG_FILE, "w") as f:
+        json.dump(config, f)
+    _launch("run_recheck.py")
+    scope = "all companies" if company_ids == "all" else f"{len(company_ids)} selected companies"
+    return jsonify({"ok": True, "message": f"Bulk recheck started for {scope}"})
+
+
 @app.route("/search-history-data")
 def search_history_data():
     from flask import jsonify
@@ -2416,6 +2609,7 @@ SEARCH_HISTORY_TEMPLATE = """<!DOCTYPE html>
             <option value="facebook">Facebook</option>
             <option value="google-partial">Partial</option>
             <option value="directories">Directories</option>
+            <option value="bulk-recheck">Bulk Recheck</option>
         </select>
         <select id="statusFilter" onchange="renderTable()">
             <option value="">All Statuses</option>
@@ -2441,7 +2635,7 @@ SEARCH_HISTORY_TEMPLATE = """<!DOCTYPE html>
     </table>
 </div>
 <script>
-var TYPE_LABELS   = {full:'Full','google-weekly':'Weekly',facebook:'Facebook','google-partial':'Partial',directories:'Directories'};
+var TYPE_LABELS   = {full:'Full','google-weekly':'Weekly',facebook:'Facebook','google-partial':'Partial',directories:'Directories','bulk-recheck':'Bulk Recheck'};
 var STATUS_COLORS = {completed:'#27ae60',stopped:'#e67e22',error:'#e74c3c'};
 var _allRows = [];
 
@@ -2940,7 +3134,9 @@ def _kill_search_processes():
     # Match both "run_directories.py" and bare "run_directories" (covers import-style launches)
     search_scripts = {
         "searcher.py", "run_weekly.py", "run_facebook.py", "run_partial.py", "run_directories.py",
+        "run_recheck.py",
         "searcher", "run_weekly", "run_facebook", "run_partial", "run_directories",
+        "run_recheck",
     }
     our_pid = str(os.getpid())
     try:
@@ -3733,7 +3929,7 @@ def _launch(script, args=None, triggered_by="manual"):
     _type_map = {
         "searcher.py": "full", "run_weekly.py": "google-weekly",
         "run_facebook.py": "facebook", "run_partial.py": "google-partial",
-        "run_directories.py": "directories",
+        "run_directories.py": "directories", "run_recheck.py": "bulk-recheck",
     }
     started_iso = datetime.now(timezone.utc).isoformat()
     try:
