@@ -1329,7 +1329,9 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
     if co_registered_name and not pspla_result.get("licensed") and co_registered_name not in names_to_try:
         print(f"  [Checking PSPLA with CO name] {co_registered_name}")
         co_pspla_res = check_pspla(co_registered_name, website_region=website_region)
-        if co_pspla_res.get("matched_name"):
+        # Only replace if CO search found an active licence, or original had no match at all.
+        # Don't replace a known-expired result or we'll skip the individual licence check.
+        if co_pspla_res.get("matched_name") and (co_pspla_res.get("licensed") or not pspla_result.get("matched_name")):
             pspla_result = co_pspla_res
             names_to_try.append(co_registered_name)
 

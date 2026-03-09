@@ -1647,10 +1647,12 @@ def recheck_pspla_for_company():
     try:
         from searcher import check_pspla, check_pspla_individual
         result = check_pspla(company_name, website_region=company_region)
-        # If no active licensed match found and we have a Companies Office name, try that too
+        # If no active licensed match found and we have a Companies Office name, try that too.
+        # Only replace result if CO search is licensed (active), or if the original found no
+        # matched_name at all — don't replace a known-expired result or we skip individual check.
         if not result.get("licensed") and co_name and co_name != company_name:
             co_result = check_pspla(co_name, website_region=company_region)
-            if co_result.get("matched_name"):
+            if co_result.get("matched_name") and (co_result.get("licensed") or not result.get("matched_name")):
                 result = co_result
         licensed = result.get("licensed")
         pspla_name = result.get("matched_name")
