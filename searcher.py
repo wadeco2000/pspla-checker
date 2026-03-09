@@ -229,15 +229,33 @@ def google_search(query, num_results=100, time_filter=None):
 
 
 def get_google_business_profile(company_name, region=""):
-    """Fetch Google Business Profile data (rating, reviews, phone, address) via SerpAPI.
+    """Fetch Google Business Profile data via SerpAPI.
 
-    SerpAPI returns knowledge_graph and local_results sections alongside organic results
-    at no extra cost per search. We run one targeted query per company and parse those
-    sections. All fields may be None if no business profile exists.
+    SerpAPI returns knowledge_graph and local_results alongside organic results
+    at no extra query cost. We run one targeted search and parse all three sections.
 
-    Returns dict: rating, reviews, phone, address
+    Email: Google rarely exposes it in the knowledge panel, but we scan:
+      1. knowledge_graph.email (set by business in their Google profile)
+      2. local_results[].email
+      3. Organic result snippets from this same search (no extra query)
+    We reject any email from google.com/facebook.com/sentry.io domains.
+
+    Returns dict: rating, reviews, phone, address, email  (all may be None)
     """
-    result = {"rating": None, "reviews": None, "phone": None, "address": None}
+    import re as _re
+
+    result = {"rating": None, "reviews": None, "phone": None, "address": None, "email": None}
+
+    _EMAIL_RE = _re.compile(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}')
+    _BAD_EMAIL_DOMAINS = {"google", "facebook", "sentry", "example", "wix", "squarespace",
+                          "wordpress", "godaddy", "namecheap", "cloudflare"}
+
+    def _clean_email(raw):
+        raw = raw.strip().lower().rstrip(".")
+        domain_part = raw.split("@")[-1].split(".")[0]
+        if domain_part in _BAD_EMAIL_DOMAINS:
+            return None
+        return raw
 
     query = f'"{company_name}"'
     if region:
@@ -251,7 +269,7 @@ def get_google_business_profile(company_name, region=""):
                 "api_key": SERPAPI_KEY,
                 "engine": "google",
                 "q": query,
-                "num": 5,           # minimal organic results — we want the panel data
+                "num": 5,       # small — we mainly want the panel sections
                 "gl": "nz",
                 "hl": "en",
             },
@@ -265,34 +283,34 @@ def get_google_business_profile(company_name, region=""):
     if "error" in data:
         return result
 
-    # ── Knowledge Graph (the right-side business panel) ─────────────────────
+    # ── Knowledge Graph ───────────────────────────────────────────────────────
     kg = data.get("knowledge_graph", {})
     if kg:
         if kg.get("rating") is not None:
             result["rating"] = str(kg["rating"])
         if kg.get("reviews") is not None:
             result["reviews"] = str(kg["reviews"])
-        # Phone — may be in root or nested under contact info
         phone = kg.get("phone") or kg.get("main_phone")
         if phone:
             result["phone"] = str(phone)
-        # Address
         addr = kg.get("address")
         if addr:
             result["address"] = str(addr)
+        # Email — sometimes present when business has set it in Google Business Profile
+        email = kg.get("email")
+        if email:
+            result["email"] = _clean_email(str(email))
 
-    # ── Local Results (map pack — business listings) ─────────────────────────
-    # Use as fallback when knowledge graph didn't have all fields
+    # ── Local Results (map pack) ──────────────────────────────────────────────
     local_results = data.get("local_results", [])
     if isinstance(local_results, dict):
-        # SerpAPI sometimes nests it: {"places": [...]}
         local_results = local_results.get("places", [])
 
+    name_words = [w for w in company_name.lower().split() if len(w) >= 4
+                  and w not in {"limited", "security", "services", "solutions"}]
+
     for place in local_results[:3]:
-        # Match: place title must share a significant word with the company name
         place_title = (place.get("title") or "").lower()
-        name_words = [w for w in company_name.lower().split() if len(w) >= 4
-                      and w not in {"limited", "security", "services", "solutions"}]
         if name_words and not any(w in place_title for w in name_words):
             continue  # wrong business
 
@@ -304,11 +322,28 @@ def get_google_business_profile(company_name, region=""):
             result["phone"] = str(place["phone"])
         if not result["address"] and place.get("address"):
             result["address"] = str(place["address"])
-        break  # first matching place is enough
+        if not result["email"] and place.get("email"):
+            result["email"] = _clean_email(str(place["email"]))
+        break
+
+    # ── Organic result snippets — free email scan from this same search ───────
+    # Google Business websites sometimes show email in their meta description
+    # which appears in the snippet. Only use if not already found above.
+    if not result["email"]:
+        for item in data.get("organic_results", [])[:5]:
+            for text in (item.get("snippet", ""), item.get("title", "")):
+                m = _EMAIL_RE.search(text)
+                if m:
+                    candidate = _clean_email(m.group(0))
+                    if candidate:
+                        result["email"] = candidate
+                        break
+            if result["email"]:
+                break
 
     if any(v for v in result.values()):
         print(f"  [Google profile] rating={result['rating']} reviews={result['reviews']} "
-              f"phone={result['phone']}")
+              f"phone={result['phone']} email={result['email']}")
 
     return result
 
@@ -2358,6 +2393,7 @@ RECORD_TEMPLATE = {
     "google_reviews": None,
     "google_phone": None,
     "google_address": None,
+    "google_email": None,
     "root_domain": None,
     "source_url": None,
     "last_checked": None,
@@ -2549,10 +2585,13 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
     # Fetch Google Business Profile (rating, reviews, phone, address from knowledge graph)
     print(f"  [Google profile] Looking up: {company_name}")
     google_profile = get_google_business_profile(company_name, website_region)
-    # Backfill phone if we don't have one yet
+    # Backfill phone/email if we don't have one yet
     if not info.get("phone") and google_profile.get("phone"):
         info["phone"] = google_profile["phone"]
         print(f"  [Phone from Google] {info['phone']}")
+    if not info.get("email") and google_profile.get("email"):
+        info["email"] = google_profile["email"]
+        print(f"  [Email from Google] {info['email']}")
 
     # Build list of all names to try on PSPLA
     names_to_try = []
@@ -2800,6 +2839,7 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         "google_reviews": google_profile.get("reviews"),
         "google_phone": google_profile.get("phone"),
         "google_address": google_profile.get("address"),
+        "google_email": google_profile.get("email"),
         "linkedin_url": info.get("linkedin_url"),
         "nzsa_member": "true" if nzsa_result["member"] else "false",
         "nzsa_member_name": nzsa_result["member_name"],
