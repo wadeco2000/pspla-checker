@@ -945,6 +945,17 @@ HTML_TEMPLATE = """
                             </button>
                         </div>
                         <div class="detail-item" style="grid-column: 1 / -1; border-top: 1px solid #ddd; padding-top: 10px; margin-top: 4px;">
+                            <label style="font-weight:bold; color:#555; font-size:11px; display:block; margin-bottom:6px;">AI Matching Decisions</label>
+                            <div id="ai-decisions-{{ c.id }}" style="font-size:11px;">
+                                <button onclick="loadAIDecisions('{{ c.id }}', this.dataset.name)"
+                                        data-name="{{ (c.company_name or '') | e }}"
+                                        style="padding:2px 10px; font-size:11px; background:#2980b9; color:white; border:none; border-radius:3px; cursor:pointer;">
+                                    Load AI reasoning
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="detail-item" style="grid-column: 1 / -1; border-top: 1px solid #ddd; padding-top: 10px; margin-top: 4px;">
                             <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
                                 <button onclick="toggleEditForm({{ c.id }})"
                                         style="padding:3px 12px; font-size:12px; background:#8e44ad; color:white; border:none; border-radius:3px; cursor:pointer;">
@@ -1187,6 +1198,48 @@ HTML_TEMPLATE = """
                 btn.textContent = 'Re-check';
                 btn.disabled = false;
             });
+        }
+
+        function loadAIDecisions(id, name) {
+            var container = document.getElementById('ai-decisions-' + id);
+            container.innerHTML = '<span style="color:#888">Loading...</span>';
+            fetch('/company-ai-decisions?name=' + encodeURIComponent(name))
+                .then(function(r) { return r.json(); })
+                .then(function(rows) {
+                    if (!rows || !rows.length) {
+                        container.innerHTML = '<span style="color:#aaa; font-size:11px;">No AI decisions recorded for this company.</span>';
+                        return;
+                    }
+                    var colors = {
+                        'ACCEPTED': '#1a7a3a', 'CONFIRMED': '#1a7a3a',
+                        'REJECTED': '#c0392b',
+                        'Strategy 4': '#8e44ad',
+                        'inconsistency': '#e67e22',
+                        'cross-check': '#e67e22',
+                    };
+                    var html = '<div style="display:flex; flex-direction:column; gap:6px; margin-top:4px;">';
+                    rows.forEach(function(row) {
+                        var ts = row.timestamp ? new Date(row.timestamp).toLocaleString('en-NZ', {timeZone:'Pacific/Auckland'}) : '';
+                        var changes = row.changes || '';
+                        var notes = row.notes || '';
+                        var triggered = row.triggered_by || '';
+                        // Pick border colour based on keywords
+                        var borderColor = '#2980b9';
+                        Object.keys(colors).forEach(function(k) {
+                            if (changes.indexOf(k) !== -1) borderColor = colors[k];
+                        });
+                        html += '<div style="border-left:3px solid ' + borderColor + '; padding:5px 8px; background:#f8f9fa; border-radius:0 4px 4px 0;">';
+                        html += '<div style="color:#666; font-size:10px; margin-bottom:2px;">' + ts + ' &nbsp;·&nbsp; ' + triggered + '</div>';
+                        html += '<div style="color:#222;">' + changes + '</div>';
+                        if (notes) html += '<div style="color:#888; font-size:10px; margin-top:2px;">' + notes + '</div>';
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                    container.innerHTML = html;
+                })
+                .catch(function(e) {
+                    container.innerHTML = '<span style="color:#c0392b; font-size:11px;">Error loading AI decisions: ' + e + '</span>';
+                });
         }
 
         function toggleEditForm(id) {
@@ -1839,6 +1892,23 @@ def audit_log_data():
     resp = requests.get(
         f"{SUPABASE_URL}/rest/v1/AuditLog?select=*&order=timestamp.desc&limit={limit}",
         headers=headers, timeout=15
+    )
+    return jsonify(resp.json() if resp.ok else [])
+
+
+@app.route("/company-ai-decisions")
+def company_ai_decisions():
+    from flask import jsonify
+    company_name = request.args.get("name", "")
+    if not company_name:
+        return jsonify([])
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    encoded = requests.utils.quote(company_name)
+    resp = requests.get(
+        f"{SUPABASE_URL}/rest/v1/AuditLog"
+        f"?select=*&action=eq.llm_decision&company_name=eq.{encoded}"
+        f"&order=timestamp.asc",
+        headers=headers, timeout=10
     )
     return jsonify(resp.json() if resp.ok else [])
 

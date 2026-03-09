@@ -876,8 +876,9 @@ Return ONLY JSON: {{"match": true or false, "confidence": "high/medium/low", "re
         return {"match": False, "confidence": "low", "reason": "deep verification error"}
 
 
-def verify_pspla_match(website_company, pspla_company, website_region, pspla_address):
-    """Use Claude to verify if a PSPLA match is genuinely the same company."""
+def verify_pspla_match(website_company, pspla_company, website_region, pspla_address, _audit_name=None):
+    """Use Claude to verify if a PSPLA match is genuinely the same company.
+    _audit_name: if set, writes the LLM decision to the audit log."""
     import re as _re
     # Hard pre-check: every significant word in the website company name must appear
     # as an EXACT whole word in the PSPLA name.  Catches "coast" vs "coastal",
@@ -938,7 +939,15 @@ Return ONLY JSON: {{"match": true or false, "confidence": "high/medium/low", "re
             text = text.split("```")[1]
             if text.startswith("json"):
                 text = text[4:]
-        return json.loads(text.strip())
+        result = json.loads(text.strip())
+        if _audit_name:
+            verdict = "ACCEPTED" if result.get("match") else "REJECTED"
+            write_audit("llm_decision", None, _audit_name,
+                        changes=f"verify_pspla_match {verdict} '{pspla_company}' "
+                                f"(confidence: {result.get('confidence','?')}): {result.get('reason','')}",
+                        triggered_by="verify_pspla_match",
+                        notes=f"PSPLA address: {pspla_address or 'unknown'} | region: {website_region or 'unknown'}")
+        return result
     except Exception as e:
         print(f"  [Verify error] {e}")
         return {"match": False, "confidence": "low", "reason": "verification error"}
@@ -1222,7 +1231,8 @@ def check_pspla(company_name, website_region=None, page_text=None, co_result=Non
                 for cand in candidates:
                     cname = get_field(cand, "name_txt") or get_field(cand, "caseTitle_s") or ""
                     caddr = get_field(cand, "registeredOffice_txt") or get_field(cand, "townCity_txt") or ""
-                    verification = verify_pspla_match(company_name, cname, website_region, caddr)
+                    verification = verify_pspla_match(company_name, cname, website_region, caddr,
+                                                     _audit_name=company_name)
                     if verification.get("match"):
                         # For low or medium confidence, do a deeper check using all available context
                         orig_confidence = verification.get("confidence")
@@ -1263,7 +1273,8 @@ def check_pspla(company_name, website_region=None, page_text=None, co_result=Non
                             for cand in aug_docs[:3]:
                                 cname = get_field(cand, "name_txt") or get_field(cand, "caseTitle_s") or ""
                                 caddr = get_field(cand, "registeredOffice_txt") or get_field(cand, "townCity_txt") or ""
-                                verification = verify_pspla_match(company_name, cname, website_region, caddr)
+                                verification = verify_pspla_match(company_name, cname, website_region, caddr,
+                                                                 _audit_name=company_name)
                                 if verification.get("match"):
                                     verified_doc = cand
                                     match_method = f"region-augmented ({augmented}, verified: {verification.get('confidence')})"
@@ -2128,7 +2139,8 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         if res.get("matched_name"):
             matched = res["matched_name"]
             verification = verify_pspla_match(
-                company_name, matched, website_region, res.get("pspla_address")
+                company_name, matched, website_region, res.get("pspla_address"),
+                _audit_name=company_name
             )
             if not verification.get("match"):
                 print(f"  [Verify rejected] {company_name} vs {matched} - {verification.get('reason')}")
