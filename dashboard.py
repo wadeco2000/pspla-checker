@@ -2095,47 +2095,59 @@ load();
          border:none;border-radius:4px;cursor:pointer;font-size:11px;">📋 Copy all</button>
 <div id="claude-context-text">PSPLA Checker — Claude Code context (paste this at the start of a new session)
 
-PROJECT: Automated NZ security company licence checker.
-Finds companies via Google/Facebook/directories, checks PSPLA licence status,
-stores results in Supabase. Flask dashboard for browsing and managing results.
+PROJECT: Automated NZ security company licence checker. Finds NZ security companies
+via Google/Facebook/NZSA/LinkedIn, checks each against PSPLA licence register,
+stores results in Supabase. Flask dashboard for browsing, managing, correcting results.
+Owner: Wade. Location: C:\Users\WadeAdmin\pspla-checker\
 
-LOCATION: C:\\Users\\WadeAdmin\\pspla-checker\\
-READ FIRST: CLAUDE.md in the project root has full documentation.
+READ FIRST: CLAUDE.md in the project root — full pipeline, AI functions, DB schema,
+design patterns, common tasks.
 
 KEY FILES:
-- searcher.py      Core engine: search, scrape, match, verify, save (~3500 lines)
-- dashboard.py     Flask web UI + scheduler + all API endpoints (~2500 lines)
-- run_weekly.py    Full Google search pass entry point
-- run_facebook.py  Facebook-only search entry point
-- run_directories.py  NZSA + LinkedIn directory import entry point
-- run_partial.py   Partial/targeted search entry point
-- search_terms.json   Google + Facebook search terms (editable from dashboard)
-- .env             API keys (ANTHROPIC_API_KEY, SERPAPI_KEY, SUPABASE_URL/KEY, SMTP_*)
+- searcher.py        Core engine: search, scrape, match, verify, save (~3500+ lines)
+- dashboard.py       Flask web UI + APScheduler + all API endpoints
+- run_weekly.py      Full Google search entry point (all regions x all terms)
+- run_facebook.py    Facebook-only search entry point
+- run_directories.py NZSA + LinkedIn directory import entry point
+- run_partial.py     Partial/targeted search (reads partial_config.json)
+- corrections.json   Blocked false-positive matches (checked before every PSPLA accept)
+- lessons.json       LLM-generated rules from past corrections (injected into verify prompts)
+- search_terms.json  Editable search terms (Google + Facebook)
+- .env               ANTHROPIC_API_KEY, SERPAPI_KEY, SUPABASE_URL, SUPABASE_KEY, SMTP_*
 
-TECH STACK: Python, Flask, Supabase (PostgreSQL via REST), Claude Haiku (LLM),
-SerpAPI (Google searches), APScheduler, Windows 11.
+PIPELINE: Google/FB search → scrape website → extract company info (Haiku LLM)
+→ scrape Facebook page (3-tier: snippet cache / og:meta / mobile fallback)
+→ Companies Office check (Google, parses CO status + directors + incorporation date)
+→ PSPLA check (4 strategies: name variants → keywords → single keyword → Haiku suggests)
+→ verify match (Sonnet: hard pre-check + lessons injection + LLM decision → audit log)
+→ deep verify if low/medium confidence (Sonnet with all context)
+→ NZSA check → cross-check all sources (Haiku) → save to Supabase
 
-PIPELINE: Google/Facebook search → scrape website → extract company info (LLM)
-→ Companies Office check → PSPLA Solr check → LLM verify match → NZSA check
-→ LLM cross-check sources → Facebook page scrape → save to Supabase.
+AI FUNCTIONS (all use Anthropic SDK, all fail gracefully):
+- extract_company_info()        Haiku — name/region from scraped page text
+- _llm_suggest_pspla_names()    Haiku — PSPLA search terms when strategies 1-3 fail
+- verify_pspla_match()          Sonnet — is PSPLA result the same company?
+- _llm_deep_verify()            Sonnet — full-context verify for low/medium confidence
+- _llm_cross_check_sources()    Haiku — consistency check across PSPLA/CO/NZSA/FB
+- parse_and_save_correction()   Haiku — parse user correction into structured JSON
+- _generate_and_save_lesson()   Haiku — create rule from false positive correction
 
 PSPLA API: https://forms.justice.govt.nz/forms/publicSolrProxy/solr/PSPLA/select
+Solr fields: name_txt, permitStatus_s, permitNumber_txt, permitEndDate_s,
+  permitStartDates_s, permitTempOrPerm_s, isIndividual_b, registeredOffice_txt,
+  securityTechnician_s, monitoringOfficer_s, propertyGuard_s, crowdController_s,
+  personalGuard_s, privateInvestigator_s, repossessionAgent_s, securityConsultant_s
 
 KEY PATTERNS:
-- RECORD_TEMPLATE in searcher.py = all DB columns with None defaults
-- check_schema() validates columns exist in Supabase before search starts
-- running.flag / pause.flag = file-based IPC, deleted on dashboard startup
-- LLM graceful degradation: API failure returns low-confidence acceptance not rejection
-- Sold company detection: CO "Removed" status → successor search → retry PSPLA
-- FB snippet cache (_FB_SNIPPET_CACHE): populated by find_facebook_url, used by
-  scrape_facebook_page tier 1 (no direct FB hit needed)
-- All LLM decisions written to AuditLog (action=llm_decision) — viewable per company
-- All run_*.py files have __main__ guards to prevent accidental execution on import
-
-SUPABASE TABLES: Companies (main), AuditLog (corrections + LLM decisions)
-GIT: yes, git repo, dashboard has rollback button. Commit after significant changes.
-
-For full detail on every function, column, and endpoint — read CLAUDE.md.</div>
+- RECORD_TEMPLATE = all DB columns with None defaults; check_schema() validates at startup
+- running.flag/pause.flag = file IPC; both deleted on dashboard startup + stop
+- LLM failure → low-confidence acceptance (not rejection) so search keeps running
+- CO "Removed" → successor keyword search → retry PSPLA with successor name
+- _FB_SNIPPET_CACHE: snippet from SerpAPI stored when FB URL found; used by scrape tier 1
+- All LLM calls write to AuditLog (action=llm_decision); viewable per company on dashboard
+- corrections.json blocks specific company→PSPLA pairs; lessons.json injects rules into prompts
+- __main__ guards on all run_*.py prevent accidental import-triggered searches
+- Git repo; dashboard has Rollback button; commit after every significant change session</div>
   </div>
 </div>
 
