@@ -228,6 +228,72 @@ def google_search(query, num_results=100, time_filter=None):
         return []
 
 
+# Cache: fb_url -> Google snippet text (populated by find_facebook_url, consumed by scrape_facebook_page)
+_FB_SNIPPET_CACHE: dict = {}
+
+
+def _parse_fb_snippet(snippet: str) -> dict:
+    """Extract structured data from a Google search snippet for a Facebook business page.
+
+    Google's snippet for FB pages typically looks like:
+        "436 followers · Home Security Company · +64 6 349 0999 · 203 Guyton St..."
+    or  "Rating: 4.8 · 15 reviews · Security Monitoring"
+
+    Returns dict with keys matching scrape_facebook_page output (all may be None).
+    """
+    import re as _re
+    data = {
+        "followers": None, "phone": None, "email": None,
+        "address": None, "category": None, "rating": None,
+    }
+    if not snippet:
+        return data
+
+    # Followers — "1,234 followers" or "1.2K followers"
+    m = _re.search(r'([\d,]+(?:\.\d+)?[KkMm]?)\s+followers', snippet, _re.I)
+    if m:
+        data["followers"] = m.group(1).replace(",", "")
+
+    # NZ phone number — +64 xxx or 0x xxx xxxx
+    m = _re.search(r'(\+64[\d\s\-().]{6,18}|\b0\d[\d\s\-]{7,12})', snippet)
+    if m:
+        candidate = m.group(1).strip().rstrip(".")
+        if _re.search(r'\d{6,}', candidate.replace(" ", "").replace("-", "")):
+            data["phone"] = candidate
+
+    # Email
+    m = _re.search(r'([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})', snippet)
+    if m:
+        email = m.group(1).lower()
+        if "facebook" not in email:
+            data["email"] = email
+
+    # Rating — "4.8 out of 5", "100% recommend", "Rating: 4.8"
+    for pat in [r'Rating[:\s]*([\d.]+)', r'([\d.]+)\s*out of\s*5', r'(\d+)%\s*recommend']:
+        m = _re.search(pat, snippet, _re.I)
+        if m:
+            data["rating"] = m.group(1)
+            break
+
+    # Category — text segment between · separators that looks like a business type
+    # e.g. "436 followers · Home Security Company · Open now"
+    parts = [p.strip() for p in _re.split(r'[·•|]', snippet)]
+    category_words = {
+        "security", "guard", "alarm", "monitor", "cctv", "surveillance",
+        "investigation", "investigator", "patrol", "company", "service",
+        "solutions", "protection", "systems",
+    }
+    for part in parts:
+        words = set(part.lower().split())
+        if (3 <= len(part.split()) <= 6
+                and words & category_words
+                and not _re.search(r'\d{3,}', part)):
+            data["category"] = part
+            break
+
+    return data
+
+
 def find_facebook_url(company_name, page_text=""):
     """Search Google for the company's Facebook page.
 
@@ -372,26 +438,30 @@ def find_facebook_url(company_name, page_text=""):
             if r2 and r2 is not SERPAPI_EXHAUSTED:
                 all_candidates += _extract_fb_candidates(r2)
 
-        # Dedupe by URL, track score and NZ signal separately
-        best_per_url = {}  # url -> (total_score, has_nz_signal)
+        # Dedupe by URL, track score, NZ signal, and best snippet
+        best_per_url = {}  # url -> (total_score, has_nz_signal, snippet)
         for url, snippet, title in all_candidates:
             ws = _word_score(url, snippet, name_words)
             nz = _nz_bonus(url, snippet, title)
             total = ws + nz
             has_nz = nz > 0
             if url not in best_per_url or total > best_per_url[url][0]:
-                best_per_url[url] = (total, has_nz)
+                best_per_url[url] = (total, has_nz, snippet)
 
         if not best_per_url:
             return None
 
         ranked = sorted(best_per_url.items(), key=lambda x: -x[1][0])
 
+        def _pick(url, entry):
+            _FB_SNIPPET_CACHE[url] = entry[2]  # cache snippet for scrape_facebook_page
+            return url
+
         # Strongly prefer results with a NZ signal — only return non-NZ as last
         # resort after an explicit NZ-targeted search also finds nothing
         nz_results = [(url, data) for url, data in ranked if data[1]]
         if nz_results:
-            return nz_results[0][0]
+            return _pick(*nz_results[0])
 
         # No NZ signal found — try one targeted search before giving up
         r_nz = google_search(f'site:facebook.com "{company_name}" "New Zealand"', num_results=10)
@@ -402,7 +472,9 @@ def find_facebook_url(company_name, page_text=""):
                 best = sorted(nz_extra_signal,
                                key=lambda x: -(_word_score(x[0], x[1], name_words)
                                                + _nz_bonus(x[0], x[1], x[2])))
-                return best[0][0]
+                winner_url, winner_snippet, _ = best[0][0], best[0][1], best[0][2]
+                _FB_SNIPPET_CACHE[winner_url] = winner_snippet
+                return winner_url
 
         # Nothing with NZ signal — return None rather than a wrong-country page
         return None
@@ -413,15 +485,20 @@ def find_facebook_url(company_name, page_text=""):
 
 
 def scrape_facebook_page(fb_url):
-    """Scrape a public Facebook business page for contact/profile data.
+    """Gather public Facebook business page data using three tiers:
 
-    Tries the mobile site (m.facebook.com) which exposes more raw HTML.
+    1. Google/SerpAPI snippet cache — populated by find_facebook_url, no FB hit.
+       Reliably yields: followers, phone, category, rating (from Google's index).
+    2. og: meta tags from page HEAD only — survives login wall, fast, low detection risk.
+       Reliably yields: description.
+    3. Mobile site fallback (m.facebook.com/about/) — full parse if 1+2 leave gaps.
+       May be blocked; always fails gracefully.
+
     All fields may be None — caller must handle gracefully.
-
-    Returns dict with keys:
-        followers, phone, email, address, description, category, rating
+    Returns dict: followers, phone, email, address, description, category, rating
     """
     import re as _re
+    import time as _time
 
     result = {
         "followers": None, "phone": None, "email": None,
@@ -429,123 +506,145 @@ def scrape_facebook_page(fb_url):
         "rating": None,
     }
 
-    # Convert to mobile URL slug
-    slug = _re.sub(r"^https?://(www\.)?facebook\.com/", "", fb_url.rstrip("/"))
-    mobile_about = f"https://m.facebook.com/{slug}/about/"
-    mobile_main = f"https://m.facebook.com/{slug}/"
+    # ── Tier 1: parse the Google snippet we already fetched ──────────────────
+    cached_snippet = _FB_SNIPPET_CACHE.get(fb_url, "")
+    if cached_snippet:
+        parsed = _parse_fb_snippet(cached_snippet)
+        for k, v in parsed.items():
+            if v:
+                result[k] = v
 
-    # Mobile iPhone UA — renders simpler HTML with more raw text
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
-            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
-        ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-NZ,en;q=0.9",
-    }
-
-    raw = ""
-    for url in [mobile_about, mobile_main]:
+    # ── Tier 2: fetch only the HTML <head> for og: meta tags ─────────────────
+    # We stream just the first 8 KB — enough for the <head> block, avoids
+    # downloading the full JS bundle and reduces fingerprinting exposure.
+    if not result["description"]:
         try:
-            resp = requests.get(url, headers=headers, timeout=12, allow_redirects=True)
-            if (resp.status_code == 200
-                    and "login" not in resp.url
-                    and len(resp.text) > 500):
-                raw = resp.text
-                break
+            head_resp = requests.get(
+                fb_url,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    ),
+                    "Accept": "text/html",
+                    "Accept-Language": "en-NZ,en;q=0.9",
+                },
+                timeout=10,
+                stream=True,
+                allow_redirects=True,
+            )
+            # Read only first 8 KB — the <head> is always in there
+            head_html = b""
+            for chunk in head_resp.iter_content(chunk_size=1024):
+                head_html += chunk
+                if len(head_html) >= 8192 or b"</head>" in head_html:
+                    break
+            head_resp.close()
+            head_text = head_html.decode("utf-8", errors="ignore")
+
+            if "login" not in head_resp.url:
+                for pat in [
+                    r'<meta[^>]+property="og:description"[^>]+content="([^"]{20,500})"',
+                    r'<meta[^>]+content="([^"]{20,500})"[^>]+property="og:description"',
+                    r'<meta[^>]+name="description"[^>]+content="([^"]{20,500})"',
+                ]:
+                    m = _re.search(pat, head_text, _re.IGNORECASE)
+                    if m:
+                        desc = m.group(1).strip()
+                        if len(desc) > 30 and "facebook" not in desc.lower()[:30]:
+                            result["description"] = desc[:500]
+                            break
         except Exception:
             pass
 
-    if not raw:
-        return result
+    # ── Tier 3: mobile site — only if fields still missing ───────────────────
+    missing = [k for k, v in result.items() if v is None]
+    if missing:
+        slug = _re.sub(r"^https?://(www\.)?facebook\.com/", "", fb_url.rstrip("/"))
+        _time.sleep(1)  # brief pause — reduces consecutive-request detection
+        raw = ""
+        for url in [f"https://m.facebook.com/{slug}/about/",
+                    f"https://m.facebook.com/{slug}/"]:
+            try:
+                resp = requests.get(
+                    url,
+                    headers={
+                        "User-Agent": (
+                            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) "
+                            "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                            "Version/16.6 Mobile/15E148 Safari/604.1"
+                        ),
+                        "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+                        "Accept-Language": "en-NZ,en;q=0.9",
+                        "Accept-Encoding": "gzip, deflate, br",
+                        "DNT": "1",
+                        "Upgrade-Insecure-Requests": "1",
+                    },
+                    timeout=12,
+                    allow_redirects=True,
+                )
+                if (resp.status_code == 200
+                        and "login" not in resp.url
+                        and len(resp.text) > 800):
+                    raw = resp.text
+                    break
+            except Exception:
+                pass
 
-    # --- Followers ---
-    for pat in [
-        r'"follower_count"\s*:\s*(\d+)',
-        r'"page_likers"\s*:\s*\{"count"\s*:\s*(\d+)',
-        r'(\d[\d,]+)\s+(?:Followers|followers)',
-        r'"subscriber_count"\s*:\s*(\d+)',
-    ]:
-        m = _re.search(pat, raw)
-        if m:
-            result["followers"] = m.group(1).replace(",", "")
-            break
+        if raw:
+            def _try(field, patterns, transform=None):
+                if result[field]:
+                    return  # already filled by tier 1 or 2
+                for pat in patterns:
+                    m = _re.search(pat, raw, _re.IGNORECASE)
+                    if m:
+                        val = (transform(m) if transform else m.group(1).strip())
+                        if val:
+                            result[field] = val
+                            return
 
-    # --- Phone ---
-    for pat in [
-        r'"label"\s*:\s*"Phone"[^}]{0,200}"text"\s*:\s*"([^"]+)"',
-        r'(?:Phone|phone|tel)[:\s]*(\+?\d[\d\s\-().]{6,20})',
-    ]:
-        m = _re.search(pat, raw)
-        if m:
-            candidate = m.group(1).strip()
-            if _re.search(r'\d{6,}', candidate.replace(" ", "").replace("-", "")):
-                result["phone"] = candidate
-                break
+            _try("followers", [
+                r'"follower_count"\s*:\s*(\d+)',
+                r'"subscriber_count"\s*:\s*(\d+)',
+                r'(\d[\d,]+)\s+followers',
+            ], lambda m: m.group(1).replace(",", ""))
 
-    # --- Email ---
-    for pat in [
-        r'"label"\s*:\s*"Email"[^}]{0,200}"text"\s*:\s*"([^"@\s]{1,60}@[^"@\s]{1,60})"',
-        r'mailto:([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})',
-    ]:
-        m = _re.search(pat, raw)
-        if m:
-            email = m.group(1).strip().lower()
-            # Reject internal Facebook/tracking addresses
-            if "@" in email and not any(x in email for x in ["facebook", "sentry", "example"]):
-                result["email"] = email
-                break
+            _try("phone", [
+                r'"label"\s*:\s*"Phone"[^}]{0,200}"text"\s*:\s*"([^"]+)"',
+                r'(?:Phone|phone|tel)[:\s]*(\+?\d[\d\s\-().]{6,20})',
+            ], lambda m: (m.group(1).strip()
+                          if _re.search(r'\d{6,}', m.group(1).replace(" ", ""))
+                          else None))
 
-    # --- Address ---
-    for pat in [
-        r'"label"\s*:\s*"Address"[^}]{0,400}"text"\s*:\s*"([^"]{5,120})"',
-        r'"location"\s*:\s*\{[^}]*?"city"\s*:\s*"([^"]+)"[^}]*?"country"\s*:\s*"([^"]+)"',
-    ]:
-        m = _re.search(pat, raw)
-        if m:
-            if m.lastindex and m.lastindex >= 2:
-                result["address"] = f"{m.group(1)}, {m.group(2)}"
-            else:
-                result["address"] = m.group(1).strip()
-            break
+            _try("email", [
+                r'"label"\s*:\s*"Email"[^}]{0,200}"text"\s*:\s*"([^"@\s]{1,60}@[^"@\s]{1,60})"',
+                r'mailto:([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})',
+            ], lambda m: (m.group(1).lower()
+                          if not any(x in m.group(1) for x in ["facebook", "sentry"])
+                          else None))
 
-    # --- Description (About text) ---
-    for pat in [
-        r'"description"\s*:\s*"([^"]{20,500})"',
-        r'<meta[^>]+property="og:description"[^>]+content="([^"]{20,500})"',
-        r'<meta[^>]+name="description"[^>]+content="([^"]{20,500})"',
-    ]:
-        m = _re.search(pat, raw, _re.IGNORECASE)
-        if m:
-            desc = m.group(1).strip()
-            if len(desc) > 30 and "facebook" not in desc.lower()[:30]:
-                result["description"] = desc[:500]
-                break
+            _try("address", [
+                r'"label"\s*:\s*"Address"[^}]{0,400}"text"\s*:\s*"([^"]{5,120})"',
+            ])
 
-    # --- Category ---
-    for pat in [
-        r'"category_name"\s*:\s*"([^"]{3,60})"',
-        r'"category"\s*:\s*"([^"]{3,60})"',
-    ]:
-        m = _re.search(pat, raw)
-        if m:
-            cat = m.group(1).strip()
-            # Skip generic/internal category keys
-            if not _re.match(r'^[A-Z_]+$', cat):
-                result["category"] = cat
-                break
+            _try("description", [
+                r'"description"\s*:\s*"([^"]{20,500})"',
+            ], lambda m: (m.group(1).strip()
+                          if "facebook" not in m.group(1).lower()[:30]
+                          else None))
 
-    # --- Rating / reviews ---
-    for pat in [
-        r'"overall_star_rating"\s*:\s*([\d.]+)',
-        r'([\d.]+)\s*out of\s*5',
-        r'(\d+(?:\.\d+)?)\s+(?:rating|stars)',
-        r'(\d+)\s*%\s*recommend',
-    ]:
-        m = _re.search(pat, raw, _re.IGNORECASE)
-        if m:
-            result["rating"] = m.group(1)
-            break
+            _try("category", [
+                r'"category_name"\s*:\s*"([^"]{3,60})"',
+            ], lambda m: (m.group(1).strip()
+                          if not _re.match(r'^[A-Z_]+$', m.group(1).strip())
+                          else None))
+
+            _try("rating", [
+                r'"overall_star_rating"\s*:\s*([\d.]+)',
+                r'([\d.]+)\s*out of\s*5',
+                r'(\d+)\s*%\s*recommend',
+            ])
 
     return result
 
@@ -2828,6 +2927,9 @@ def _process_fb_result(result, found_urls_all, fb_total, fb_new, term, fallback_
 
     info["_fb_snippet"] = result.get("snippet", "")
     info["_fb_url"] = fb_url_norm
+    # Populate snippet cache so scrape_facebook_page can use it without hitting FB
+    if fb_url_norm and info["_fb_snippet"]:
+        _FB_SNIPPET_CACHE[fb_url_norm] = info["_fb_snippet"]
     source_label = f"Facebook {term} {fallback_region}".strip()
     if process_and_save_company(info, website_url, root_domain, source_label, fallback_region):
         fb_new += 1
