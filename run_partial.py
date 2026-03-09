@@ -12,11 +12,13 @@ from datetime import datetime, timezone
 
 from searcher import (
     google_search, extract_company_info, scrape_website,
-    find_email_via_google, find_facebook_url, get_root_domain, get_domain_record,
+    find_email_via_google, find_facebook_url, find_linkedin_url,
+    get_root_domain, get_domain_record,
     company_exists, process_and_save_company, check_schema,
     write_status, clear_status, append_history, check_pause,
     SKIP_DOMAINS, SERPAPI_EXHAUSTED, run_facebook_search,
     is_directory_listing_url,
+    reset_session_log, get_session_log, send_search_email,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -46,6 +48,7 @@ def run_partial(triggered_by="manual"):
         return
 
     started_iso = datetime.now(timezone.utc).isoformat()
+    reset_session_log()
     print("=" * 60)
     print(f"  PSPLA Partial Search")
     print(f"  Regions: {len(regions)}  |  Terms: {len(google_terms)}  |  Facebook: {include_facebook}  |  NZ-wide FB: {include_nationwide}")
@@ -82,6 +85,7 @@ def run_partial(triggered_by="manual"):
                     print("\n  [STOPPED] SerpAPI exhausted.")
                     append_history("google-partial", started_iso, total_found, total_new,
                                    "stopped", triggered_by)
+                    send_search_email("google-partial", started_iso, total_found, total_new, triggered_by, get_session_log())
                     return
 
                 if not results:
@@ -110,13 +114,15 @@ def run_partial(triggered_by="manual"):
                     print(f"  [Found] {url}")
                     total_found += 1
 
-                    page_text, scraped_email, scraped_facebook = scrape_website(url)
+                    page_text, scraped_email, scraped_facebook, scraped_linkedin = scrape_website(url)
                     time.sleep(1)
 
                     info = extract_company_info(url, page_text, result["snippet"])
                     if not info or not info.get("company_name"):
                         print("  [Skipped] Could not extract company name")
                         continue
+
+                    info["_page_text"] = page_text
 
                     if not info.get("email") and scraped_email:
                         info["email"] = scraped_email
@@ -129,6 +135,9 @@ def run_partial(triggered_by="manual"):
                     fb_url = find_facebook_url(info["company_name"], page_text)
                     if fb_url:
                         info["facebook_url"] = fb_url
+                    li_url = scraped_linkedin or find_linkedin_url(info["company_name"], page_text)
+                    if li_url:
+                        info["linkedin_url"] = li_url
                     if process_and_save_company(info, url, root_domain,
                                                 f"partial {term} {region}", region):
                         total_new += 1
@@ -144,6 +153,7 @@ def run_partial(triggered_by="manual"):
 
         append_history("google-partial", started_iso, total_found, total_new,
                        "completed", triggered_by)
+        send_search_email("google-partial", started_iso, total_found, total_new, triggered_by, get_session_log())
 
     finally:
         clear_status()

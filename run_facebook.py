@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from searcher import (
     run_facebook_search, check_schema, clear_status,
     append_history, RUNNING_FLAG, PAUSE_FLAG,
+    reset_session_log, get_session_log, send_search_email,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -33,10 +34,12 @@ if not check_schema():
 
 if os.path.exists(PAUSE_FLAG):
     os.remove(PAUSE_FLAG)
+reset_session_log()
 open(RUNNING_FLAG, "w").close()
 try:
     fb_found, fb_new = run_facebook_search(set())
     append_history("facebook", started_iso, fb_found, fb_new, "completed", triggered_by)
+    send_search_email("facebook", started_iso, fb_found, fb_new, triggered_by, get_session_log())
 except Exception as e:
     append_history("facebook", started_iso, 0, 0, f"error: {e}", triggered_by)
     raise

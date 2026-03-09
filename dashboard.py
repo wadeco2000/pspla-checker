@@ -165,6 +165,12 @@ HTML_TEMPLATE = """
         .fb-tag { display:inline-block; background:#1877f2; color:white; border-radius:4px;
                   padding:2px 6px; font-size:11px; font-weight:bold; margin-left:6px;
                   vertical-align:middle; white-space:nowrap; text-decoration:none; }
+        .li-tag { display:inline-block; background:#0a66c2; color:white; border-radius:4px;
+                  padding:2px 6px; font-size:11px; font-weight:bold; margin-left:4px;
+                  vertical-align:middle; white-space:nowrap; text-decoration:none; }
+        .nzsa-tag { display:inline-block; background:#c0392b; color:white; border-radius:4px;
+                    padding:2px 6px; font-size:11px; font-weight:bold; margin-left:4px;
+                    vertical-align:middle; white-space:nowrap; cursor:default; }
         .status-icon { margin-right:4px; }
     </style>
 </head>
@@ -198,6 +204,9 @@ HTML_TEMPLATE = """
                     <form method="POST" action="/start-facebook-search" onsubmit="return confirm('Run Facebook-only search? This adds Facebook-sourced companies on top of existing data.')">
                         <button class="btn" style="background:#1877f2; color:white;"><i class="fa-brands fa-facebook-f"></i> Facebook</button>
                     </form>
+                    <form method="POST" action="/start-directory-import" onsubmit="return confirm('Import from NZSA and LinkedIn directories? Adds members not already in the database.')">
+                        <button class="btn" style="background:#c0392b; color:white;">&#9707; Directories</button>
+                    </form>
                 </span>
                 <form method="POST" action="/dedupe-db" onsubmit="return confirm('Merge duplicate company names? Keeps the best record and combines all regions into one entry.')">
                     <button class="btn" style="background:#8e44ad; color:white;"><i class="fa-solid fa-filter"></i> Dedupe DB</button>
@@ -214,6 +223,7 @@ HTML_TEMPLATE = """
                 <button class="btn btn-dark" onclick="document.getElementById('export-modal').style.display='flex';">&#x2B07; Export CSV</button>
                 <a href="/history" class="btn btn-dark" style="text-decoration:none;">&#x1F4DC; Version History</a>
                 <a href="/duplicates" class="btn btn-dark" style="text-decoration:none; background:#c0392b;">&#x26A0; Duplicates</a>
+                <a href="/audit-log" class="btn btn-dark" style="text-decoration:none; background:#6c3483;">&#x1F4CB; Audit Log</a>
             </div>
         </div>
     </div>
@@ -342,7 +352,7 @@ HTML_TEMPLATE = """
 
     // Search history
     (function() {
-        var TYPE_LABELS = {'full':'Full','google-weekly':'Weekly','facebook':'Facebook','google-partial':'Partial'};
+        var TYPE_LABELS = {'full':'Full','google-weekly':'Weekly','facebook':'Facebook','google-partial':'Partial','directories':'Directories'};
         var STATUS_COLORS = {'completed':'#27ae60','stopped':'#e67e22','error':'#e74c3c'};
         function loadHistory() {
             fetch('/search-history')
@@ -435,7 +445,7 @@ HTML_TEMPLATE = """
                     <th style="text-align:right;padding:3px 6px;font-weight:normal;">New</th>
                     <th style="text-align:left;padding:3px 6px;font-weight:normal;">Status</th>
                 </tr>
-                {% set type_labels = {'full':'Full','google-weekly':'Weekly','facebook':'Facebook','google-partial':'Partial'} %}
+                {% set type_labels = {'full':'Full','google-weekly':'Weekly','facebook':'Facebook','google-partial':'Partial','directories':'Directories'} %}
                 {% set status_colors = {'completed':'#27ae60','stopped':'#e67e22','error':'#e74c3c'} %}
                 {% for r in init_history %}
                 <tr style="border-bottom:1px solid #f5f5f5;">
@@ -454,6 +464,69 @@ HTML_TEMPLATE = """
         </div>
 
     </div>
+
+    <script>
+    var _terms = {google: [], facebook: []};
+    var _activeTab = 'google';
+    function renderTermsList(type) {
+        var el = document.getElementById('terms-list-' + type);
+        if (!el) return;
+        if (!_terms[type].length) {
+            el.innerHTML = '<span style="color:#aaa;">No terms yet.</span>';
+            return;
+        }
+        var html = '';
+        for (var i = 0; i < _terms[type].length; i++) {
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;">'
+                  + '<span>' + _terms[type][i] + '</span>'
+                  + '<button onclick="removeTerm(\\'' + type + '\\',' + i + ')" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">x</button>'
+                  + '</div>';
+        }
+        el.innerHTML = html;
+    }
+    function renderPartialTerms() {
+        var el = document.getElementById('partial-term-list');
+        if (!el) return;
+        var html = '';
+        for (var i = 0; i < _terms.google.length; i++) {
+            html += '<label style="display:block;padding:1px 2px;cursor:pointer;">'
+                  + '<input type="checkbox" class="partial-term-cb" value="' + _terms.google[i] + '" checked style="margin-right:4px;">'
+                  + _terms.google[i] + '</label>';
+        }
+        el.innerHTML = html;
+    }
+    function loadTerms() {
+        fetch('/search-terms').then(function(r) { return r.json(); }).then(function(data) {
+            _terms.google = data.google || [];
+            _terms.facebook = data.facebook || [];
+            renderTermsList('google');
+            renderTermsList('facebook');
+            renderPartialTerms();
+        });
+    }
+    function saveTerms(type) {
+        var payload = {};
+        payload[type] = _terms[type];
+        fetch('/save-terms', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+    }
+    function addTerm(type) {
+        var input = document.getElementById('new-term-' + type);
+        var val = input.value.trim();
+        if (!val || _terms[type].indexOf(val) !== -1) return;
+        _terms[type].push(val);
+        input.value = '';
+        renderTermsList(type);
+        renderPartialTerms();
+        saveTerms(type);
+    }
+    function removeTerm(type, idx) {
+        _terms[type].splice(idx, 1);
+        renderTermsList(type);
+        renderPartialTerms();
+        saveTerms(type);
+    }
+    loadTerms();
+    </script>
 
     <!-- Search Terms + Partial Search row -->
     <div style="display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
@@ -611,69 +684,6 @@ HTML_TEMPLATE = """
 
     </div>
 
-    <script>
-    var _terms = {google: [], facebook: []};
-    var _activeTab = 'google';
-    function renderTermsList(type) {
-        var el = document.getElementById('terms-list-' + type);
-        if (!el) return;
-        if (!_terms[type].length) {
-            el.innerHTML = '<span style="color:#aaa;">No terms yet.</span>';
-            return;
-        }
-        var html = '';
-        for (var i = 0; i < _terms[type].length; i++) {
-            html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;">'
-                  + '<span>' + _terms[type][i] + '</span>'
-                  + '<button onclick="removeTerm(\'' + type + '\',' + i + ')" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">x</button>'
-                  + '</div>';
-        }
-        el.innerHTML = html;
-    }
-    function renderPartialTerms() {
-        var el = document.getElementById('partial-term-list');
-        if (!el) return;
-        var html = '';
-        for (var i = 0; i < _terms.google.length; i++) {
-            html += '<label style="display:block;padding:1px 2px;cursor:pointer;">'
-                  + '<input type="checkbox" class="partial-term-cb" value="' + _terms.google[i] + '" checked style="margin-right:4px;">'
-                  + _terms.google[i] + '</label>';
-        }
-        el.innerHTML = html;
-    }
-    function loadTerms() {
-        fetch('/search-terms').then(function(r) { return r.json(); }).then(function(data) {
-            _terms.google = data.google || [];
-            _terms.facebook = data.facebook || [];
-            renderTermsList('google');
-            renderTermsList('facebook');
-            renderPartialTerms();
-        });
-    }
-    function saveTerms(type) {
-        var payload = {};
-        payload[type] = _terms[type];
-        fetch('/save-terms', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
-    }
-    function addTerm(type) {
-        var input = document.getElementById('new-term-' + type);
-        var val = input.value.trim();
-        if (!val || _terms[type].indexOf(val) !== -1) return;
-        _terms[type].push(val);
-        input.value = '';
-        renderTermsList(type);
-        renderPartialTerms();
-        saveTerms(type);
-    }
-    function removeTerm(type, idx) {
-        _terms[type].splice(idx, 1);
-        renderTermsList(type);
-        renderPartialTerms();
-        saveTerms(type);
-    }
-    loadTerms();
-    </script>
-
     <div class="stats">
         <div class="stat-box">
             <h2>{{ total }}</h2>
@@ -712,6 +722,21 @@ HTML_TEMPLATE = """
             <option value="expired">Expired</option>
             <option value="unknown">Unknown</option>
         </select>
+        <select id="facebookFilter" onchange="filterTable()">
+            <option value="">All (Facebook)</option>
+            <option value="yes">Has Facebook</option>
+            <option value="no">No Facebook</option>
+        </select>
+        <select id="linkedinFilter" onchange="filterTable()">
+            <option value="">All (LinkedIn)</option>
+            <option value="yes">Has LinkedIn</option>
+            <option value="no">No LinkedIn</option>
+        </select>
+        <select id="nzsaFilter" onchange="filterTable()">
+            <option value="">All (NZSA)</option>
+            <option value="yes">NZSA Member</option>
+            <option value="no">Not NZSA</option>
+        </select>
         <button class="btn btn-dark" onclick="window.location.reload()">Refresh</button>
     </div>
 
@@ -722,6 +747,9 @@ HTML_TEMPLATE = """
                 <th><i class="fa-solid fa-location-dot"></i> Region</th>
                 <th><i class="fa-solid fa-phone"></i> Phone</th>
                 <th><i class="fa-solid fa-envelope"></i> Email</th>
+                <th style="text-align:center"><i class="fa-brands fa-facebook-f" style="color:#1877f2"></i></th>
+                <th style="text-align:center"><i class="fa-brands fa-linkedin-in" style="color:#0a66c2"></i></th>
+                <th style="text-align:center"><span style="color:#c0392b;font-size:11px;font-weight:bold">NZSA</span></th>
                 <th><i class="fa-solid fa-shield-halved"></i> PSPLA Status</th>
                 <th><i class="fa-solid fa-id-card"></i> PSPLA Registered Name</th>
                 <th><i class="fa-solid fa-hashtag"></i> License #</th>
@@ -738,18 +766,33 @@ HTML_TEMPLATE = """
                 data-name="{{ (c.company_name or '') | lower }}"
                 data-region="{{ (c.region or '') | lower }}"
                 data-status="{{ status_key }}"
+                data-facebook="{{ 'yes' if (c.facebook_url or (c.source_url and 'facebook.com' in c.source_url)) else 'no' }}"
+                data-linkedin="{{ 'yes' if c.linkedin_url else 'no' }}"
+                data-nzsa="{{ 'yes' if c.nzsa_member == 'true' else 'no' }}"
                 data-id="{{ loop.index }}">
                 <td class="company-cell">
                     {% if c.website %}<a href="{{ c.website }}" target="_blank">{{ c.company_name or '-' }}</a>{% else %}{{ c.company_name or '-' }}{% endif %}
-                    {% if c.facebook_url %}
-                        <a href="{{ c.facebook_url }}" target="_blank" class="fb-tag" title="Facebook page"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" width="7" height="11" fill="white" style="vertical-align:middle"><path d="M279.14 288l14.22-92.66h-88.91v-60.13c0-25.35 12.42-50.06 52.24-50.06h40.42V6.26S260.43 0 225.36 0c-73.22 0-121.08 44.38-121.08 124.72v70.62H22.89V288h81.39v224h100.17V288z"/></svg></a>
-                    {% elif c.source_url and 'facebook.com' in c.source_url %}
-                        <a href="{{ c.source_url }}" target="_blank" class="fb-tag" title="Found via Facebook"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" width="7" height="11" fill="white" style="vertical-align:middle"><path d="M279.14 288l14.22-92.66h-88.91v-60.13c0-25.35 12.42-50.06 52.24-50.06h40.42V6.26S260.43 0 225.36 0c-73.22 0-121.08 44.38-121.08 124.72v70.62H22.89V288h81.39v224h100.17V288z"/></svg></a>
-                    {% endif %}
                 </td>
                 <td>{{ c.region or '-' }}</td>
                 <td>{{ c.phone or '-' }}</td>
                 <td>{% if c.email %}<a href="mailto:{{ c.email }}">{{ c.email }}</a>{% else %}-{% endif %}</td>
+                <td style="text-align:center">
+                    {% if c.facebook_url %}
+                        <a href="{{ c.facebook_url }}" target="_blank" class="fb-tag" title="{{ c.facebook_url }}"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" width="7" height="11" fill="white" style="vertical-align:middle"><path d="M279.14 288l14.22-92.66h-88.91v-60.13c0-25.35 12.42-50.06 52.24-50.06h40.42V6.26S260.43 0 225.36 0c-73.22 0-121.08 44.38-121.08 124.72v70.62H22.89V288h81.39v224h100.17V288z"/></svg></a>
+                    {% elif c.source_url and 'facebook.com' in c.source_url %}
+                        <a href="{{ c.source_url }}" target="_blank" class="fb-tag" style="opacity:0.6" title="{{ c.source_url }}"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" width="7" height="11" fill="white" style="vertical-align:middle"><path d="M279.14 288l14.22-92.66h-88.91v-60.13c0-25.35 12.42-50.06 52.24-50.06h40.42V6.26S260.43 0 225.36 0c-73.22 0-121.08 44.38-121.08 124.72v70.62H22.89V288h81.39v224h100.17V288z"/></svg></a>
+                    {% else %}-{% endif %}
+                </td>
+                <td style="text-align:center">
+                    {% if c.linkedin_url %}
+                        <a href="{{ c.linkedin_url }}" target="_blank" class="li-tag" title="{{ c.linkedin_url }}"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" width="8" height="11" fill="white" style="vertical-align:middle"><path d="M100.28 448H7.4V148.9h92.88zM53.79 108.1C24.09 108.1 0 83.5 0 53.8a53.79 53.79 0 0 1 107.58 0c0 29.7-24.1 54.3-53.79 54.3zM447.9 448h-92.68V302.4c0-34.7-.7-79.2-48.29-79.2-48.29 0-55.69 37.7-55.69 76.7V448h-92.78V148.9h89.08v40.8h1.3c12.4-23.5 42.69-48.3 87.88-48.3 94 0 111.28 61.9 111.28 142.3V448z"/></svg></a>
+                    {% else %}-{% endif %}
+                </td>
+                <td style="text-align:center">
+                    {% if c.nzsa_member == 'true' %}
+                        <span class="nzsa-tag" style="margin-left:0" title="NZSA Member{% if c.nzsa_accredited == 'true' %} — Accredited{% endif %}{% if c.nzsa_grade %}: {{ c.nzsa_grade }}{% endif %}">NZSA{% if c.nzsa_accredited == 'true' %}<i class="fa-solid fa-star" style="font-size:7px;margin-left:2px;vertical-align:middle;"></i>{% endif %}</span>
+                    {% else %}-{% endif %}
+                </td>
                 <td>
                     {% if lic == 'true' and c.individual_license and (not c.pspla_license_status or c.pspla_license_status|lower != 'active') and c.pspla_name %}
                         <span class="badge badge-expired"><i class="fa-solid fa-user-check status-icon"></i>EXP + INDIVIDUAL</span>
@@ -845,6 +888,54 @@ HTML_TEMPLATE = """
                                 Search
                             </button>
                         </div>
+                        <div class="detail-item" id="li-item-{{ c.id }}">
+                            <label><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" width="10" height="12" fill="#0a66c2" style="vertical-align:middle;margin-right:3px"><path d="M100.28 448H7.4V148.9h92.88zM53.79 108.1C24.09 108.1 0 83.5 0 53.8a53.79 53.79 0 0 1 107.58 0c0 29.7-24.1 54.3-53.79 54.3zM447.9 448h-92.68V302.4c0-34.7-.7-79.2-48.29-79.2-48.29 0-55.69 37.7-55.69 76.7V448h-92.78V148.9h89.08v40.8h1.3c12.4-23.5 42.69-48.3 87.88-48.3 94 0 111.28 61.9 111.28 142.3V448z"/></svg> LinkedIn Page</label>
+                            <span id="li-result-{{ c.id }}">
+                                {% if c.linkedin_url %}
+                                    <a href="{{ c.linkedin_url }}" target="_blank">{{ c.linkedin_url }}</a>
+                                {% else %}
+                                    <em style="color:#aaa">not found</em>
+                                {% endif %}
+                            </span>
+                            <input id="li-term-{{ c.id }}" type="text"
+                                   value="{{ (c.company_name or '') | replace('"', '&quot;') }}"
+                                   style="margin-left:8px; padding:1px 5px; font-size:11px; border:1px solid #ccc; border-radius:3px; width:160px;"
+                                   title="Edit search term if the company uses a different name on LinkedIn">
+                            <button onclick="lookupLinkedIn({{ c.id }})"
+                                    id="li-btn-{{ c.id }}"
+                                    style="margin-left:4px; padding:1px 7px; font-size:11px; background:#0a66c2; color:white; border:none; border-radius:3px; cursor:pointer;">
+                                Search
+                            </button>
+                        </div>
+                        <div class="detail-item" id="nzsa-item-{{ c.id }}">
+                            <label><span class="nzsa-tag" style="margin-left:0;font-size:10px;">NZSA</span> Membership</label>
+                            <span id="nzsa-result-{{ c.id }}">
+                                {% if c.nzsa_member == 'true' %}
+                                    <strong style="color:#27ae60;">Member</strong> — {{ c.nzsa_member_name }}{% if c.nzsa_accredited == 'true' %} <em>(Accredited{% if c.nzsa_grade %}: {{ c.nzsa_grade }}{% endif %})</em>{% endif %}
+                                    {% if c.nzsa_contact_name or c.nzsa_phone or c.nzsa_email %}
+                                    <br><small style="color:#555;">
+                                        {% if c.nzsa_contact_name %}<strong>Contact:</strong> {{ c.nzsa_contact_name }}{% endif %}
+                                        {% if c.nzsa_phone %} &nbsp;&#128222; {{ c.nzsa_phone }}{% endif %}
+                                        {% if c.nzsa_email %} &nbsp;&#9993; <a href="mailto:{{ c.nzsa_email }}">{{ c.nzsa_email }}</a>{% endif %}
+                                    </small>
+                                    {% endif %}
+                                    {% if c.nzsa_overview %}
+                                    <br><small style="color:#777;font-style:italic;">{{ c.nzsa_overview[:200] }}{% if c.nzsa_overview|length > 200 %}…{% endif %}</small>
+                                    {% endif %}
+                                {% else %}
+                                    <em style="color:#aaa">not found / not a member</em>
+                                {% endif %}
+                            </span>
+                            <input id="nzsa-term-{{ c.id }}" type="text"
+                                   value="{{ (c.company_name or '') | replace('"', '&quot;') }}"
+                                   style="margin-left:8px; padding:1px 5px; font-size:11px; border:1px solid #ccc; border-radius:3px; width:160px;"
+                                   title="Edit name to search NZSA with">
+                            <button onclick="recheckNzsa({{ c.id }})"
+                                    id="nzsa-btn-{{ c.id }}"
+                                    style="margin-left:4px; padding:1px 7px; font-size:11px; background:#c0392b; color:white; border:none; border-radius:3px; cursor:pointer;">
+                                Check
+                            </button>
+                        </div>
                         <div class="detail-item" style="grid-column: 1 / -1; border-top: 1px solid #ddd; padding-top: 10px; margin-top: 4px;">
                             <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
                                 <button onclick="toggleEditForm({{ c.id }})"
@@ -911,12 +1002,18 @@ HTML_TEMPLATE = """
             const search = document.getElementById('searchBox').value.toLowerCase();
             const region = document.getElementById('regionFilter').value.toLowerCase();
             const status = document.getElementById('statusFilter').value.toLowerCase();
+            const facebook = document.getElementById('facebookFilter').value;
+            const linkedin = document.getElementById('linkedinFilter').value;
+            const nzsa = document.getElementById('nzsaFilter').value;
             const rows = document.querySelectorAll('.company-row');
             rows.forEach(row => {
                 const nameMatch = !search || row.dataset.name.includes(search);
                 const regionMatch = !region || row.dataset.region.includes(region);
                 const statusMatch = !status || row.dataset.status === status;
-                const visible = nameMatch && regionMatch && statusMatch;
+                const facebookMatch = !facebook || row.dataset.facebook === facebook;
+                const linkedinMatch = !linkedin || row.dataset.linkedin === linkedin;
+                const nzsaMatch = !nzsa || row.dataset.nzsa === nzsa;
+                const visible = nameMatch && regionMatch && statusMatch && facebookMatch && linkedinMatch && nzsaMatch;
                 row.style.display = visible ? '' : 'none';
                 const detailRow = document.getElementById('detail-' + row.dataset.id);
                 if (detailRow && !visible) detailRow.classList.remove('open');
@@ -932,6 +1029,84 @@ HTML_TEMPLATE = """
             btn.disabled = true;
             btn.textContent = 'Searching...';
             fetch('/find-facebook', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id, name: name})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.found && d.url) {
+                    result.innerHTML = '<a href="' + d.url + '" target="_blank">' + d.url + '</a>';
+                    btn.textContent = 'Done';
+                    btn.style.background = '#27ae60';
+                } else if (d.error) {
+                    result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
+                    btn.textContent = 'Search';
+                    btn.disabled = false;
+                } else {
+                    result.innerHTML = '<em style="color:#aaa">not found</em>';
+                    btn.textContent = 'Not found';
+                    btn.style.background = '#95a5a6';
+                }
+            })
+            .catch(function(e) {
+                result.innerHTML = '<em style="color:#e74c3c">Request failed</em>';
+                btn.textContent = 'Search';
+                btn.disabled = false;
+            });
+        }
+
+        function recheckNzsa(id) {
+            var btn = document.getElementById('nzsa-btn-' + id);
+            var result = document.getElementById('nzsa-result-' + id);
+            var termInput = document.getElementById('nzsa-term-' + id);
+            var name = termInput ? termInput.value.trim() : '';
+            if (!name) return;
+            btn.disabled = true;
+            btn.textContent = 'Checking...';
+            fetch('/recheck-nzsa', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id, name: name})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.error) {
+                    result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
+                    btn.textContent = 'Check'; btn.disabled = false;
+                } else if (d.member) {
+                    var txt = '<strong style="color:#27ae60;">Member</strong> — ' + d.member_name;
+                    if (d.accredited) { txt += ' <em>(Accredited' + (d.grade ? ': ' + d.grade : '') + ')</em>'; }
+                    if (d.contact_name || d.phone || d.email) {
+                        txt += '<br><small style="color:#555;">';
+                        if (d.contact_name) txt += '<strong>Contact:</strong> ' + d.contact_name;
+                        if (d.phone) txt += ' &nbsp;&#128222; ' + d.phone;
+                        if (d.email) txt += ' &nbsp;&#9993; <a href="mailto:' + d.email + '">' + d.email + '</a>';
+                        txt += '</small>';
+                    }
+                    if (d.overview) { txt += '<br><small style="color:#777;font-style:italic;">' + d.overview.substring(0, 200) + (d.overview.length > 200 ? '…' : '') + '</small>'; }
+                    result.innerHTML = txt;
+                    btn.textContent = 'Done'; btn.style.background = '#27ae60';
+                } else {
+                    result.innerHTML = '<em style="color:#aaa">not found / not a member</em>';
+                    btn.textContent = 'Not found'; btn.style.background = '#95a5a6';
+                }
+            })
+            .catch(function() {
+                result.innerHTML = '<em style="color:#e74c3c">Request failed</em>';
+                btn.textContent = 'Check'; btn.disabled = false;
+            });
+        }
+
+        function lookupLinkedIn(id) {
+            var btn = document.getElementById('li-btn-' + id);
+            var result = document.getElementById('li-result-' + id);
+            var termInput = document.getElementById('li-term-' + id);
+            var name = termInput ? termInput.value.trim() : '';
+            if (!name) return;
+            btn.disabled = true;
+            btn.textContent = 'Searching...';
+            fetch('/find-linkedin', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({id: id, name: name})
@@ -1051,11 +1226,19 @@ HTML_TEMPLATE = """
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({id: id, company_name: companyName, correction: text})
-            }).then(function(r){ return r.json(); }).then(function(d) {
+            }).then(function(r){ return r.json(); })
+            .then(function(d) {
                 if (d.ok) {
                     status.style.color = '#27ae60';
-                    status.textContent = 'Saved to corrections log!';
-                    setTimeout(function(){ status.textContent = ''; }, 4000);
+                    var msg = 'Saved!';
+                    if (d.recheck_summary) {
+                        msg += ' Re-checked: ' + d.recheck_summary;
+                    }
+                    if (d.lesson_rule) {
+                        msg += ' | Lesson learned: ' + d.lesson_rule.substring(0, 80) + (d.lesson_rule.length > 80 ? '...' : '');
+                    }
+                    status.textContent = msg;
+                    setTimeout(function(){ status.textContent = ''; }, 8000);
                 } else {
                     status.style.color = '#e74c3c';
                     status.textContent = d.error || 'Error saving.';
@@ -1384,6 +1567,15 @@ def start_facebook_search():
         return redirect(url_for("index", message=f"Failed to start Facebook search: {e}", type="error"))
 
 
+@app.route("/start-directory-import", methods=["POST"])
+def start_directory_import():
+    try:
+        _launch("run_directories.py")
+        return redirect(url_for("index", message="Directory import started (NZSA + LinkedIn).", type="success"))
+    except Exception as e:
+        return redirect(url_for("index", message=f"Failed to start directory import: {e}", type="error"))
+
+
 @app.route("/dedupe-db", methods=["POST"])
 def dedupe_db():
     """Merge duplicate company names into one record, combining all regions.
@@ -1478,10 +1670,15 @@ def export_csv():
     companies = get_companies()
     fields = [
         "company_name", "website", "region", "phone", "email", "address",
+        "facebook_url", "linkedin_url",
+        "nzsa_member", "nzsa_accredited", "nzsa_grade", "nzsa_member_name",
+        "nzsa_contact_name", "nzsa_phone", "nzsa_email",
         "pspla_licensed", "pspla_name", "pspla_address", "pspla_license_number",
         "pspla_license_status", "pspla_license_expiry", "license_type",
         "match_method", "match_reason", "individual_license", "director_name",
-        "companies_office_name", "companies_office_address", "last_checked", "notes"
+        "companies_office_name", "companies_office_address",
+        "companies_office_number", "nzbn",
+        "last_checked", "notes"
     ]
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
@@ -1626,6 +1823,140 @@ def search_history():
     return jsonify(history[:20])
 
 
+@app.route("/audit-log-data")
+def audit_log_data():
+    from flask import jsonify
+    limit = request.args.get("limit", 1000)
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    resp = requests.get(
+        f"{SUPABASE_URL}/rest/v1/AuditLog?select=*&order=timestamp.desc&limit={limit}",
+        headers=headers, timeout=15
+    )
+    return jsonify(resp.json() if resp.ok else [])
+
+
+@app.route("/audit-log")
+def audit_log_page():
+    return render_template_string(AUDIT_LOG_TEMPLATE)
+
+
+AUDIT_LOG_TEMPLATE = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Audit Log</title>
+<style>
+body { font-family: Arial, sans-serif; font-size: 13px; padding: 20px; background: #f5f5f5; }
+h1 { color: #2c3e50; margin-bottom: 6px; }
+.back { margin-bottom: 16px; display: inline-block; color: #2980b9; text-decoration: none; }
+.controls { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+.controls input, .controls select { padding: 5px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
+.controls input { width: 220px; }
+.controls button { padding: 5px 14px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; cursor: pointer; background: white; }
+.count { color: #888; font-size: 12px; }
+table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.08); }
+th { background: #ecf0f1; text-align: left; padding: 8px 10px; font-size: 12px; font-weight: 600; color: #555; border-bottom: 2px solid #ddd; }
+td { padding: 7px 10px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #fafafa; }
+.badge { display: inline-block; border-radius: 3px; padding: 1px 8px; font-size: 11px; color: white; font-weight: bold; }
+.badge-added { background: #27ae60; }
+.badge-updated { background: #2980b9; }
+.badge-deleted { background: #e74c3c; }
+.badge-email { background: #8e44ad; }
+.badge-correction { background: #d35400; }
+.ts { color: #888; white-space: nowrap; }
+.changes { color: #555; max-width: 380px; }
+.tby { color: #999; }
+.co { font-weight: 600; }
+#loading { color: #aaa; padding: 20px 0; }
+</style>
+</head>
+<body>
+<a class="back" href="/">&#8592; Back to dashboard</a>
+<h1>&#x1F4CB; Audit Log</h1>
+<div class="controls">
+  <input id="filterName" type="text" placeholder="Filter by company..." oninput="render()">
+  <select id="filterAction" onchange="render()">
+    <option value="">All actions</option>
+    <option value="added">Added</option>
+    <option value="updated">Updated</option>
+    <option value="deleted">Deleted</option>
+    <option value="email">Email</option>
+    <option value="correction">Correction</option>
+  </select>
+  <input id="filterDate" type="date" onchange="render()" title="Filter by date">
+  <button onclick="load()">&#x21BA; Refresh</button>
+  <span class="count" id="countLabel"></span>
+</div>
+<div id="loading">Loading...</div>
+<table id="auditTable" style="display:none">
+  <thead>
+    <tr>
+      <th style="width:140px">Time (NZ)</th>
+      <th style="width:80px">Action</th>
+      <th>Company</th>
+      <th>Changes</th>
+      <th style="width:150px">Triggered By</th>
+    </tr>
+  </thead>
+  <tbody id="auditBody"></tbody>
+</table>
+<script>
+var _data = [];
+function load() {
+  document.getElementById('loading').style.display = '';
+  document.getElementById('auditTable').style.display = 'none';
+  fetch('/audit-log-data?limit=2000').then(function(r){return r.json();}).then(function(d){
+    _data = d;
+    render();
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('auditTable').style.display = '';
+  }).catch(function(){
+    document.getElementById('loading').textContent = 'Failed to load.';
+  });
+}
+function render() {
+  var name = document.getElementById('filterName').value.toLowerCase();
+  var action = document.getElementById('filterAction').value;
+  var date = document.getElementById('filterDate').value;
+  var rows = _data.filter(function(r) {
+    if (name && !(r.company_name||'').toLowerCase().includes(name)) return false;
+    if (action && r.action !== action) return false;
+    if (date && !(r.timestamp||'').startsWith(date)) return false;
+    return true;
+  });
+  document.getElementById('countLabel').textContent = rows.length + ' of ' + _data.length + ' entries';
+  var html = '';
+  var nzOffset = 13 * 60;
+  rows.forEach(function(r) {
+    var ts = '-';
+    if (r.timestamp) {
+      var d = new Date(r.timestamp);
+      ts = d.toLocaleString('en-NZ', {timeZone:'Pacific/Auckland',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+    }
+    var badgeCls = 'badge-' + (r.action||'');
+    var notes = r.notes ? '<br><small style="color:#aaa">' + escHtml(r.notes) + '</small>' : '';
+    html += '<tr>'
+      + '<td class="ts">' + ts + '</td>'
+      + '<td><span class="badge ' + badgeCls + '">' + escHtml(r.action||'') + '</span></td>'
+      + '<td class="co">' + escHtml(r.company_name||'-') + '</td>'
+      + '<td class="changes">' + escHtml(r.changes||'') + notes + '</td>'
+      + '<td class="tby">' + escHtml(r.triggered_by||'') + '</td>'
+      + '</tr>';
+  });
+  document.getElementById('auditBody').innerHTML = html || '<tr><td colspan="5" style="color:#aaa;padding:20px">No entries match.</td></tr>';
+}
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+load();
+</script>
+</body>
+</html>
+"""
+
+
 @app.route("/toggle-schedule", methods=["POST"])
 def toggle_schedule():
     if os.path.exists(SCHEDULE_FLAG):
@@ -1702,7 +2033,7 @@ def _kill_search_processes():
             _search_proc.kill()
     _search_proc = None
     # Also scan for orphaned search processes (e.g. after dashboard restart)
-    search_scripts = {"searcher.py", "run_weekly.py", "run_facebook.py", "run_partial.py"}
+    search_scripts = {"searcher.py", "run_weekly.py", "run_facebook.py", "run_partial.py", "run_directories.py"}
     our_pid = str(os.getpid())
     try:
         result = subprocess.run(
@@ -1769,6 +2100,81 @@ def find_facebook_for_company():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/recheck-nzsa", methods=["POST"])
+def recheck_nzsa_for_company():
+    """Re-check NZSA membership for a single company and save the result."""
+    from flask import jsonify
+    company_id = request.json.get("id")
+    company_name = request.json.get("name", "")
+    if not company_name:
+        return jsonify({"error": "No company name provided"}), 400
+    try:
+        from searcher import check_nzsa
+        # Fetch website for domain matching
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        row = requests.get(
+            f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}&select=website",
+            headers=headers, timeout=10
+        ).json()
+        website = row[0].get("website") if row else None
+
+        result = check_nzsa(company_name, website=website)
+        patch_headers = {**headers, "Content-Type": "application/json", "Prefer": "return=minimal"}
+        requests.patch(
+            f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
+            headers=patch_headers,
+            json={
+                "nzsa_member": "true" if result["member"] else "false",
+                "nzsa_member_name": result["member_name"],
+                "nzsa_accredited": "true" if result["accredited"] else "false",
+                "nzsa_grade": result["grade"],
+                "nzsa_contact_name": result.get("contact_name") or None,
+                "nzsa_phone": result.get("phone") or None,
+                "nzsa_email": result.get("email") or None,
+                "nzsa_overview": result.get("overview") or None,
+            },
+        )
+        from searcher import write_audit
+        write_audit("updated", company_id, company_name,
+                    changes=f"NZSA recheck: member={result['member']}, name={result['member_name']}",
+                    triggered_by="manual (dashboard)")
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/find-linkedin", methods=["POST"])
+def find_linkedin_for_company():
+    """Look up a LinkedIn company page for a single company by ID and save it."""
+    from flask import jsonify
+    company_id = request.json.get("id")
+    company_name = request.json.get("name", "")
+    if not company_name:
+        return jsonify({"error": "No company name provided"}), 400
+    try:
+        from searcher import find_linkedin_url, write_audit
+        li_url = find_linkedin_url(company_name)
+        if li_url:
+            headers = {
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            }
+            requests.patch(
+                f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
+                headers=headers,
+                json={"linkedin_url": li_url},
+            )
+            write_audit("updated", company_id, company_name,
+                        changes=f"LinkedIn found: {li_url}",
+                        triggered_by="manual (dashboard)")
+            return jsonify({"found": True, "url": li_url})
+        return jsonify({"found": False})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/recheck-pspla", methods=["POST"])
 def recheck_pspla_for_company():
     """Re-run PSPLA check for a single company by ID and save the result."""
@@ -1781,12 +2187,29 @@ def recheck_pspla_for_company():
         return jsonify({"error": "No company name provided"}), 400
     try:
         from searcher import check_pspla, check_pspla_individual
-        result = check_pspla(company_name, website_region=company_region)
+        # Fetch stored context to improve LLM-assisted matching
+        row_resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}&select=director_name,companies_office_name,companies_office_address,facebook_url,linkedin_url,nzsa_member_name,nzsa_grade",
+            headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}, timeout=10
+        )
+        row = row_resp.json()[0] if row_resp.ok and row_resp.json() else {}
+        stored_directors = [d.strip() for d in (row.get("director_name") or "").split(",") if d.strip()]
+        stored_co = {"name": row.get("companies_office_name"), "address": row.get("companies_office_address")} if row.get("companies_office_name") else None
+        extra_context = {
+            "facebook_snippet": "",
+            "linkedin_url": row.get("linkedin_url") or "",
+            "nzsa_data": {"member_name": row.get("nzsa_member_name"), "grade": row.get("nzsa_grade")} if row.get("nzsa_member_name") else None,
+        }
+        result = check_pspla(company_name, website_region=company_region,
+                             co_result=stored_co, directors=stored_directors,
+                             extra_context=extra_context)
         # If no active licensed match found and we have a Companies Office name, try that too.
         # Only replace result if CO search is licensed (active), or if the original found no
         # matched_name at all — don't replace a known-expired result or we skip individual check.
         if not result.get("licensed") and co_name and co_name != company_name:
-            co_result = check_pspla(co_name, website_region=company_region)
+            co_result = check_pspla(co_name, website_region=company_region,
+                                    co_result=stored_co, directors=stored_directors,
+                                    extra_context=extra_context)
             if co_result.get("matched_name") and (co_result.get("licensed") or not result.get("matched_name")):
                 result = co_result
         licensed = result.get("licensed")
@@ -1830,6 +2253,10 @@ def recheck_pspla_for_company():
             headers=headers,
             json=update,
         )
+        from searcher import write_audit
+        write_audit("updated", company_id, company_name,
+                    changes=f"PSPLA recheck: licensed={licensed}, name={pspla_name}",
+                    triggered_by="manual (dashboard)")
         return jsonify({
             "licensed": licensed,
             "pspla_name": pspla_name,
@@ -1961,7 +2388,8 @@ CORRECTIONS_FILE = os.path.join(BASE_DIR, "corrections.md")
 
 @app.route("/save-correction", methods=["POST"])
 def save_correction():
-    """Save a user correction note to the local corrections.md file."""
+    """Save a correction note, parse with Claude, block false match, auto-recheck, learn."""
+    from flask import jsonify
     company_id = request.json.get("id")
     company_name = request.json.get("company_name", "Unknown")
     correction = request.json.get("correction", "").strip()
@@ -1969,12 +2397,57 @@ def save_correction():
         return jsonify({"error": "No correction text provided"}), 400
     try:
         from datetime import datetime as _dt
+        from searcher import parse_and_save_correction, write_audit, apply_correction_and_recheck
+
+        # 1. Write to human-readable markdown log
         timestamp = _dt.now().strftime("%Y-%m-%d %H:%M")
         entry = f"\n## {company_name} (ID: {company_id}) — {timestamp}\n{correction}\n"
         with open(CORRECTIONS_FILE, "a", encoding="utf-8") as f:
             f.write(entry)
-        return jsonify({"ok": True})
+
+        # 2. Fetch existing PSPLA name and region from DB (needed for recheck)
+        headers_sb = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        row_resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}&select=pspla_name,region",
+            headers=headers_sb, timeout=10
+        )
+        row = row_resp.json()[0] if row_resp.ok and row_resp.json() else {}
+        old_pspla_name = row.get("pspla_name") or ""
+        website_region = row.get("region") or ""
+
+        # 3. Parse correction with Claude and save to corrections.json
+        parsed = parse_and_save_correction(company_name, company_id, correction)
+        correction_type = parsed.get("type", "other")
+        summary = parsed.get("summary", correction)
+        blocked_name = parsed.get("blocked_pspla_name", "")
+        print(f"  [Correction saved] {company_name}: type={correction_type}, blocked={blocked_name}")
+
+        # 4. Log to audit
+        write_audit("correction", company_id, company_name,
+                    changes=f"Type: {correction_type} | {summary}" + (f" | Blocked PSPLA: {blocked_name}" if blocked_name else ""),
+                    triggered_by="manual (dashboard)",
+                    notes=correction)
+
+        # 5. Auto-recheck PSPLA and generate lesson (only if it was a false PSPLA match)
+        recheck_summary = None
+        lesson_rule = None
+        if correction_type == "false_pspla_match" and old_pspla_name:
+            recheck = apply_correction_and_recheck(
+                company_id, company_name, old_pspla_name, website_region=website_region
+            )
+            recheck_summary = recheck.get("summary")
+            lesson_rule = recheck.get("lesson", {}).get("rule_to_apply")
+
+        return jsonify({
+            "ok": True,
+            "type": correction_type,
+            "summary": summary,
+            "recheck_summary": recheck_summary,
+            "lesson_rule": lesson_rule,
+        })
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 
@@ -1991,11 +2464,24 @@ def delete_company():
             "Authorization": f"Bearer {SUPABASE_KEY}",
             "Prefer": "return=minimal",
         }
+        # Fetch company name before deleting for audit log
+        fetch_headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        fetch_resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}&select=company_name",
+            headers=fetch_headers, timeout=10
+        )
+        company_name = ""
+        if fetch_resp.ok:
+            rows = fetch_resp.json()
+            if rows:
+                company_name = rows[0].get("company_name", "")
         resp = requests.delete(
             f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
             headers=headers,
         )
         if resp.status_code in (200, 204):
+            from searcher import write_audit
+            write_audit("deleted", company_id, company_name, triggered_by="manual (dashboard)")
             return jsonify({"ok": True})
         return jsonify({"error": f"Supabase returned {resp.status_code}"}), 500
     except Exception as e:
@@ -2041,6 +2527,7 @@ def _launch(script, args=None, triggered_by="manual"):
     _type_map = {
         "searcher.py": "full", "run_weekly.py": "google-weekly",
         "run_facebook.py": "facebook", "run_partial.py": "google-partial",
+        "run_directories.py": "directories",
     }
     started_iso = datetime.now(timezone.utc).isoformat()
     try:
@@ -2080,6 +2567,11 @@ def _scheduled_facebook():
         _launch("run_facebook.py", ["--scheduled"], triggered_by="scheduled")
 
 
+def _scheduled_directories():
+    if os.path.exists(SCHEDULE_FLAG):
+        _launch("run_directories.py", ["--scheduled"], triggered_by="scheduled")
+
+
 if __name__ == "__main__":
     scheduler = BackgroundScheduler(timezone="Pacific/Auckland")
     # Full search: 1st of each month at 2am NZ
@@ -2091,6 +2583,9 @@ if __name__ == "__main__":
     # Facebook: Tuesday and Friday at 3am NZ
     scheduler.add_job(_scheduled_facebook, CronTrigger(day_of_week="tue,fri", hour=3, minute=0),
                       id="facebook", name="Facebook scan")
+    # Directory import (NZSA + LinkedIn): 15th of each month at 4am NZ
+    scheduler.add_job(_scheduled_directories, CronTrigger(day=15, hour=4, minute=0),
+                      id="directories", name="Directory import (NZSA + LinkedIn)")
     scheduler.start()
     print("Dashboard running at http://localhost:5000")
     print("Scheduler started — scheduled searches run automatically when enabled.")

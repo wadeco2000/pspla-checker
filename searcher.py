@@ -11,13 +11,35 @@ load_dotenv()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TERMS_FILE = os.path.join(BASE_DIR, "search_terms.json")
+CORRECTIONS_JSON = os.path.join(BASE_DIR, "corrections.json")
+LESSONS_JSON = os.path.join(BASE_DIR, "lessons.json")
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASS = os.getenv("SMTP_PASS", "")
+NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
+
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+# Session log — tracks new companies added in the current run for email notifications
+_session_new_companies = []
+
+
+def reset_session_log():
+    """Call at the start of each search run to clear the session log."""
+    global _session_new_companies
+    _session_new_companies = []
+
+
+def get_session_log():
+    """Return a copy of the session log."""
+    return list(_session_new_companies)
 
 NZ_REGIONS = [
     # Major cities
@@ -358,9 +380,76 @@ def find_facebook_url(company_name, page_text=""):
     return None
 
 
+def find_linkedin_url(company_name, page_text=""):
+    """Search Google for the company's LinkedIn company page.
+    Returns a linkedin.com/company/... URL or None."""
+    import re as _re
+
+    _LI_RE = _re.compile(r'https?://(?:[a-z]{2}\.)?linkedin\.com/company/([a-zA-Z0-9\-_%]+)', _re.I)
+
+    def _extract_candidate(link):
+        m = _LI_RE.match(link)
+        return f"https://www.linkedin.com/company/{m.group(1).rstrip('/')}" if m else None
+
+    # Check page_text for a linkedin.com/company/ link first
+    m = _LI_RE.search(page_text)
+    if m:
+        return f"https://www.linkedin.com/company/{m.group(1).rstrip('/')}"
+
+    # Name words — include short tokens (≥2 chars) so "ADT", "NZ" etc. are kept
+    name_words = [w for w in _re.findall(r'[a-z0-9]+', company_name.lower()) if len(w) >= 2]
+    # Generic words that add no signal on their own
+    _GENERIC = {"security", "services", "limited", "solutions", "systems",
+                "alarm", "alarms", "group", "new", "zealand", "install",
+                "camera", "cctv", "surveillance", "protection", "management"}
+    sig_words = [w for w in name_words if w not in _GENERIC]
+
+    def _score(r):
+        link = r.get("link", "")
+        combined = (link + " " + r.get("snippet", "") + " " + r.get("title", "")).lower()
+        # Slug from the LinkedIn URL itself — best signal
+        slug = link.lower().replace("-", " ").replace("_", " ").replace("/", " ")
+        word_hits = sum(1 for w in name_words if w in slug)
+        sig_hits = sum(1 for w in sig_words if w in slug)
+        nz_hit = 1 if any(s in combined for s in ["new zealand", " nz", ".co.nz", "auckland",
+                           "wellington", "christchurch", "hamilton", "tauranga"]) else 0
+        return sig_hits * 3 + word_hits * 2 + nz_hit
+
+    # Try three progressively broader queries, collect all linkedin.com/company/ results
+    queries = [
+        f'site:linkedin.com/company "{company_name}" New Zealand',
+        f'site:linkedin.com/company {company_name} New Zealand',
+        f'"{company_name}" New Zealand site:linkedin.com',
+    ]
+    candidates = []
+    for query in queries:
+        results = google_search(query, num_results=5)
+        if results is SERPAPI_EXHAUSTED:
+            break
+        if not results:
+            continue
+        for r in results:
+            link = r.get("link", "")
+            if not _LI_RE.search(link):
+                continue
+            c = _extract_candidate(link)
+            if c:
+                candidates.append((c, _score(r), r))
+        if candidates:
+            break  # Stop as soon as we get at least one linkedin hit
+
+    if not candidates:
+        return None
+
+    # Pick highest-scoring candidate; require at least one word match
+    candidates.sort(key=lambda x: -x[1])
+    best_url, best_score, _ = candidates[0]
+    return best_url if best_score >= 1 else None
+
+
 def scrape_website(url):
-    """Returns (page_text, email_or_None, facebook_url_or_None).
-    Extracts mailto: and facebook links directly from HTML."""
+    """Returns (page_text, email_or_None, facebook_url_or_None, linkedin_url_or_None).
+    Extracts mailto:, facebook, and linkedin/company links directly from HTML."""
     import re
     try:
         headers = {
@@ -371,7 +460,7 @@ def scrape_website(url):
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 403:
             print(f"  [Scrape blocked 403] {url} - will use search snippet only")
-            return "", None, None
+            return "", None, None, None
         soup = BeautifulSoup(response.text, "html.parser")
 
         # Extract email from mailto: links before truncating text
@@ -390,6 +479,14 @@ def scrape_website(url):
             if m:
                 scraped_email = m.group(1).lower()
 
+        # Extract LinkedIn company page URL from links
+        scraped_linkedin = None
+        for a in soup.find_all("a", href=True):
+            href = a["href"].split("?")[0].rstrip("/")
+            if re.search(r'linkedin\.com/company/[^/\s]+', href, re.I):
+                scraped_linkedin = re.sub(r'^https?://(?:[a-z]{2}\.)?linkedin\.com', 'https://www.linkedin.com', href, flags=re.I)
+                break
+
         # Remove chrome (nav/header/footer/sidebar) before capping so actual content isn't crowded out
         for tag in soup.find_all(["nav", "header", "footer",
                                    "script", "style", "noscript"]):
@@ -397,10 +494,10 @@ def scrape_website(url):
         for tag in soup.find_all(True, {"role": ["navigation", "banner", "contentinfo"]}):
             tag.decompose()
         text = " ".join(soup.get_text(separator=" ", strip=True).split())[:5000]
-        return text, scraped_email, None
+        return text, scraped_email, None, scraped_linkedin
     except Exception as e:
         print(f"  [Scrape error] {url}: {e}")
-        return "", None, None
+        return "", None, None, None
 
 
 def extract_company_info(url, page_text, search_snippet):
@@ -553,6 +650,232 @@ def extract_keywords(company_name):
     return keywords
 
 
+_lessons_cache = None
+
+
+def _load_lessons():
+    """Load lessons from lessons.json. Cached per process."""
+    global _lessons_cache
+    if _lessons_cache is not None:
+        return _lessons_cache
+    if not os.path.exists(LESSONS_JSON):
+        _lessons_cache = []
+        return _lessons_cache
+    try:
+        with open(LESSONS_JSON, "r", encoding="utf-8") as f:
+            _lessons_cache = json.load(f)
+    except Exception:
+        _lessons_cache = []
+    return _lessons_cache
+
+
+def _invalidate_lessons_cache():
+    global _lessons_cache
+    _lessons_cache = None
+
+
+def _get_relevant_lessons(website_company, pspla_company):
+    """Return lessons whose keywords appear in either company name (max 5)."""
+    lessons = _load_lessons()
+    if not lessons:
+        return []
+    both = (website_company + " " + pspla_company).lower()
+    relevant = []
+    for lesson in lessons:
+        kws = lesson.get("keywords_to_watch") or []
+        if any(kw.lower() in both for kw in kws):
+            relevant.append(lesson)
+    return relevant[:5]
+
+
+def _generate_and_save_lesson(company_name, wrong_pspla_name, new_result):
+    """Ask Claude why the false match happened and save the lesson."""
+    new_matched = new_result.get("matched_name") or "no match found"
+    prompt = f"""A PSPLA matching error was found and corrected in a New Zealand security company database.
+
+Company website name: "{company_name}"
+Wrong PSPLA match (false positive that was corrected): "{wrong_pspla_name}"
+New result after correction: matched_name="{new_matched}", licensed={new_result.get('licensed')}
+
+Analyse WHY the original false match happened and write a rule to prevent similar errors in future.
+
+Return JSON only:
+{{
+  "pattern_name": "short_snake_case_identifier",
+  "what_went_wrong": "1-2 sentences: why did the system incorrectly match these two companies?",
+  "rule_to_apply": "A clear, specific rule written as a bullet point guideline for a matching system. Start with: If ...",
+  "keywords_to_watch": ["list", "of", "2-6", "words", "that", "triggered", "the", "false", "match"]
+}}"""
+
+    try:
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        lesson = json.loads(raw.strip())
+    except Exception as e:
+        print(f"  [Lesson generation error] {e}")
+        lesson = {
+            "pattern_name": "unknown_pattern",
+            "what_went_wrong": f"False match: {company_name} -> {wrong_pspla_name}",
+            "rule_to_apply": f"If website is '{company_name}', do not match to '{wrong_pspla_name}'.",
+            "keywords_to_watch": company_name.lower().split()[:4],
+        }
+
+    lesson["example_wrong_match"] = f"{company_name} -> {wrong_pspla_name}"
+    lesson["example_correct_result"] = new_matched
+    lesson["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+    existing = []
+    if os.path.exists(LESSONS_JSON):
+        try:
+            with open(LESSONS_JSON, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        except Exception:
+            existing = []
+    existing.append(lesson)
+    with open(LESSONS_JSON, "w", encoding="utf-8") as f:
+        json.dump(existing, f, indent=2)
+
+    _invalidate_lessons_cache()
+    print(f"  [Lesson saved] {lesson['pattern_name']}: {lesson['rule_to_apply'][:80]}...")
+    return lesson
+
+
+def _llm_suggest_pspla_names(company_name, website_region, page_text, co_result, directors, extra_context=None):
+    """Ask Claude to suggest PSPLA search terms based on all available company context.
+    Returns a list of suggested names to try."""
+    co_name = (co_result or {}).get("name") or ""
+    co_address = (co_result or {}).get("address") or ""
+    dirs_str = ", ".join((directors or [])[:5]) if directors else "none found"
+    text_snippet = (page_text or "")[:2000]
+    ctx = extra_context or {}
+    facebook_snippet = ctx.get("facebook_snippet", "")
+    linkedin_url = ctx.get("linkedin_url", "")
+    nzsa_data = ctx.get("nzsa_data") or {}
+    nzsa_name = nzsa_data.get("member_name") or nzsa_data.get("name") or ""
+    nzsa_grade = nzsa_data.get("grade") or ""
+
+    extra_lines = ""
+    if facebook_snippet:
+        extra_lines += f"\n- Facebook page description: \"{facebook_snippet[:300]}\""
+    if linkedin_url:
+        extra_lines += f"\n- LinkedIn company page: {linkedin_url}"
+    if nzsa_name:
+        extra_lines += f"\n- NZSA member name: \"{nzsa_name}\""
+        if nzsa_grade:
+            extra_lines += f" (grade: {nzsa_grade})"
+
+    prompt = f"""You are helping find a New Zealand security company in the PSPLA (Private Security Personnel Licensing Authority) database.
+
+All available information about this company:
+- Website trading name: "{company_name}"
+- Region/city: "{website_region or 'unknown'}"
+- Companies Office registered name: "{co_name or 'not found'}"
+- Companies Office address: "{co_address or 'not found'}"
+- Directors/owners: {dirs_str}
+- Website text excerpt: "{text_snippet}"{extra_lines}
+
+Simple keyword searches of the PSPLA database found no match. The PSPLA uses official legal registered company names (e.g. "SMITH SECURITY SERVICES LIMITED") or individual full legal names for sole operators.
+
+Based on all the information above, suggest up to 5 specific names or search terms to try in the PSPLA database. Consider:
+- The Companies Office name is often the same as the PSPLA registered name
+- The NZSA member name may differ from the trading name but match the legal name
+- Directors may hold individual PSPLA licences under their personal name
+- The company may trade under a different name than their legal registration
+- Common NZ patterns: "TRADING NAME LIMITED", "SURNAME SECURITY LIMITED", etc.
+
+Return JSON only:
+{{
+  "suggested_names": ["name1", "name2", "name3"],
+  "reasoning": "brief explanation"
+}}"""
+
+    try:
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        result = json.loads(raw.strip())
+        return result.get("suggested_names", [])
+    except Exception as e:
+        print(f"  [LLM suggest error] {e}")
+        return []
+
+
+def _llm_deep_verify(website_company, pspla_company, website_region, pspla_address, page_text, co_result, directors, extra_context=None):
+    """Deep LLM verification using ALL available context — used when verify_pspla_match returns low/medium confidence."""
+    co_name = (co_result or {}).get("name") or "not found"
+    co_address = (co_result or {}).get("address") or "not found"
+    dirs_str = ", ".join((directors or [])[:4]) if directors else "none"
+    text_snippet = (page_text or "")[:1500]
+    ctx = extra_context or {}
+    facebook_snippet = ctx.get("facebook_snippet", "")
+    linkedin_url = ctx.get("linkedin_url", "")
+    nzsa_data = ctx.get("nzsa_data") or {}
+    nzsa_name = nzsa_data.get("member_name") or nzsa_data.get("name") or ""
+    nzsa_grade = nzsa_data.get("grade") or ""
+
+    extra_lines = ""
+    if facebook_snippet:
+        extra_lines += f"\n- Facebook description: \"{facebook_snippet[:300]}\""
+    if linkedin_url:
+        extra_lines += f"\n- LinkedIn: {linkedin_url}"
+    if nzsa_name:
+        extra_lines += f"\n- NZSA member name: \"{nzsa_name}\""
+        if nzsa_grade:
+            extra_lines += f" (grade: {nzsa_grade})"
+
+    prompt = f"""Verify if these are the same New Zealand security company. You have comprehensive evidence.
+
+Website trading name: "{website_company}"
+Website region: "{website_region or 'unknown'}"
+Companies Office registered name: "{co_name}"
+Companies Office address: "{co_address}"
+Directors/owners: {dirs_str}
+Website text excerpt: "{text_snippet}"{extra_lines}
+
+PSPLA registered name: "{pspla_company}"
+PSPLA registered address: "{pspla_address or 'unknown'}"
+
+Using ALL the above evidence together, are these the same company? Look for:
+- Whether the Companies Office name matches or resembles the PSPLA name
+- Whether the NZSA member name matches the PSPLA name
+- Whether addresses/regions are compatible
+- Whether directors are mentioned in website text
+- Whether the trading name logically maps to the PSPLA registered name
+
+Return ONLY JSON: {{"match": true or false, "confidence": "high/medium/low", "reason": "explanation citing specific evidence used"}}"""
+
+    try:
+        resp = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        return json.loads(raw.strip())
+    except Exception as e:
+        print(f"  [Deep verify error] {e}")
+        return {"match": False, "confidence": "low", "reason": "deep verification error"}
+
+
 def verify_pspla_match(website_company, pspla_company, website_region, pspla_address):
     """Use Claude to verify if a PSPLA match is genuinely the same company."""
     import re as _re
@@ -571,6 +894,14 @@ def verify_pspla_match(website_company, pspla_company, website_region, pspla_add
             # Every distinctive word is absent — definitely not the same company
             return {"match": False, "confidence": "high",
                     "reason": f"Distinctive word(s) {missing} not found as exact words in PSPLA name"}
+
+    # Load and inject relevant lessons
+    relevant_lessons = _get_relevant_lessons(website_company, pspla_company)
+    lessons_text = ""
+    if relevant_lessons:
+        lessons_text = "\nLearned rules from past corrections (apply these):\n"
+        for les in relevant_lessons:
+            lessons_text += f"- {les.get('rule_to_apply', '')}\n"
 
     try:
         prompt = f"""Are these likely the same company?
@@ -594,7 +925,7 @@ Consider:
   - "Watchu Security" vs "Watchu Security Waikato Limited" (address: Cambridge, region: Canterbury) → NO — Canterbury is not in the Waikato.
   - "Addz Livewire" vs "Livewire Electrical Wellington" → NO — different first word, different city.
   - "Hines Security" vs "Hines Electrical & Security NZ" → YES — same family name, same business type.
-
+{lessons_text}
 Return ONLY JSON: {{"match": true or false, "confidence": "high/medium/low", "reason": "brief reason"}}"""
 
         message = client.messages.create(
@@ -613,7 +944,156 @@ Return ONLY JSON: {{"match": true or false, "confidence": "high/medium/low", "re
         return {"match": False, "confidence": "low", "reason": "verification error"}
 
 
-def check_pspla(company_name, website_region=None):
+_corrections_cache = None
+
+
+def _load_corrections():
+    """Load structured corrections from corrections.json. Cached per process."""
+    global _corrections_cache
+    if _corrections_cache is not None:
+        return _corrections_cache
+    if not os.path.exists(CORRECTIONS_JSON):
+        _corrections_cache = []
+        return _corrections_cache
+    try:
+        with open(CORRECTIONS_JSON, "r", encoding="utf-8") as f:
+            _corrections_cache = json.load(f)
+    except Exception:
+        _corrections_cache = []
+    return _corrections_cache
+
+
+def invalidate_corrections_cache():
+    """Call after saving a new correction so it takes effect immediately."""
+    global _corrections_cache
+    _corrections_cache = None
+
+
+def _is_pspla_match_blocked(company_name, pspla_name):
+    """Return (True, reason) if this company→PSPLA match has been flagged as a false positive."""
+    corrections = _load_corrections()
+    co_norm = company_name.lower().strip()
+    pspla_norm = pspla_name.lower().strip()
+    for c in corrections:
+        if c.get("type") != "false_pspla_match":
+            continue
+        c_company = (c.get("company_name") or "").lower().strip()
+        c_blocked = (c.get("blocked_pspla_name") or "").lower().strip()
+        if not c_company or not c_blocked:
+            continue
+        # Flexible match: names can be substrings of each other (handles Ltd/Limited variants)
+        company_match = c_company in co_norm or co_norm in c_company
+        pspla_match = c_blocked in pspla_norm or pspla_norm in c_blocked
+        if company_match and pspla_match:
+            return True, c.get("reason", "flagged by user correction")
+    return False, ""
+
+
+def parse_and_save_correction(company_name, company_id, correction_text):
+    """Use Claude to parse a free-text correction into structured JSON and save to corrections.json.
+    Returns the parsed dict."""
+    prompt = f"""A user found an error in a security company database entry.
+
+Company in the database: "{company_name}"
+User's correction note: "{correction_text}"
+
+Analyze what type of error this is. Return JSON only with these fields:
+- "type": one of "false_pspla_match" (this company was incorrectly matched to a PSPLA/license entry), "not_security_company" (not actually a security camera/alarm company), "wrong_data" (wrong email/phone/website/address), "other"
+- "blocked_pspla_name": (only if type is "false_pspla_match") the name of the PSPLA entity that is NOT this company, extracted from the note. Be as specific as possible using words from the note.
+- "summary": one sentence summarising what needs to be corrected.
+
+Respond with a single JSON object, nothing else."""
+
+    try:
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = resp.content[0].text.strip()
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        parsed = json.loads(raw.strip())
+    except Exception as e:
+        print(f"  [Correction parse error] {e}")
+        parsed = {"type": "other", "summary": correction_text}
+
+    parsed["company_name"] = company_name
+    parsed["company_id"] = str(company_id)
+    parsed["raw"] = correction_text
+    parsed["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+    # Load existing, append, save
+    existing = []
+    if os.path.exists(CORRECTIONS_JSON):
+        try:
+            with open(CORRECTIONS_JSON, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+        except Exception:
+            existing = []
+    existing.append(parsed)
+    with open(CORRECTIONS_JSON, "w", encoding="utf-8") as f:
+        json.dump(existing, f, indent=2)
+
+    invalidate_corrections_cache()
+    return parsed
+
+
+def _llm_cross_check_sources(company_name, website_region, pspla_result, co_result, nzsa_result, extra_context):
+    """Cross-check all available data sources for internal consistency.
+    Returns {"consistent": bool, "confidence": str, "issues": [], "notes": str}."""
+    ctx = extra_context or {}
+    facebook_snippet = ctx.get("facebook_snippet", "")
+    linkedin_url = ctx.get("linkedin_url", "")
+
+    pspla_name = (pspla_result or {}).get("matched_name") or "none"
+    pspla_addr = (pspla_result or {}).get("pspla_address") or "unknown"
+    co_name = (co_result or {}).get("name") or "none"
+    co_address = (co_result or {}).get("address") or "unknown"
+    nzsa_member_name = (nzsa_result or {}).get("member_name") or "none"
+    nzsa_grade = (nzsa_result or {}).get("grade") or ""
+
+    # Only run if at least 2 named sources are available
+    named_sources = [s for s in [pspla_name, co_name, nzsa_member_name] if s and s != "none"]
+    if len(named_sources) < 2 and not facebook_snippet:
+        return {"consistent": True, "confidence": "high", "issues": [], "notes": "insufficient sources for cross-check"}
+
+    prompt = f"""Cross-check these data sources about a New Zealand security company for consistency.
+
+Website trading name: "{company_name}"
+Website region: "{website_region or 'unknown'}"
+PSPLA registered name: "{pspla_name}" (address: {pspla_addr})
+Companies Office registered name: "{co_name}" (address: {co_address})
+NZSA member name: "{nzsa_member_name}"{(' grade: ' + nzsa_grade) if nzsa_grade else ''}
+Facebook description: "{facebook_snippet[:300] if facebook_snippet else 'not available'}"
+LinkedIn: "{linkedin_url or 'not found'}"
+
+Are all these sources consistently pointing to the same company?
+Look for name mismatches, address/region conflicts, or business type conflicts suggesting a data mix-up.
+
+Return ONLY JSON: {{"consistent": true or false, "confidence": "high/medium/low", "issues": ["list specific inconsistencies"], "notes": "brief summary"}}"""
+
+    try:
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        return json.loads(raw.strip())
+    except Exception as e:
+        print(f"  [Cross-check error] {e}")
+        return {"consistent": True, "confidence": "low", "issues": [], "notes": "cross-check error"}
+
+
+def check_pspla(company_name, website_region=None, page_text=None, co_result=None, directors=None, extra_context=None):
     def _get_status(d):
         s = d.get("permitStatus_s", "")
         if isinstance(s, list): s = s[0] if s else ""
@@ -660,6 +1140,28 @@ def check_pspla(company_name, website_region=None):
                 docs, num_found = pspla_search(keywords[0])
                 if num_found > 0:
                     match_method = f"keyword: {keywords[0]}"
+
+        # Try 4: LLM-suggested names using all available context
+        if num_found == 0 and (page_text or co_result or directors or extra_context):
+            print(f"  [LLM search] No match via keywords — asking Claude for PSPLA name suggestions")
+            llm_suggestions = _llm_suggest_pspla_names(
+                company_name, website_region, page_text, co_result, directors, extra_context
+            )
+            if llm_suggestions:
+                print(f"  [LLM search] Suggestions: {llm_suggestions}")
+            for suggested in llm_suggestions:
+                if not suggested or suggested.lower() == company_name.lower():
+                    continue
+                sdocs, sfound = pspla_search(suggested)
+                if sfound > 0:
+                    docs, num_found = sdocs, sfound
+                    match_method = f"LLM-suggested: {suggested}"
+                    print(f"  [LLM search] Found results for: {suggested}")
+                    write_audit("llm_decision", None, company_name,
+                                changes=f"Strategy 4: LLM suggested '{suggested}' -> found PSPLA results",
+                                triggered_by="check_pspla",
+                                notes=f"All suggestions tried: {llm_suggestions}")
+                    break
 
         if num_found > 0 and docs:
             def get_field(d, key):
@@ -722,6 +1224,27 @@ def check_pspla(company_name, website_region=None):
                     caddr = get_field(cand, "registeredOffice_txt") or get_field(cand, "townCity_txt") or ""
                     verification = verify_pspla_match(company_name, cname, website_region, caddr)
                     if verification.get("match"):
+                        # For low or medium confidence, do a deeper check using all available context
+                        orig_confidence = verification.get("confidence")
+                        if orig_confidence in ("low", "medium") and (page_text or co_result or directors or extra_context):
+                            print(f"  [Deep verify] {orig_confidence} confidence match — checking with full context: {cname}")
+                            deep = _llm_deep_verify(
+                                company_name, cname, website_region, caddr,
+                                page_text, co_result, directors, extra_context
+                            )
+                            if not deep.get("match"):
+                                print(f"  [Deep verify rejected] {company_name} vs {cname} - {deep.get('reason')}")
+                                write_audit("llm_decision", None, company_name,
+                                            changes=f"Deep verify REJECTED '{cname}': {deep.get('reason', '')}",
+                                            triggered_by="check_pspla",
+                                            notes=f"Original confidence: {orig_confidence}")
+                                continue
+                            write_audit("llm_decision", None, company_name,
+                                        changes=f"Deep verify CONFIRMED '{cname}': {deep.get('reason', '')}",
+                                        triggered_by="check_pspla",
+                                        notes=f"Original confidence: {orig_confidence} -> deep: {deep.get('confidence')}")
+                            verification = deep
+                            print(f"  [Deep verify confirmed] {cname} - {deep.get('reason')}")
                         verified_doc = cand
                         match_method = f"{match_method} (verified: {verification.get('confidence')})"
                         break
@@ -778,6 +1301,15 @@ def check_pspla(company_name, website_region=None):
             permit_status = get_field(matched, "permitStatus_s")
             permit_expiry = get_field(matched, "permitEndDate_s")
             license_type = "individual" if matched.get("isIndividual_b") else "company"
+
+            # Check user corrections — block matches flagged as false positives
+            blocked, block_reason = _is_pspla_match_blocked(company_name, name_field)
+            if blocked:
+                print(f"  [Correction applied] '{company_name}' -> '{name_field}' blocked: {block_reason}")
+                return {"licensed": False, "matched_name": None, "license_type": None,
+                        "match_method": "blocked by user correction",
+                        "pspla_address": None, "pspla_license_number": None,
+                        "pspla_license_status": None, "pspla_license_expiry": None}
 
             return {
                 "licensed": has_active,
@@ -870,17 +1402,21 @@ def check_companies_office(company_name, pspla_address=None):
                 if name_upper in line:
                     address = None
                     company_number = None
+                    nzbn = None
                     for j in range(i + 1, min(i + 8, len(lines))):
                         lj = lines[j]
-                        # Company number looks like "(9364441)" or "(9364441) (NZBN:...)"
+                        # Company number looks like "(9364441)" or "(9364441) (NZBN:9429039...)"
                         m = _re.match(r"\((\d{6,8})\)", lj)
                         if m and not company_number:
                             company_number = m.group(1)
+                        nzbn_m = _re.search(r"NZBN:\s*(\d+)", lj)
+                        if nzbn_m and not nzbn:
+                            nzbn = nzbn_m.group(1)
                         if any(w in lj.lower() for w in address_words) and len(lj) > 10 and not address:
                             address = lj
                         if address and company_number:
                             break
-                    return {"name": line.title(), "address": address, "company_number": company_number}
+                    return {"name": line.title(), "address": address, "company_number": company_number, "nzbn": nzbn}
             return None
 
         result = _find_match(lines, company_name_upper)
@@ -908,7 +1444,7 @@ Return ONLY JSON: {{"name": "best match or null", "address": null}}"""
                 result = json.loads(raw.strip())
 
         if result is None:
-            return {"name": None, "address": None, "directors": []}
+            return {"name": None, "address": None, "company_number": None, "nzbn": None, "directors": []}
 
         # Fetch directors from the detail page if we have a company number
         directors = []
@@ -917,7 +1453,13 @@ Return ONLY JSON: {{"name": "best match or null", "address": null}}"""
             if directors:
                 print(f"  [Companies Office directors] {directors}")
 
-        return {"name": result.get("name"), "address": result.get("address"), "directors": directors}
+        return {
+            "name": result.get("name"),
+            "address": result.get("address"),
+            "company_number": result.get("company_number"),
+            "nzbn": result.get("nzbn"),
+            "directors": directors,
+        }
 
     except Exception as e:
         print(f"  [Companies Office error] {e}")
@@ -1081,6 +1623,218 @@ def check_pspla_individual(name):
     return {"found": False, "name": None}
 
 
+# ---------------------------------------------------------------------------
+# NZSA member directory
+# ---------------------------------------------------------------------------
+_nzsa_cache = {"members": None, "fetched_at": 0}
+NZSA_URL = "https://security.org.nz/public-info/find-a-member/"
+NZSA_CACHE_TTL = 86400  # re-fetch at most once per day
+
+
+def _decode_cf_email(encoded):
+    """Decode a Cloudflare-obfuscated email address.
+    encoded is the hex string after the # in /cdn-cgi/l/email-protection#..."""
+    try:
+        key = int(encoded[:2], 16)
+        return "".join(chr(int(encoded[i:i+2], 16) ^ key) for i in range(2, len(encoded), 2))
+    except Exception:
+        return ""
+
+
+def _fetch_nzsa_members():
+    """Fetch and parse the full NZSA member directory.
+    Returns a list of dicts with keys:
+        name, locations, services, contact_name, phone, email, website,
+        accredited (bool), grade (str or None)
+    """
+    import re as _re
+    try:
+        resp = requests.get(
+            NZSA_URL,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+            timeout=20,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"  [NZSA fetch error] {e}")
+        return []
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    members = []
+
+    for label in soup.find_all("label", class_="accordion-header"):
+        name = label.get_text(strip=True).replace("\u200b", "").strip()
+        body = label.find_next_sibling("div", class_="accordion-body")
+        if not name or not body:
+            continue
+
+        # Accreditation
+        accred_div = body.find("div", class_="member-accred-manage")
+        accredited = False
+        grade = None
+        if accred_div:
+            h4 = accred_div.find("h4", class_="accredited")
+            if h4:
+                accredited = True
+            p_text = accred_div.get_text(" ", strip=True)
+            gm = _re.search(r"Grade:\s*(.+?)(?:Expiry|Security|$)", p_text)
+            if gm:
+                grade = gm.group(1).strip().rstrip(".")
+
+        # Company overview
+        overview = ""
+        overview_h5 = body.find(lambda t: t.name in ("h4", "h5") and "Overview" in t.get_text())
+        if overview_h5:
+            p = overview_h5.find_next_sibling("p")
+            if p:
+                overview = p.get_text(strip=True)
+
+        # Locations and services
+        meta = body.find("div", class_="member-meta")
+        locations, services = [], []
+        if meta:
+            boxes = meta.find_all("div", class_="box")
+            for box in boxes:
+                h4 = box.find("h4")
+                if not h4:
+                    continue
+                items = [li.get_text(strip=True) for li in box.find_all("li")]
+                if "Location" in h4.text:
+                    locations = items
+                elif "Service" in h4.text:
+                    services = items
+
+        # Contact
+        contact_div = body.find("div", class_="member-contact")
+        contact_name, phone, email, website = "", "", "", ""
+        if contact_div:
+            h4 = contact_div.find("h4")
+            if h4:
+                contact_name = h4.get_text(strip=True).replace("Contact:", "").strip()
+            for p in contact_div.find_all("p"):
+                txt = p.get_text(strip=True)
+                if _re.search(r"\d{2,}", txt) and not email:
+                    phone = _re.sub(r"[^\d\s\+\-\(\)]", "", txt).strip()
+                a = p.find("a")
+                if a:
+                    href = a.get("href", "")
+                    if "email-protection#" in href:
+                        encoded = href.split("#")[-1]
+                        email = _decode_cf_email(encoded)
+                    elif href.startswith("http"):
+                        website = href.rstrip("/")
+
+        members.append({
+            "name": name,
+            "overview": overview,
+            "locations": locations,
+            "services": services,
+            "contact_name": contact_name,
+            "phone": phone,
+            "email": email,
+            "website": website,
+            "accredited": accredited,
+            "grade": grade,
+        })
+
+    return members
+
+
+def _get_nzsa_members():
+    """Return cached member list, refreshing if stale."""
+    import time as _t
+    if _nzsa_cache["members"] is None or (_t.time() - _nzsa_cache["fetched_at"]) > NZSA_CACHE_TTL:
+        print("  [NZSA] Fetching member directory...")
+        _nzsa_cache["members"] = _fetch_nzsa_members()
+        _nzsa_cache["fetched_at"] = _t.time()
+        print(f"  [NZSA] {len(_nzsa_cache['members'])} members loaded.")
+    return _nzsa_cache["members"]
+
+
+def _normalise_company_name(name):
+    """Strip legal suffixes and punctuation for fuzzy matching."""
+    import re as _re
+    n = name.lower()
+    n = _re.sub(r'\b(limited|ltd|nz|new zealand|inc|llp|lp|co)\b', ' ', n)
+    n = _re.sub(r'[^a-z0-9 ]', ' ', n)
+    return _re.sub(r'\s+', ' ', n).strip()
+
+
+def check_nzsa(company_name, website=None):
+    """Check if a company is listed as a NZSA member.
+    Returns dict with keys:
+        member (bool), member_name (str or None), accredited (bool), grade (str or None)
+    """
+    import re as _re
+
+    members = _get_nzsa_members()
+    if not members:
+        return {"member": False, "member_name": None, "accredited": False, "grade": None}
+
+    def _member_hit(m):
+        return {
+            "member": True,
+            "member_name": m["name"],
+            "accredited": m["accredited"],
+            "grade": m["grade"],
+            "contact_name": m.get("contact_name", ""),
+            "phone": m.get("phone", ""),
+            "email": m.get("email", ""),
+            "overview": m.get("overview", ""),
+        }
+
+    query_norm = _normalise_company_name(company_name)
+    query_words = set(query_norm.split())
+
+    # Generic words that alone don't identify a company
+    _GENERIC = {"security", "services", "solutions", "systems", "alarm", "alarms",
+                "group", "install", "camera", "cctv", "surveillance", "protection",
+                "management", "response", "patrol", "guard", "monitoring"}
+
+    sig_words = query_words - _GENERIC
+
+    best_score = 0
+    best_member = None
+
+    for m in members:
+        m_norm = _normalise_company_name(m["name"])
+        m_words = set(m_norm.split())
+
+        # Exact normalised match
+        if query_norm == m_norm:
+            return _member_hit(m)
+
+        # Website match — most reliable
+        if website and m["website"]:
+            q_dom = _re.sub(r'^https?://(www\.)?', '', website).rstrip("/").lower()
+            m_dom = _re.sub(r'^https?://(www\.)?', '', m["website"]).rstrip("/").lower()
+            if q_dom and m_dom and q_dom == m_dom:
+                return _member_hit(m)
+
+        # Word overlap scoring — weight significant words higher
+        common = query_words & m_words
+        sig_common = sig_words & m_words
+        if not sig_common and not common:
+            continue
+
+        # Score: significant word hits * 3, generic word hits * 1
+        # Penalise if many words don't match
+        score = len(sig_common) * 3 + len(common - sig_common)
+        # Require at least 1 significant word match
+        if sig_common:
+            best_score = max(best_score, score)
+            if score >= best_score:
+                best_score = score
+                best_member = m
+
+    # Require score >= 3 (at least one significant word match)
+    if best_member and best_score >= 3:
+        return _member_hit(best_member)
+
+    return {"member": False, "member_name": None, "accredited": False, "grade": None,
+            "contact_name": None, "phone": None, "email": None, "overview": None}
+
+
 PAUSE_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pause.flag")
 RUNNING_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "running.flag")
 PROGRESS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "search_progress.json")
@@ -1107,8 +1861,20 @@ RECORD_TEMPLATE = {
     "match_reason": None,
     "companies_office_name": None,
     "companies_office_address": None,
+    "companies_office_number": None,
+    "nzbn": None,
     "individual_license": None,
     "director_name": None,
+    "facebook_url": None,
+    "linkedin_url": None,
+    "nzsa_member": None,
+    "nzsa_member_name": None,
+    "nzsa_accredited": None,
+    "nzsa_grade": None,
+    "nzsa_contact_name": None,
+    "nzsa_phone": None,
+    "nzsa_email": None,
+    "nzsa_overview": None,
     "root_domain": None,
     "source_url": None,
     "last_checked": None,
@@ -1295,10 +2061,17 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
             names_to_try.append(other)
 
     # Try each name on PSPLA until we find a match
+    page_text = info.get("_page_text", "")
+    extra_context = {
+        "facebook_snippet": info.get("_fb_snippet", ""),
+        "linkedin_url": info.get("linkedin_url", ""),
+        "nzsa_data": info.get("_nzsa_data"),
+    }
     pspla_result = None
     for name in names_to_try:
         print(f"  [Checking PSPLA] {name}")
-        res = check_pspla(name, website_region=website_region)
+        res = check_pspla(name, website_region=website_region, page_text=page_text,
+                          directors=info.get("director_names"), extra_context=extra_context)
         if res.get("matched_name"):
             matched = res["matched_name"]
             verification = verify_pspla_match(
@@ -1344,7 +2117,10 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
     co_registered_name = co_result.get("name")
     if co_registered_name and not pspla_result.get("licensed") and co_registered_name not in names_to_try:
         print(f"  [Checking PSPLA with CO name] {co_registered_name}")
-        co_pspla_res = check_pspla(co_registered_name, website_region=website_region)
+        co_pspla_res = check_pspla(co_registered_name, website_region=website_region,
+                                   page_text=page_text, co_result=co_result,
+                                   directors=co_result.get("directors") or info.get("director_names") or [],
+                                   extra_context=extra_context)
         # Only replace if CO search found an active licence, or original had no match at all.
         # Don't replace a known-expired result or we'll skip the individual licence check.
         if co_pspla_res.get("matched_name") and (co_pspla_res.get("licensed") or not pspla_result.get("matched_name")):
@@ -1429,6 +2205,29 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
     else:
         reason_parts.append(f"Companies Office search for '{co_search_name}' returned no match.")
 
+    # NZSA membership check
+    print(f"  [Checking NZSA] {company_name}")
+    nzsa_result = check_nzsa(company_name, website=website_url)
+    if nzsa_result["member"]:
+        print(f"  [NZSA] Member: {nzsa_result['member_name']}" + (" (Accredited)" if nzsa_result["accredited"] else ""))
+
+    # Cross-check all sources when we have a PSPLA match and multiple data sources
+    if pspla_result.get("matched_name") and (nzsa_result.get("member") or co_result.get("name") or extra_context.get("facebook_snippet")):
+        print(f"  [Cross-check] Verifying source consistency for: {company_name}")
+        cross_check = _llm_cross_check_sources(
+            company_name, website_region, pspla_result, co_result, nzsa_result, extra_context
+        )
+        if not cross_check.get("consistent"):
+            issues = cross_check.get("issues", [])
+            print(f"  [Cross-check WARNING] Inconsistency detected: {issues}")
+            write_audit("llm_decision", None, company_name,
+                        changes=f"Source cross-check found inconsistency: {'; '.join(issues)}",
+                        triggered_by="cross_check",
+                        notes=cross_check.get("notes", ""))
+            reason_parts.insert(0, f"[WARNING] Source inconsistency: {cross_check.get('notes', '')}.")
+        else:
+            print(f"  [Cross-check OK] Sources consistent ({cross_check.get('confidence','?')} confidence): {cross_check.get('notes', '')}")
+
     record = {
         "company_name": company_name,
         "website": website_url,
@@ -1447,9 +2246,20 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         "match_reason": " ".join(reason_parts),
         "companies_office_name": co_result.get("name"),
         "companies_office_address": co_result.get("address"),
+        "companies_office_number": co_result.get("company_number"),
+        "nzbn": co_result.get("nzbn"),
         "individual_license": individual_license_found,
         "director_name": ", ".join(directors),
         "facebook_url": info.get("facebook_url"),
+        "linkedin_url": info.get("linkedin_url"),
+        "nzsa_member": "true" if nzsa_result["member"] else "false",
+        "nzsa_member_name": nzsa_result["member_name"],
+        "nzsa_accredited": "true" if nzsa_result["accredited"] else "false",
+        "nzsa_grade": nzsa_result["grade"],
+        "nzsa_contact_name": nzsa_result.get("contact_name") or None,
+        "nzsa_phone": nzsa_result.get("phone") or None,
+        "nzsa_email": nzsa_result.get("email") or None,
+        "nzsa_overview": nzsa_result.get("overview") or None,
         "root_domain": root_domain,
         "source_url": info.get("_fb_url") or website_url,
         "last_checked": datetime.now(timezone.utc).isoformat(),
@@ -1469,6 +2279,17 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         else:
             status = "UNKNOWN"
         print(f"  [Saved] PSPLA Status: {status}")
+        _session_new_companies.append({
+            "company_name": company_name,
+            "licensed": licensed_val,
+            "region": website_region or fallback_region,
+            "website": website_url,
+            "email": info.get("email", ""),
+        })
+        write_audit("added", None, company_name,
+                    changes=f"Source: {source_label} | Status: {status}",
+                    triggered_by=source_label,
+                    notes=website_url)
         return True
     else:
         print("  [Error] Failed to save to database")
@@ -1624,7 +2445,7 @@ def _process_fb_result(result, found_urls_all, fb_total, fb_new, term, fallback_
             return fb_total, fb_new
 
         print(f"  [Website found] {website_url}")
-        page_text, scraped_email, scraped_facebook = scrape_website(website_url)
+        page_text, scraped_email, scraped_facebook, scraped_linkedin = scrape_website(website_url)
         time.sleep(1)
 
         info = extract_company_info(website_url, page_text, result["snippet"])
@@ -1635,10 +2456,14 @@ def _process_fb_result(result, found_urls_all, fb_total, fb_new, term, fallback_
             print("  [Skipped] Could not extract company name")
             return fb_total, fb_new
 
+        info["_page_text"] = page_text
+
         if not info.get("email") and scraped_email:
             info["email"] = scraped_email
         if scraped_facebook:
             info["facebook_url"] = scraped_facebook
+        if scraped_linkedin:
+            info["linkedin_url"] = scraped_linkedin
         if not info.get("email"):
             found_email = find_email_via_google(root_domain)
             if found_email:
@@ -1734,11 +2559,512 @@ def run_facebook_search(found_urls_all, regions=None, include_nationwide=True):
     return fb_total, fb_new
 
 
+def linkedin_url_exists(li_url):
+    """Return True if a record with this linkedin_url already exists in the DB."""
+    url = f"{SUPABASE_URL}/rest/v1/Companies?linkedin_url=eq.{requests.utils.quote(li_url)}&select=id&limit=1"
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    try:
+        r = requests.get(url, headers=headers)
+        return bool(r.json())
+    except:
+        return False
+
+
+_LINKEDIN_IMPORT_QUERIES = [
+    'site:linkedin.com/company "security camera" "New Zealand"',
+    'site:linkedin.com/company "CCTV installation" "New Zealand"',
+    'site:linkedin.com/company "alarm installation" "New Zealand"',
+    'site:linkedin.com/company "security systems" "New Zealand"',
+    'site:linkedin.com/company "security alarm" "New Zealand"',
+    'site:linkedin.com/company "CCTV" "New Zealand" security',
+]
+
+
+def write_audit(action, company_id, company_name, changes="", triggered_by="manual", notes=""):
+    """Write an audit log entry to the AuditLog table in Supabase."""
+    try:
+        url = f"{SUPABASE_URL}/rest/v1/AuditLog"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        }
+        payload = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "action": action,
+            "company_id": str(company_id) if company_id else None,
+            "company_name": company_name,
+            "changes": changes,
+            "triggered_by": triggered_by,
+            "notes": notes,
+        }
+        requests.post(url, headers=headers, json=payload, timeout=10)
+    except Exception as e:
+        print(f"  [Audit log error] {e}")
+
+
+def send_search_email(search_type, started_iso, total_found, total_new, triggered_by, new_companies=None):
+    """Send a notification email summarising the completed search run."""
+    if not NOTIFY_EMAIL or not SMTP_USER or not SMTP_PASS or not SMTP_HOST:
+        return  # email not configured
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    type_labels = {
+        "full": "Full Search",
+        "google-weekly": "Weekly Scan",
+        "google-partial": "Partial Search",
+        "facebook": "Facebook Search",
+        "directories": "Directory Import (NZSA + LinkedIn)",
+    }
+    label = type_labels.get(search_type, search_type.title())
+
+    try:
+        started_dt = datetime.fromisoformat(started_iso.replace("Z", "+00:00"))
+        duration_mins = round((datetime.now(timezone.utc) - started_dt).total_seconds() / 60)
+        duration_str = f"{duration_mins} min"
+    except Exception:
+        duration_str = "unknown"
+
+    subject = f"PSPLA {label} complete -- {total_new} new companies added"
+
+    # Build plain text body
+    lines = [
+        f"Search type:     {label}",
+        f"Triggered by:    {triggered_by}",
+        f"Duration:        {duration_str}",
+        f"URLs/pages found: {total_found}",
+        f"New companies:   {total_new}",
+        "",
+    ]
+
+    if new_companies:
+        lines.append(f"New companies added ({len(new_companies)}):")
+        lines.append("-" * 50)
+        for c in new_companies:
+            status = "LICENSED" if c.get("licensed") else ("NOT LICENSED" if c.get("licensed") is False else "UNKNOWN")
+            lines.append(f"  {c['company_name']}  [{status}]  {c.get('region','')}")
+            if c.get("website"):
+                lines.append(f"    Website: {c['website']}")
+            if c.get("email"):
+                lines.append(f"    Email:   {c['email']}")
+    else:
+        lines.append("No new companies were added in this run.")
+
+    body_text = "\n".join(lines)
+
+    # Build HTML body
+    rows_html = ""
+    if new_companies:
+        for c in new_companies:
+            status = "LICENSED" if c.get("licensed") else ("NOT LICENSED" if c.get("licensed") is False else "UNKNOWN")
+            color = "#27ae60" if c.get("licensed") else "#e74c3c" if c.get("licensed") is False else "#888"
+            ws = f'<a href="{c["website"]}">{c["website"]}</a>' if c.get("website") else ""
+            rows_html += (
+                f"<tr><td style='padding:4px 8px;border-bottom:1px solid #eee'>{c['company_name']}</td>"
+                f"<td style='padding:4px 8px;border-bottom:1px solid #eee;color:{color}'><b>{status}</b></td>"
+                f"<td style='padding:4px 8px;border-bottom:1px solid #eee;color:#666'>{c.get('region','')}</td>"
+                f"<td style='padding:4px 8px;border-bottom:1px solid #eee'>{ws}</td>"
+                f"<td style='padding:4px 8px;border-bottom:1px solid #eee;color:#555'>{c.get('email','')}</td></tr>"
+            )
+        table_html = (
+            "<table style='border-collapse:collapse;font-size:13px;width:100%'>"
+            "<tr style='background:#f5f5f5'>"
+            "<th style='padding:4px 8px;text-align:left'>Company</th>"
+            "<th style='padding:4px 8px;text-align:left'>Status</th>"
+            "<th style='padding:4px 8px;text-align:left'>Region</th>"
+            "<th style='padding:4px 8px;text-align:left'>Website</th>"
+            "<th style='padding:4px 8px;text-align:left'>Email</th>"
+            "</tr>" + rows_html + "</table>"
+        )
+    else:
+        table_html = "<p style='color:#888'>No new companies were added in this run.</p>"
+
+    html = f"""<html><body style='font-family:sans-serif;color:#333'>
+<h2 style='color:#2c3e50'>PSPLA {label} Complete</h2>
+<table style='margin-bottom:16px'>
+<tr><td style='padding:2px 12px 2px 0;color:#666'>Triggered by</td><td>{triggered_by}</td></tr>
+<tr><td style='padding:2px 12px 2px 0;color:#666'>Duration</td><td>{duration_str}</td></tr>
+<tr><td style='padding:2px 12px 2px 0;color:#666'>URLs/pages found</td><td>{total_found}</td></tr>
+<tr><td style='padding:2px 12px 2px 0;color:#666'>New companies added</td><td><b>{total_new}</b></td></tr>
+</table>
+<h3 style='color:#2c3e50'>New Companies ({len(new_companies) if new_companies else 0})</h3>
+{table_html}
+</body></html>"""
+
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = SMTP_USER
+        msg["To"] = NOTIFY_EMAIL
+        msg.attach(MIMEText(body_text, "plain"))
+        msg.attach(MIMEText(html, "html"))
+
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_USER, NOTIFY_EMAIL, msg.as_string())
+        print(f"  [Email sent] {subject}")
+        write_audit("email", None, f"Notification sent",
+                    changes=subject,
+                    triggered_by=triggered_by,
+                    notes=f"To: {NOTIFY_EMAIL}")
+    except Exception as e:
+        print(f"  [Email error] {e}")
+
+
+def apply_correction_and_recheck(company_id, company_name, old_pspla_name, website_region=None):
+    """Re-run PSPLA check after a correction, update DB, generate lesson.
+    Returns dict with keys: new_result, lesson, changed (bool), summary."""
+    print(f"  [Auto-recheck] Running PSPLA for '{company_name}' after correction")
+
+    new_result = check_pspla(company_name, website_region=website_region)
+
+    # Generate and save the lesson from this mistake
+    lesson = _generate_and_save_lesson(company_name, old_pspla_name, new_result)
+
+    # Patch the DB record with new PSPLA result
+    new_licensed = new_result.get("licensed")
+    new_name = new_result.get("matched_name")
+    patch = {
+        "pspla_licensed": new_licensed,
+        "pspla_name": new_name,
+        "pspla_address": new_result.get("pspla_address"),
+        "pspla_license_number": new_result.get("pspla_license_number"),
+        "pspla_license_status": new_result.get("pspla_license_status"),
+        "pspla_license_expiry": new_result.get("pspla_license_expiry"),
+        "license_type": new_result.get("license_type"),
+        "match_method": new_result.get("match_method"),
+    }
+    patch = {k: v for k, v in patch.items() if v is not None}
+    patch["pspla_licensed"] = new_licensed  # always include even if False
+
+    try:
+        url = f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}"
+        headers = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        }
+        requests.patch(url, headers=headers, json=patch, timeout=15)
+        print(f"  [Auto-recheck] DB updated: licensed={new_licensed}, name={new_name}")
+    except Exception as e:
+        print(f"  [Auto-recheck DB error] {e}")
+
+    changed = new_name != old_pspla_name or new_licensed is not None
+
+    if new_name and new_name != old_pspla_name:
+        summary = f"Found new match: {new_name} (licensed={new_licensed})"
+    elif new_licensed is False and not new_name:
+        summary = "No PSPLA match found — marked as Not Licensed"
+    else:
+        summary = f"Result unchanged: {new_name}"
+
+    write_audit("updated", company_id, company_name,
+                changes=f"Auto-recheck after correction: {summary}. Lesson: {lesson.get('rule_to_apply','')[:100]}",
+                triggered_by="auto-recheck (correction)")
+
+    return {
+        "new_result": new_result,
+        "lesson": lesson,
+        "changed": changed,
+        "summary": summary,
+    }
+
+
+def run_nzsa_import(found_urls=None, limit=None):
+    """Import all NZSA members not already in the database.
+    limit: stop after processing this many new candidates (for testing).
+    Returns (total_found, total_new)."""
+    if found_urls is None:
+        found_urls = set()
+
+    print("\n" + "=" * 60)
+    print("  NZSA Directory Import")
+    print("=" * 60)
+
+    members = _get_nzsa_members()
+    print(f"  {len(members)} NZSA members loaded")
+
+    total_found = 0
+    total_new = 0
+    processed = 0
+
+    for idx, m in enumerate(members):
+        check_pause()
+        if limit is not None and processed >= limit:
+            print(f"  [Limit reached] Stopping at {limit} processed")
+            break
+
+        name = m.get("name", "").strip()
+        website = m.get("website", "").strip()
+
+        write_status("nzsa-import", f"member {idx+1}/{len(members)}", name,
+                     idx + 1, 1, len(members), 1, total_found, total_new)
+
+        # --- Member has a website ---
+        if website and website.startswith("http"):
+            root_domain = get_root_domain(website)
+            if root_domain in found_urls or get_domain_record(root_domain):
+                print(f"  [Already in DB] {name} ({root_domain})")
+                continue
+            if company_name_exists(name):
+                print(f"  [Already in DB by name] {name}")
+                found_urls.add(root_domain)
+                continue
+            found_urls.add(root_domain)
+            total_found += 1
+            processed += 1
+
+            print(f"  [NZSA] {name} -> {website}")
+            page_text, scraped_email, scraped_facebook, scraped_linkedin = scrape_website(website)
+            time.sleep(1)
+
+            info = extract_company_info(website, page_text, name)
+            if not info:
+                info = {}
+            info["_page_text"] = page_text
+            info["_nzsa_data"] = m  # Pass NZSA member record as LLM context
+            if not info.get("company_name"):
+                info["company_name"] = name
+            if not info.get("region"):
+                locs = m.get("locations") or []
+                if locs:
+                    info["region"] = locs[0]
+            if not info.get("email") and scraped_email:
+                info["email"] = scraped_email
+            if not info.get("email") and m.get("email"):
+                info["email"] = m["email"]
+            if scraped_facebook:
+                info["facebook_url"] = scraped_facebook
+            if scraped_linkedin:
+                info["linkedin_url"] = scraped_linkedin
+            if not info.get("email"):
+                found_email = find_email_via_google(root_domain)
+                if found_email:
+                    info["email"] = found_email
+
+            fb_url = find_facebook_url(info["company_name"], page_text)
+            if fb_url:
+                info["facebook_url"] = fb_url
+            li_url = scraped_linkedin or find_linkedin_url(info["company_name"], page_text)
+            if li_url:
+                info["linkedin_url"] = li_url
+
+            region = info.get("region") or (m.get("locations") or [""])[0]
+            if process_and_save_company(info, website, root_domain, "NZSA directory", region):
+                total_new += 1
+
+        else:
+            # --- No website: search Google ---
+            if company_name_exists(name):
+                print(f"  [Already in DB by name] {name}")
+                continue
+
+            processed += 1
+            print(f"  [NZSA, no website] {name} — searching Google...")
+            query = f'"{name}" security New Zealand'
+            results = google_search(query, num_results=5)
+            time.sleep(1)
+
+            if results is SERPAPI_EXHAUSTED:
+                print("  [STOPPED] SerpAPI exhausted during NZSA import.")
+                return total_found, total_new
+
+            if not results:
+                continue
+
+            for result in results:
+                url = result["link"]
+                if any(domain in url for domain in SKIP_DOMAINS):
+                    continue
+                if is_directory_listing_url(url):
+                    continue
+                if "facebook.com" in url or "linkedin.com" in url:
+                    continue
+                root_domain = get_root_domain(url)
+                if root_domain in found_urls or get_domain_record(root_domain):
+                    continue
+                found_urls.add(root_domain)
+                total_found += 1
+
+                page_text, scraped_email, scraped_facebook, scraped_linkedin = scrape_website(url)
+                time.sleep(1)
+
+                info = extract_company_info(url, page_text, result.get("snippet", ""))
+                if not info:
+                    info = {}
+                info["_page_text"] = page_text
+                if not info.get("company_name"):
+                    info["company_name"] = name
+                if not info.get("email") and scraped_email:
+                    info["email"] = scraped_email
+                if not info.get("email") and m.get("email"):
+                    info["email"] = m["email"]
+                if scraped_facebook:
+                    info["facebook_url"] = scraped_facebook
+                if scraped_linkedin:
+                    info["linkedin_url"] = scraped_linkedin
+                if not info.get("email"):
+                    found_email = find_email_via_google(root_domain)
+                    if found_email:
+                        info["email"] = found_email
+
+                fb_url = find_facebook_url(info["company_name"], page_text)
+                if fb_url:
+                    info["facebook_url"] = fb_url
+                li_url = scraped_linkedin or find_linkedin_url(info["company_name"], page_text)
+                if li_url:
+                    info["linkedin_url"] = li_url
+
+                region = info.get("region") or (m.get("locations") or [""])[0]
+                if process_and_save_company(info, url, root_domain, "NZSA directory", region):
+                    total_new += 1
+                break  # only process first good result per member
+
+    print(f"\n  NZSA import complete. Found: {total_found}, New: {total_new}")
+    return total_found, total_new
+
+
+def run_linkedin_import(found_urls=None, limit=None):
+    """Search LinkedIn via Google for NZ security companies not already in the database.
+    limit: stop after processing this many new candidates (for testing).
+    Returns (total_found, total_new)."""
+    import re as _lire
+    if found_urls is None:
+        found_urls = set()
+
+    print("\n" + "=" * 60)
+    print("  LinkedIn Directory Import")
+    print("=" * 60)
+
+    total_found = 0
+    total_new = 0
+    seen_li_urls = set()
+    processed = 0
+
+    for q_idx, query in enumerate(_LINKEDIN_IMPORT_QUERIES):
+        check_pause()
+        print(f"\n  Query: {query}")
+        write_status("linkedin-import", f"query {q_idx+1}/{len(_LINKEDIN_IMPORT_QUERIES)}", query,
+                     q_idx + 1, 1, len(_LINKEDIN_IMPORT_QUERIES), 1, total_found, total_new)
+
+        results = google_search(query, num_results=50)
+        time.sleep(1)
+
+        if results is SERPAPI_EXHAUSTED:
+            print("  [STOPPED] SerpAPI exhausted during LinkedIn import.")
+            return total_found, total_new
+
+        if not results:
+            continue
+
+        for result in results:
+            check_pause()
+            if limit is not None and processed >= limit:
+                print(f"  [Limit reached] Stopping at {limit} processed")
+                return total_found, total_new
+
+            li_url = result["link"]
+            if "linkedin.com/company/" not in li_url:
+                continue
+
+            # Normalise to www subdomain, strip query params
+            li_norm = _lire.sub(r'https?://(?:[a-z]{2}\.)?linkedin\.com/company/',
+                                'https://www.linkedin.com/company/', li_url)
+            li_norm = li_norm.split("?")[0].rstrip("/")
+
+            if li_norm in seen_li_urls:
+                continue
+            seen_li_urls.add(li_norm)
+
+            if linkedin_url_exists(li_norm):
+                print(f"  [Already in DB] {li_norm}")
+                continue
+
+            # Derive a guess at the company name from the URL slug
+            slug = li_norm.split("/company/")[-1]
+            company_name_guess = slug.replace("-", " ").title()
+
+            if company_name_exists(company_name_guess):
+                print(f"  [Already in DB by name] {company_name_guess}")
+                continue
+
+            processed += 1
+            print(f"  [LinkedIn] {li_norm} -> {company_name_guess}")
+
+            # Find their real website via Google
+            site_query = f'"{company_name_guess}" security New Zealand -site:linkedin.com'
+            website_results = google_search(site_query, num_results=5)
+            time.sleep(1)
+
+            if website_results is SERPAPI_EXHAUSTED:
+                print("  [STOPPED] SerpAPI exhausted during LinkedIn import.")
+                return total_found, total_new
+
+            website_url = None
+            for wr in (website_results or []):
+                wu = wr["link"]
+                if any(d in wu for d in SKIP_DOMAINS):
+                    continue
+                if is_directory_listing_url(wu):
+                    continue
+                if "linkedin.com" in wu or "facebook.com" in wu:
+                    continue
+                website_url = wu
+                break
+
+            if not website_url:
+                print(f"  [No website found] Skipping {company_name_guess}")
+                continue
+
+            root_domain = get_root_domain(website_url)
+            if root_domain in found_urls or get_domain_record(root_domain):
+                print(f"  [Domain already in DB] {root_domain}")
+                continue
+            found_urls.add(root_domain)
+            total_found += 1
+
+            page_text, scraped_email, scraped_facebook, scraped_linkedin = scrape_website(website_url)
+            time.sleep(1)
+
+            info = extract_company_info(website_url, page_text, result.get("snippet", ""))
+            if not info or not info.get("company_name"):
+                info = {"company_name": company_name_guess}
+
+            info["_page_text"] = page_text
+            info["linkedin_url"] = li_norm
+            if not info.get("email") and scraped_email:
+                info["email"] = scraped_email
+            if scraped_facebook:
+                info["facebook_url"] = scraped_facebook
+            if not info.get("email"):
+                found_email = find_email_via_google(root_domain)
+                if found_email:
+                    info["email"] = found_email
+
+            fb_url = find_facebook_url(info["company_name"], page_text)
+            if fb_url:
+                info["facebook_url"] = fb_url
+
+            region = info.get("region", "")
+            if process_and_save_company(info, website_url, root_domain, "LinkedIn directory", region):
+                total_new += 1
+
+    print(f"\n  LinkedIn import complete. Found: {total_found}, New: {total_new}")
+    return total_found, total_new
+
+
 def run_search(triggered_by="manual"):
     print("=" * 60)
     print("  PSPLA Security Camera Company Checker")
     print("=" * 60)
     started_iso = datetime.now(timezone.utc).isoformat()
+    reset_session_log()
 
     # Sanity check — abort if the database is missing any required columns
     print("  Checking database schema...")
@@ -1821,13 +3147,15 @@ def run_search(triggered_by="manual"):
                     print(f"  [Found] {url}")
                     total_found += 1
 
-                    page_text, scraped_email, scraped_facebook = scrape_website(url)
+                    page_text, scraped_email, scraped_facebook, scraped_linkedin = scrape_website(url)
                     time.sleep(1)
 
                     info = extract_company_info(url, page_text, result["snippet"])
                     if not info or not info.get("company_name"):
                         print("  [Skipped] Could not extract company name")
                         continue
+
+                    info["_page_text"] = page_text
 
                     # Use mailto: email from HTML if Claude didn't find one in the text
                     if not info.get("email") and scraped_email:
@@ -1841,6 +3169,12 @@ def run_search(triggered_by="manual"):
                     if fb_url:
                         info["facebook_url"] = fb_url
                         print(f"  [Facebook] {fb_url}")
+
+                    # Find LinkedIn company page
+                    li_url = scraped_linkedin or find_linkedin_url(info["company_name"], page_text)
+                    if li_url:
+                        info["linkedin_url"] = li_url
+                        print(f"  [LinkedIn] {li_url}")
 
                     # Email fallback: Google search for "@domain" if still no email
                     if not info.get("email"):
@@ -1862,8 +3196,19 @@ def run_search(triggered_by="manual"):
         total_found += fb_found
         total_new += fb_new_count
 
+        # NZSA directory import
+        nzsa_found, nzsa_new = run_nzsa_import(found_urls)
+        total_found += nzsa_found
+        total_new += nzsa_new
+
+        # LinkedIn directory import
+        li_found, li_new = run_linkedin_import(found_urls)
+        total_found += li_found
+        total_new += li_new
+
         clear_progress()
         append_history("full", started_iso, total_found, total_new, "completed", triggered_by)
+        send_search_email("full", started_iso, total_found, total_new, triggered_by, get_session_log())
 
     finally:
         # Always clean up flags and status when done or crashed

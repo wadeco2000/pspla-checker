@@ -14,11 +14,13 @@ from datetime import datetime, timezone
 
 from searcher import (
     google_search, extract_company_info, scrape_website,
-    find_email_via_google, find_facebook_url, get_root_domain, get_domain_record,
+    find_email_via_google, find_facebook_url, find_linkedin_url,
+    get_root_domain, get_domain_record,
     company_exists, process_and_save_company, check_schema,
     write_status, clear_status, append_history, check_pause,
     RUNNING_FLAG, PAUSE_FLAG, SKIP_DOMAINS, NZ_REGIONS, SERPAPI_EXHAUSTED,
     is_directory_listing_url,
+    reset_session_log, get_session_log, send_search_email,
 )
 
 WEEKLY_TERMS = [
@@ -36,6 +38,7 @@ PAUSE_FLAG = os.path.join(BASE_DIR, "pause.flag")
 
 def run_weekly(triggered_by="manual"):
     started_iso = datetime.now(timezone.utc).isoformat()
+    reset_session_log()
     print("=" * 60)
     print("  PSPLA Weekly Light Scan (last 7 days)")
     print("=" * 60)
@@ -72,6 +75,7 @@ def run_weekly(triggered_by="manual"):
                     print("\n  [STOPPED] SerpAPI exhausted.")
                     append_history("google-weekly", started_iso, total_found, total_new,
                                    "stopped", triggered_by)
+                    send_search_email("google-weekly", started_iso, total_found, total_new, triggered_by, get_session_log())
                     return
 
                 if not results:
@@ -100,13 +104,15 @@ def run_weekly(triggered_by="manual"):
                     print(f"  [Found] {url}")
                     total_found += 1
 
-                    page_text, scraped_email, scraped_facebook = scrape_website(url)
+                    page_text, scraped_email, scraped_facebook, scraped_linkedin = scrape_website(url)
                     time.sleep(1)
 
                     info = extract_company_info(url, page_text, result["snippet"])
                     if not info or not info.get("company_name"):
                         print("  [Skipped] Could not extract company name")
                         continue
+
+                    info["_page_text"] = page_text
 
                     if not info.get("email") and scraped_email:
                         info["email"] = scraped_email
@@ -119,12 +125,16 @@ def run_weekly(triggered_by="manual"):
                     fb_url = find_facebook_url(info["company_name"], page_text)
                     if fb_url:
                         info["facebook_url"] = fb_url
+                    li_url = scraped_linkedin or find_linkedin_url(info["company_name"], page_text)
+                    if li_url:
+                        info["linkedin_url"] = li_url
                     if process_and_save_company(info, url, root_domain,
                                                 f"weekly {term} {region}", region):
                         total_new += 1
 
         append_history("google-weekly", started_iso, total_found, total_new,
                        "completed", triggered_by)
+        send_search_email("google-weekly", started_iso, total_found, total_new, triggered_by, get_session_log())
 
     finally:
         clear_status()
