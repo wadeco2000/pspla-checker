@@ -15,11 +15,13 @@ import time
 import requests
 from datetime import datetime, timezone
 
+import traceback as _tb
+
 from searcher import (
     check_pspla, check_pspla_individual, check_companies_office, check_nzsa,
     find_facebook_url, scrape_facebook_page, find_linkedin_url, scrape_linkedin_page,
     get_google_business_profile, detect_services,
-    write_audit, write_status, clear_status, append_history, check_pause,
+    write_audit, write_status, clear_status, append_history, record_search_start, check_pause,
     reset_session_log, get_session_log, send_search_email,
     patch_company, enrich_existing_record,
     SUPABASE_URL, SUPABASE_KEY,
@@ -327,6 +329,7 @@ def run_recheck(triggered_by="manual"):
     if os.path.exists(PAUSE_FLAG):
         os.remove(PAUSE_FLAG)
     open(RUNNING_FLAG, "w").close()
+    record_search_start("bulk-recheck", started_iso, triggered_by)
 
     total_processed = 0
     total_updated = 0
@@ -364,8 +367,11 @@ def run_recheck(triggered_by="manual"):
                           triggered_by, get_session_log())
 
     except Exception as e:
+        tb = _tb.format_exc()
+        print(f"\n  [CRASH] Unhandled exception in Bulk Recheck: {e}")
+        print(tb)
         append_history("bulk-recheck", started_iso, total_processed, total_updated,
-                       f"error: {e}", triggered_by)
+                       f"error: {type(e).__name__}: {e}", triggered_by, notes=tb[:1500])
         raise
 
     finally:

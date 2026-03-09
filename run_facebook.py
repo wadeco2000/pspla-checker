@@ -10,9 +10,11 @@ import os
 import sys
 from datetime import datetime, timezone
 
+import traceback as _tb
+
 from searcher import (
     run_facebook_search, check_schema, clear_status,
-    append_history, RUNNING_FLAG, PAUSE_FLAG,
+    append_history, record_search_start, RUNNING_FLAG, PAUSE_FLAG,
     reset_session_log, reset_token_usage, get_session_log, send_search_email,
     clear_fb_progress,
 )
@@ -41,13 +43,18 @@ if __name__ == "__main__":
     reset_session_log()
     reset_token_usage()
     open(RUNNING_FLAG, "w").close()
+    record_search_start("facebook", started_iso, triggered_by)
     try:
         fb_found, fb_new = run_facebook_search(set(), fresh=fresh)
         append_history("facebook", started_iso, fb_found, fb_new, "completed", triggered_by)
         send_search_email("facebook", started_iso, fb_found, fb_new, triggered_by, get_session_log())
         clear_fb_progress()
     except Exception as e:
-        append_history("facebook", started_iso, 0, 0, f"error: {e}", triggered_by)
+        tb = _tb.format_exc()
+        print(f"\n  [CRASH] Unhandled exception in Facebook search: {e}")
+        print(tb)
+        append_history("facebook", started_iso, 0, 0, f"error: {type(e).__name__}: {e}", triggered_by,
+                       notes=tb[:1500])
         raise
     finally:
         clear_status()

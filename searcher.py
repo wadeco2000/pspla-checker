@@ -3353,8 +3353,42 @@ def clear_status():
         os.remove(STATUS_FILE)
 
 
-def append_history(run_type, started_iso, total_found, total_new, status="completed", triggered_by="manual"):
-    """Append a run record to search_history.json (newest first, capped at 100)."""
+def record_search_start(run_type, started_iso, triggered_by):
+    """Write a 'running' sentinel to history at search start.
+    If the process crashes without calling append_history(), this entry remains
+    visible in the history so you can see the search started but never finished."""
+    record = {
+        "type": run_type,
+        "started": started_iso,
+        "finished": None,
+        "duration_minutes": None,
+        "total_found": 0,
+        "total_new": 0,
+        "status": "running",
+        "triggered_by": triggered_by,
+        "notes": "",
+    }
+    history = []
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE) as f:
+                history = json.load(f)
+        except Exception:
+            history = []
+    # Remove any stale "running" sentinels from previous crashed sessions
+    history = [h for h in history if h.get("status") != "running"]
+    history.insert(0, record)
+    history = history[:100]
+    try:
+        with open(HISTORY_FILE, "w") as f:
+            json.dump(history, f, indent=2)
+    except Exception as e:
+        print(f"  [History start write error] {e}")
+
+
+def append_history(run_type, started_iso, total_found, total_new, status="completed", triggered_by="manual", notes=""):
+    """Append a run record to search_history.json (newest first, capped at 100).
+    Replaces any 'running' sentinel written by record_search_start() for the same started_iso."""
     finished = datetime.now(timezone.utc)
     try:
         started_dt = datetime.fromisoformat(started_iso)
@@ -3370,6 +3404,7 @@ def append_history(run_type, started_iso, total_found, total_new, status="comple
         "total_new": total_new,
         "status": status,
         "triggered_by": triggered_by,
+        "notes": notes,
     }
     history = []
     if os.path.exists(HISTORY_FILE):
@@ -3378,6 +3413,8 @@ def append_history(run_type, started_iso, total_found, total_new, status="comple
                 history = json.load(f)
         except Exception:
             history = []
+    # Remove the "running" sentinel for this run (same started_iso) and any stale ones
+    history = [h for h in history if not (h.get("status") == "running")]
     history.insert(0, record)
     history = history[:100]
     try:
@@ -4314,7 +4351,17 @@ def send_search_email(search_type, started_iso, total_found, total_new, triggere
                     triggered_by=triggered_by,
                     notes=f"To: {NOTIFY_EMAIL}")
     except Exception as e:
+        import traceback as _tb_email
+        tb = _tb_email.format_exc()
         print(f"  [Email error] {e}")
+        print(tb)
+        try:
+            write_audit("email", None, "Email send FAILED",
+                        changes=f"Subject: {subject}  Error: {e}",
+                        triggered_by=triggered_by,
+                        notes=tb[:800])
+        except Exception:
+            pass
 
 
 def apply_correction_and_recheck(company_id, company_name, old_pspla_name, website_region=None):
@@ -4773,6 +4820,7 @@ def run_search(triggered_by="manual"):
     print("  PSPLA Security Camera Company Checker")
     print("=" * 60)
     started_iso = datetime.now(timezone.utc).isoformat()
+    record_search_start("full", started_iso, triggered_by)
     reset_session_log()
     reset_token_usage()
 
@@ -4919,6 +4967,16 @@ def run_search(triggered_by="manual"):
         clear_progress()
         append_history("full", started_iso, total_found, total_new, "completed", triggered_by)
         send_search_email("full", started_iso, total_found, total_new, triggered_by, get_session_log())
+
+    except Exception as e:
+        import traceback as _tb
+        tb = _tb.format_exc()
+        print(f"\n  [CRASH] Unhandled exception in run_search: {e}")
+        print(tb)
+        append_history("full", started_iso, total_found, total_new,
+                       f"error: {type(e).__name__}: {e}", triggered_by,
+                       notes=tb[:1500])
+        raise
 
     finally:
         # Always clean up flags and status when done or crashed

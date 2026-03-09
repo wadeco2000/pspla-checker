@@ -13,9 +13,11 @@ import os
 import sys
 from datetime import datetime, timezone
 
+import traceback as _tb
+
 from searcher import (
     run_nzsa_import, run_linkedin_import, check_schema,
-    clear_status, append_history,
+    clear_status, append_history, record_search_start,
     reset_session_log, get_session_log, send_search_email,
     clear_dir_progress, reset_token_usage,
 )
@@ -51,6 +53,7 @@ if __name__ == "__main__":
     reset_session_log()
     reset_token_usage()
     open(RUNNING_FLAG, "w").close()
+    record_search_start("directories", started_iso, triggered_by)
 
     found_urls = set()
     total_found = 0
@@ -72,7 +75,11 @@ if __name__ == "__main__":
         clear_dir_progress()
 
     except Exception as e:
-        append_history("directories", started_iso, total_found, total_new, f"error: {e}", triggered_by)
+        tb = _tb.format_exc()
+        print(f"\n  [CRASH] Unhandled exception in Directory import: {e}")
+        print(tb)
+        append_history("directories", started_iso, total_found, total_new,
+                       f"error: {type(e).__name__}: {e}", triggered_by, notes=tb[:1500])
         raise
 
     finally:

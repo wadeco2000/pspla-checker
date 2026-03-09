@@ -2394,8 +2394,13 @@ def publish():
 
 @app.route("/search-status")
 def search_status():
+    global _was_running
     running = _search_process_alive()
     paused = running and os.path.exists(PAUSE_FLAG)
+    # Crash detection: if we were running last poll but not any more, mark stale "running" entries
+    if _was_running and not running:
+        _detect_and_mark_crashes()
+    _was_running = running
     status = {"running": running, "paused": paused}
     if running and os.path.exists(STATUS_FILE):
         try:
@@ -2558,6 +2563,22 @@ def search_history_data():
                 history = json.load(f)
         except Exception:
             pass
+    # If no process is running, any "running" entry is a crash remnant
+    if not _search_process_alive():
+        changed = False
+        for entry in history:
+            if entry.get("status") == "running":
+                entry["status"] = "crashed"
+                entry["finished"] = entry.get("finished") or datetime.now(timezone.utc).isoformat()
+                if not entry.get("notes"):
+                    entry["notes"] = "Process exited without writing a completion record. Check search_log.txt for details."
+                changed = True
+        if changed:
+            try:
+                with open(HISTORY_FILE, "w") as f:
+                    json.dump(history, f, indent=2)
+            except Exception:
+                pass
     return jsonify(history)
 
 
@@ -2614,6 +2635,8 @@ SEARCH_HISTORY_TEMPLATE = """<!DOCTYPE html>
         <select id="statusFilter" onchange="renderTable()">
             <option value="">All Statuses</option>
             <option value="completed">Completed</option>
+            <option value="running">Running</option>
+            <option value="crashed">Crashed</option>
             <option value="stopped">Stopped</option>
             <option value="error">Error</option>
         </select>
@@ -2629,14 +2652,15 @@ SEARCH_HISTORY_TEMPLATE = """<!DOCTYPE html>
                 <th class="right">Found</th>
                 <th class="right">New</th>
                 <th>Status</th>
+                <th>Notes</th>
             </tr>
         </thead>
-        <tbody id="tableBody"><tr><td colspan="7" style="text-align:center;color:#aaa;padding:30px;">Loading...</td></tr></tbody>
+        <tbody id="tableBody"><tr><td colspan="8" style="text-align:center;color:#aaa;padding:30px;">Loading...</td></tr></tbody>
     </table>
 </div>
 <script>
 var TYPE_LABELS   = {full:'Full','google-weekly':'Weekly',facebook:'Facebook','google-partial':'Partial',directories:'Directories','bulk-recheck':'Bulk Recheck'};
-var STATUS_COLORS = {completed:'#27ae60',stopped:'#e67e22',error:'#e74c3c'};
+var STATUS_COLORS = {completed:'#27ae60',stopped:'#e67e22',error:'#e74c3c',running:'#e67e22',crashed:'#c0392b'};
 var _allRows = [];
 
 function fmt(iso) {
@@ -2668,15 +2692,32 @@ function renderTable() {
     });
     if (!rows.length) {
         document.getElementById('tableBody').innerHTML =
-            '<tr><td colspan="7" style="text-align:center;color:#aaa;padding:30px;">No records match.</td></tr>';
+            '<tr><td colspan="8" style="text-align:center;color:#aaa;padding:30px;">No records match.</td></tr>';
         return;
     }
     var html = '';
-    rows.forEach(function(r) {
+    rows.forEach(function(r, idx) {
         var col = STATUS_COLORS[r.status] || '#888';
         var lbl = TYPE_LABELS[r.type] || r.type;
-        var dur = r.duration_minutes ? r.duration_minutes + ' min' : '-';
-        html += '<tr>'
+        var dur = r.duration_minutes ? r.duration_minutes + ' min' : (r.status === 'running' ? '(running...)' : '-');
+        var notes = r.notes || '';
+        var notesTd = '';
+        var notesRow = '';
+        if (notes) {
+            var short = notes.length > 60 ? notes.substring(0, 60) + '...' : notes;
+            notesTd = '<td style="max-width:220px;color:#888;font-size:11px;" title="' + notes.replace(/"/g,'&quot;') + '">'
+                + '<span>' + short.replace(/</g,'&lt;') + '</span>'
+                + (notes.length > 60 ? ' <a href="#" onclick="toggleNotes(event,' + idx + ');return false;" style="color:#3498db;font-size:10px;">[expand]</a>' : '')
+                + '</td>';
+            if (notes.length > 60) {
+                notesRow = '<tr id="notes-' + idx + '" style="display:none;">'
+                    + '<td colspan="8" style="background:#fff8f8;padding:10px 14px;font-size:11px;color:#555;white-space:pre-wrap;font-family:monospace;">'
+                    + notes.replace(/</g,'&lt;') + '</td></tr>';
+            }
+        } else {
+            notesTd = '<td></td>';
+        }
+        html += '<tr style="' + (r.status==='crashed'?'background:#fff5f5;':r.status==='running'?'background:#fffaf0;':'') + '">'
             + '<td>' + fmt(r.started) + '</td>'
             + '<td>' + lbl + '</td>'
             + '<td style="color:#888;">' + (r.triggered_by||'-') + '</td>'
@@ -2684,9 +2725,15 @@ function renderTable() {
             + '<td class="right">' + (r.total_found||0).toLocaleString() + '</td>'
             + '<td class="right" style="font-weight:bold;">' + (r.total_new||0).toLocaleString() + '</td>'
             + '<td><span class="badge" style="background:' + col + '20;color:' + col + ';">' + r.status + '</span></td>'
-            + '</tr>';
+            + notesTd
+            + '</tr>' + notesRow;
     });
     document.getElementById('tableBody').innerHTML = html;
+}
+
+function toggleNotes(e, idx) {
+    var row = document.getElementById('notes-' + idx);
+    if (row) row.style.display = row.style.display === 'none' ? '' : 'none';
 }
 
 fetch('/search-history-data')
@@ -2697,7 +2744,7 @@ fetch('/search-history-data')
         renderTable();
     })
     .catch(function(){ document.getElementById('tableBody').innerHTML =
-        '<tr><td colspan="7" style="text-align:center;color:#e74c3c;padding:30px;">Failed to load history.</td></tr>'; });
+        '<tr><td colspan="8" style="text-align:center;color:#e74c3c;padding:30px;">Failed to load history.</td></tr>'; });
 </script>
 </body>
 </html>"""
@@ -3891,6 +3938,34 @@ def delete_company():
 
 
 _search_proc = None   # module-level reference to the running subprocess
+_was_running = False  # tracks previous poll state for crash detection
+
+
+def _detect_and_mark_crashes():
+    """Scan search_history.json for stale 'running' entries and mark them 'crashed'.
+    Called when the dashboard detects a search process just died without writing a final entry."""
+    if not os.path.exists(HISTORY_FILE):
+        return
+    try:
+        with open(HISTORY_FILE) as f:
+            history = json.load(f)
+    except Exception:
+        return
+    changed = False
+    for entry in history:
+        if entry.get("status") == "running":
+            entry["status"] = "crashed"
+            entry["finished"] = datetime.now(timezone.utc).isoformat()
+            if not entry.get("notes"):
+                entry["notes"] = "Process exited without writing a completion record. Check search_log.txt for details."
+            changed = True
+    if changed:
+        try:
+            with open(HISTORY_FILE, "w") as f:
+                json.dump(history, f, indent=2)
+            print("  [Crash detected] Marked stale 'running' history entries as 'crashed'.")
+        except Exception as e:
+            print(f"  [Crash detection write error] {e}")
 
 
 def _search_process_alive():

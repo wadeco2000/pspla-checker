@@ -10,12 +10,14 @@ import json
 import time
 from datetime import datetime, timezone
 
+import traceback as _tb
+
 from searcher import (
     google_search, extract_company_info, scrape_website,
     find_email_via_google, find_facebook_url, find_linkedin_url,
     get_root_domain, get_domain_record,
     company_exists, process_and_save_company, check_schema,
-    write_status, clear_status, append_history, check_pause,
+    write_status, clear_status, append_history, record_search_start, check_pause,
     SKIP_DOMAINS, SERPAPI_EXHAUSTED, run_facebook_search,
     is_directory_listing_url,
     reset_session_log, get_session_log, send_search_email,
@@ -64,6 +66,7 @@ def run_partial(triggered_by="manual", fresh=False):
     if os.path.exists(PAUSE_FLAG):
         os.remove(PAUSE_FLAG)
     open(RUNNING_FLAG, "w").close()
+    record_search_start("google-partial", started_iso, triggered_by)
     total_found = 0
     total_new = 0
     found_urls = set()
@@ -182,6 +185,14 @@ def run_partial(triggered_by="manual", fresh=False):
                        "completed", triggered_by)
         send_search_email("google-partial", started_iso, total_found, total_new, triggered_by, get_session_log())
         clear_partial_progress()
+
+    except Exception as e:
+        tb = _tb.format_exc()
+        print(f"\n  [CRASH] Unhandled exception in Partial search: {e}")
+        print(tb)
+        append_history("google-partial", started_iso, total_found, total_new,
+                       f"error: {type(e).__name__}: {e}", triggered_by, notes=tb[:1500])
+        raise
 
     finally:
         clear_status()
