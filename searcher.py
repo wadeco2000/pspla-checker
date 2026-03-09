@@ -27,6 +27,38 @@ NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
+# LLM health tracking — counts consecutive API failures across all LLM functions
+_llm_consecutive_errors = 0
+_LLM_ERROR_THRESHOLD = 3  # write an audit warning after this many consecutive failures
+
+
+def _llm_error(fn_name, error):
+    """Record an LLM API failure and warn via audit log when threshold is hit."""
+    global _llm_consecutive_errors
+    _llm_consecutive_errors += 1
+    print(f"  [LLM unavailable] {fn_name}: {error}")
+    if _llm_consecutive_errors == _LLM_ERROR_THRESHOLD:
+        try:
+            write_audit("llm_error", None, "SYSTEM",
+                        changes=f"LLM API unavailable after {_llm_consecutive_errors} consecutive failures "
+                                f"in {fn_name}: {error}. Matches requiring verification will be "
+                                f"saved as low-confidence and flagged for review.",
+                        triggered_by="system", notes="Check Anthropic API key / credit balance")
+        except Exception:
+            pass
+
+
+def _llm_ok():
+    """Reset the consecutive error counter after a successful LLM call."""
+    global _llm_consecutive_errors
+    _llm_consecutive_errors = 0
+
+
+def get_llm_status():
+    """Return current LLM health status for dashboard display."""
+    return _llm_consecutive_errors
+
+
 # Session log — tracks new companies added in the current run for email notifications
 _session_new_companies = []
 
@@ -809,9 +841,10 @@ Return JSON only:
             if raw.startswith("json"):
                 raw = raw[4:]
         result = json.loads(raw.strip())
+        _llm_ok()
         return result.get("suggested_names", [])
     except Exception as e:
-        print(f"  [LLM suggest error] {e}")
+        _llm_error("_llm_suggest_pspla_names", e)
         return []
 
 
@@ -870,10 +903,15 @@ Return ONLY JSON: {{"match": true or false, "confidence": "high/medium/low", "re
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
-        return json.loads(raw.strip())
+        result = json.loads(raw.strip())
+        _llm_ok()
+        return result
     except Exception as e:
-        print(f"  [Deep verify error] {e}")
-        return {"match": False, "confidence": "low", "reason": "deep verification error"}
+        _llm_error("_llm_deep_verify", e)
+        # Graceful fallback: let the original verify_pspla_match result stand rather than
+        # falsely rejecting the match because the deeper check API call failed.
+        return {"match": True, "confidence": "low",
+                "reason": f"LLM unavailable ({e}) — deep verify skipped, original match retained"}
 
 
 def verify_pspla_match(website_company, pspla_company, website_region, pspla_address, _audit_name=None):
@@ -940,6 +978,7 @@ Return ONLY JSON: {{"match": true or false, "confidence": "high/medium/low", "re
             if text.startswith("json"):
                 text = text[4:]
         result = json.loads(text.strip())
+        _llm_ok()
         if _audit_name:
             verdict = "ACCEPTED" if result.get("match") else "REJECTED"
             write_audit("llm_decision", None, _audit_name,
@@ -949,8 +988,12 @@ Return ONLY JSON: {{"match": true or false, "confidence": "high/medium/low", "re
                         notes=f"PSPLA address: {pspla_address or 'unknown'} | region: {website_region or 'unknown'}")
         return result
     except Exception as e:
-        print(f"  [Verify error] {e}")
-        return {"match": False, "confidence": "low", "reason": "verification error"}
+        _llm_error("verify_pspla_match", e)
+        # Graceful fallback: the hard pre-check above already passed, so the distinctive words
+        # DO appear in the PSPLA name.  Rather than falsely rejecting a genuine match because
+        # the API is down, return a low-confidence acceptance flagged for manual review.
+        return {"match": True, "confidence": "low",
+                "reason": f"LLM unavailable ({e}) — pre-check passed, flagged for review"}
 
 
 _corrections_cache = None
@@ -1096,10 +1139,12 @@ Return ONLY JSON: {{"consistent": true or false, "confidence": "high/medium/low"
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
-        return json.loads(raw.strip())
+        result = json.loads(raw.strip())
+        _llm_ok()
+        return result
     except Exception as e:
-        print(f"  [Cross-check error] {e}")
-        return {"consistent": True, "confidence": "low", "issues": [], "notes": "cross-check error"}
+        _llm_error("_llm_cross_check_sources", e)
+        return {"consistent": True, "confidence": "low", "issues": [], "notes": f"cross-check unavailable: {e}"}
 
 
 def check_pspla(company_name, website_region=None, page_text=None, co_result=None, directors=None, extra_context=None):

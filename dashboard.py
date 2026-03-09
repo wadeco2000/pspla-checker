@@ -243,6 +243,9 @@ HTML_TEMPLATE = """
     {% set _label = _phase ~ ' search: region ' ~ _s.region_idx ~ ' of ' ~ _s.total_regions ~ ' — ' ~ (_s.region or '') ~ _paused_txt if _s.region_idx else _phase ~ ' search starting...' ~ _paused_txt %}
     {% set _term_txt = 'Term ' ~ _s.term_idx ~ ' of ' ~ _s.total_terms ~ ': ' ~ (_s.term or '') if _s.term_idx else '' %}
     {% set _bar_color = '#1877f2' if _s.phase == 'facebook' else '#27ae60' %}
+    <div id="llm-warning-banner" style="display:none; margin-top:10px; background:#fff3cd; border:1px solid #ffc107;
+         border-radius:6px; padding:8px 14px; font-size:12px; color:#856404;"></div>
+
     <div id="progress-wrap" style="display:{{ 'block' if search_running else 'none' }}; margin-top:14px; background:white; border-radius:8px;
          box-shadow:0 2px 4px rgba(0,0,0,0.1); padding:14px 18px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
@@ -351,6 +354,16 @@ HTML_TEMPLATE = """
                     }
                     bar.style.background = s.phase === 'facebook' ? '#1877f2' : '#27ae60';
                     counts.textContent = (s.total_found || 0) + ' found, ' + (s.total_new || 0) + ' new';
+                    // LLM warning banner
+                    var llmBanner = document.getElementById('llm-warning-banner');
+                    if (llmBanner) {
+                        if (s.llm_warning) {
+                            llmBanner.textContent = '⚠ ' + s.llm_warning;
+                            llmBanner.style.display = 'block';
+                        } else {
+                            llmBanner.style.display = 'none';
+                        }
+                    }
                 })
                 .catch(function() {});
         }
@@ -1795,6 +1808,13 @@ def search_status():
             status["log_lines"] = [l.rstrip() for l in lines[-200:]]
         except Exception as e:
             status["log_lines"] = [f"[log read error: {e}]"]
+    try:
+        from searcher import get_llm_status
+        llm_errors = get_llm_status()
+        if llm_errors >= 3:
+            status["llm_warning"] = f"LLM API appears unavailable ({llm_errors} consecutive failures). Matches are being saved as low-confidence. Check Anthropic API key / credit balance."
+    except Exception:
+        pass
     from flask import jsonify
     return jsonify(status)
 
