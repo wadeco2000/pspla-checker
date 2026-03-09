@@ -2606,6 +2606,223 @@ def get_company_by_name(name):
         return None
 
 
+def get_company_by_id(company_id):
+    """Return the full DB record for a company by its ID."""
+    url = f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}&select=*&limit=1"
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    try:
+        r = requests.get(url, headers=headers)
+        data = r.json()
+        return data[0] if data else None
+    except:
+        return None
+
+
+def get_company_by_facebook_url(fb_url):
+    """Return existing DB record with this Facebook URL, or None."""
+    if not fb_url:
+        return None
+    norm = normalise_fb_url(fb_url)
+    url = f"{SUPABASE_URL}/rest/v1/Companies?facebook_url=eq.{requests.utils.quote(norm)}&select=*&limit=1"
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    try:
+        r = requests.get(url, headers=headers)
+        data = r.json()
+        return data[0] if data else None
+    except:
+        return None
+
+
+def patch_company(company_id, updates):
+    """PATCH only the specified fields on an existing company record."""
+    if not updates or not company_id:
+        return False
+    url = f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    try:
+        r = requests.patch(url, headers=headers, json=updates)
+        return r.status_code in [200, 204]
+    except Exception as e:
+        print(f"  [Patch error] {e}")
+        return False
+
+
+def enrich_existing_record(company_id, existing_record, new_data, source_label):
+    """Patch null/empty fields in an existing record with data from a new search result.
+    Only patches fields that are currently null/empty in the existing record.
+    Returns dict of field names that were actually patched.
+    """
+    if not company_id or not existing_record:
+        return {}
+
+    # Fields eligible for enrichment (only fill in if currently blank)
+    enrichable = [
+        "facebook_url", "fb_followers", "fb_phone", "fb_email", "fb_address",
+        "fb_description", "fb_category", "fb_rating",
+        "fb_alarm_systems", "fb_cctv_cameras", "fb_alarm_monitoring",
+        "phone", "email", "linkedin_url",
+        "nzsa_member", "nzsa_member_name", "nzsa_accredited", "nzsa_grade",
+        "nzsa_contact_name", "nzsa_phone", "nzsa_email", "nzsa_overview",
+        "has_alarm_systems", "has_cctv_cameras", "has_alarm_monitoring",
+        "google_rating", "google_reviews", "google_phone", "google_address",
+    ]
+
+    updates = {}
+    for field in enrichable:
+        new_val = new_data.get(field)
+        existing_val = existing_record.get(field)
+        # Skip if new value is None, empty string, or False (for bools we don't want to overwrite True with False)
+        if new_val is None or new_val == "" or new_val is False:
+            continue
+        # Only patch if existing field is empty/null
+        if existing_val is None or existing_val == "" or str(existing_val).lower() in ("none", "null"):
+            updates[field] = new_val
+
+    # Region: append if new region not already listed
+    new_region = new_data.get("region")
+    if new_region:
+        existing_region = existing_record.get("region") or ""
+        existing_list = [r.strip().lower() for r in existing_region.split(",") if r.strip()]
+        if new_region.strip().lower() not in existing_list:
+            updates["region"] = (existing_region + ", " + new_region).strip(", ")
+
+    if updates:
+        updates["last_checked"] = datetime.now(timezone.utc).isoformat()
+        if patch_company(company_id, updates):
+            field_list = [k for k in updates.keys() if k != "last_checked"]
+            print(f"  [Enriched] {existing_record.get('company_name')} — added: {', '.join(field_list)}")
+            write_audit("updated", str(company_id), existing_record.get("company_name", ""),
+                        changes=f"Enriched from {source_label}: {', '.join(field_list)}",
+                        triggered_by="search")
+        return updates
+    else:
+        print(f"  [No new data] {existing_record.get('company_name')} already has all available fields")
+        return {}
+
+
+def _llm_confirm_same_company(existing_name, existing_region, existing_website,
+                               new_name, new_region, new_fb_url, new_snippet):
+    """Use LLM (Haiku) to determine if a newly found entity is the same company as an existing DB record.
+    Returns dict: {same_company: bool, confidence: str, reason: str}
+    """
+    prompt = f"""You are checking whether a newly found company is the same as an existing database record.
+
+EXISTING RECORD:
+- Name: {existing_name}
+- Region: {existing_region or 'unknown'}
+- Website: {existing_website or 'unknown'}
+
+NEWLY FOUND:
+- Name: {new_name}
+- Region: {new_region or 'unknown'}
+- Facebook URL: {new_fb_url or 'unknown'}
+- Snippet: {new_snippet or 'none'}
+
+Are these the same company? Consider name variations (Ltd/Limited, trading vs registered), region consistency, and business context.
+
+Respond with JSON only:
+{{"same_company": true/false, "confidence": "high/medium/low", "reason": "one sentence"}}"""
+
+    try:
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=150,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        text = response.content[0].text.strip()
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        return json.loads(text.strip())
+    except Exception as e:
+        print(f"  [LLM same-company check error] {e}")
+        return {"same_company": False, "confidence": "low", "reason": str(e)}
+
+
+def _find_and_enrich_existing(company_name, region, fb_url, website_domain, snippet, enrich_data, source_label):
+    """
+    Check if a company matching these details already exists in the DB.
+    If found, enrich it with enrich_data and return True.
+    If not found, return False (caller should create a new record).
+
+    Checks in order:
+      1. By FB URL (definite match)
+      2. By website domain (definite match)
+      3. By exact company name (definite match)
+      4. By keyword fuzzy search + LLM confirmation (uncertain match)
+    """
+    # 1. FB URL match
+    if fb_url:
+        existing = get_company_by_facebook_url(fb_url)
+        if existing:
+            print(f"  [Match by FB URL] → {existing.get('company_name')}")
+            enrich_existing_record(existing["id"], existing, enrich_data, source_label)
+            return True
+
+    # 2. Domain match
+    if website_domain and "facebook.com" not in website_domain:
+        existing = get_domain_record(website_domain)
+        if existing:
+            print(f"  [Match by domain] {website_domain} → {existing.get('company_name')}")
+            enrich_existing_record(existing["id"], existing, enrich_data, source_label)
+            return True
+
+    # 3. Exact name match
+    if company_name:
+        existing_stub = get_company_by_name(company_name)
+        if existing_stub:
+            existing = get_company_by_id(existing_stub["id"])
+            if existing:
+                print(f"  [Match by name] {company_name}")
+                enrich_existing_record(existing["id"], existing, enrich_data, source_label)
+                return True
+
+    # 4. Fuzzy name match → LLM confirmation
+    if company_name:
+        stop_words = {"security", "systems", "limited", "ltd", "nz", "new", "zealand",
+                      "alarm", "alarms", "company", "services", "solutions", "group",
+                      "protection", "surveillance", "monitoring", "camera", "cameras"}
+        keywords = [w for w in company_name.split() if len(w) >= 4 and w.lower() not in stop_words]
+        for keyword in keywords[:2]:  # try at most 2 keywords
+            search_url = (f"{SUPABASE_URL}/rest/v1/Companies"
+                          f"?company_name=ilike.{requests.utils.quote('%' + keyword + '%')}"
+                          f"&select=id,company_name,region,website_url&limit=3")
+            headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+            try:
+                r = requests.get(search_url, headers=headers)
+                candidates = r.json() if r.ok else []
+            except:
+                candidates = []
+
+            for candidate in candidates:
+                cname = candidate.get("company_name", "")
+                if cname.lower() == company_name.lower():
+                    continue  # exact match already handled above
+                llm_result = _llm_confirm_same_company(
+                    cname, candidate.get("region", ""), candidate.get("website_url", ""),
+                    company_name, region, fb_url, snippet
+                )
+                if llm_result.get("same_company") and llm_result.get("confidence") in ("high", "medium"):
+                    print(f"  [LLM match] '{company_name}' → '{cname}' "
+                          f"({llm_result['confidence']}: {llm_result.get('reason', '')})")
+                    full_existing = get_company_by_id(candidate["id"])
+                    if full_existing:
+                        enrich_existing_record(full_existing["id"], full_existing, enrich_data, source_label)
+                        return True
+                else:
+                    print(f"  [LLM: different] '{company_name}' vs '{cname}': {llm_result.get('reason', '')}")
+            if candidates:
+                break  # found candidates for first keyword, don't try second
+
+    return False
+
+
 def append_region_to_company(company_id, existing_region, new_region):
     """Add new_region to the company's region field if it isn't already listed."""
     if not new_region:
@@ -3747,65 +3964,89 @@ def _process_fb_result(result, found_urls_all, fb_total, fb_new, term, fallback_
         return fb_total, fb_new
     found_urls_all.add(fb_url_norm)
 
-    if company_exists(fb_url_norm):
-        print(f"  [Already in DB] {fb_url_norm}")
-        return fb_total, fb_new
-
     print(f"  [FB Page] {fb_url_norm}")
     fb_total += 1
 
+    # Try to find this company's real website from the FB page
     website_url = extract_website_from_facebook(fb_url_norm)
     if not website_url or "facebook.com" in website_url:
         website_url = extract_website_from_snippet(result.get("snippet", ""))
     time.sleep(1)
 
+    root_domain = None
+    page_text = ""
+    scraped_email = None
+    scraped_facebook = None
+    scraped_linkedin = None
+    info = None
+
     if website_url and "facebook.com" not in website_url and website_url not in found_urls_all:
         found_urls_all.add(website_url)
         root_domain = get_root_domain(website_url)
-
-        if get_domain_record(root_domain):
-            print(f"  [Domain already in DB] {root_domain}")
-            return fb_total, fb_new
-
-        print(f"  [Website found] {website_url}")
         page_text, scraped_email, scraped_facebook, scraped_linkedin = scrape_website(website_url)
         time.sleep(1)
-
         info = extract_company_info(website_url, page_text, result["snippet"])
-        if not info or not info.get("company_name"):
-            info = extract_from_fb_snippet(result["title"], result["snippet"], fb_url_norm, fallback_region)
 
-        if not info or not info.get("company_name"):
-            print("  [Skipped] Could not extract company name")
-            return fb_total, fb_new
-
-        info["_page_text"] = page_text
-
-        if not info.get("email") and scraped_email:
-            info["email"] = scraped_email
-        if scraped_facebook:
-            info["facebook_url"] = scraped_facebook
-        if scraped_linkedin:
-            info["linkedin_url"] = scraped_linkedin
-        if not info.get("email"):
-            found_email = find_email_via_google(root_domain)
-            if found_email:
-                info["email"] = found_email
-
-    else:
+    if not info or not info.get("company_name"):
         info = extract_from_fb_snippet(result["title"], result["snippet"], fb_url_norm, fallback_region)
-        if not info or not info.get("company_name"):
-            print("  [Skipped] Could not extract company name from snippet")
-            return fb_total, fb_new
-        website_url = fb_url_norm
-        root_domain = get_root_domain(fb_url_norm)
 
+    if not info or not info.get("company_name"):
+        print("  [Skipped] Could not extract company name")
+        return fb_total, fb_new
+
+    if not root_domain:
+        root_domain = get_root_domain(fb_url_norm)
+        website_url = fb_url_norm
+
+    # Fill in any missing contact info
+    if scraped_email and not info.get("email"):
+        info["email"] = scraped_email
+    if scraped_facebook:
+        info["facebook_url"] = scraped_facebook
+    if scraped_linkedin:
+        info["linkedin_url"] = scraped_linkedin
+    if not info.get("email") and root_domain and "facebook.com" not in root_domain:
+        found_email = find_email_via_google(root_domain)
+        if found_email:
+            info["email"] = found_email
+
+    info["_page_text"] = page_text
     info["_fb_snippet"] = result.get("snippet", "")
     info["_fb_url"] = fb_url_norm
-    # Populate snippet cache so scrape_facebook_page can use it without hitting FB
     if fb_url_norm and info["_fb_snippet"]:
         _FB_SNIPPET_CACHE[fb_url_norm] = info["_fb_snippet"]
+
+    # Scrape FB page for contact/profile data (used for both enrichment and new records)
+    fb_page_data = scrape_facebook_page(fb_url_norm, company_name=info.get("company_name", ""))
+    if any(v for v in fb_page_data.values()):
+        print(f"  [Facebook data] followers={fb_page_data.get('followers')} "
+              f"phone={fb_page_data.get('phone')} email={fb_page_data.get('email')}")
+
     source_label = f"Facebook {term} {fallback_region}".strip()
+    company_name = info.get("company_name", "")
+    region = info.get("region") or fallback_region
+
+    # Build enrichment data from everything we've gathered
+    enrich_data = {
+        "facebook_url": fb_url_norm,
+        "fb_followers": fb_page_data.get("followers"),
+        "fb_phone": fb_page_data.get("phone"),
+        "fb_email": fb_page_data.get("email"),
+        "fb_address": fb_page_data.get("address"),
+        "fb_description": fb_page_data.get("description"),
+        "fb_category": fb_page_data.get("category"),
+        "fb_rating": fb_page_data.get("rating"),
+        "phone": info.get("phone") or fb_page_data.get("phone"),
+        "email": info.get("email") or fb_page_data.get("email"),
+        "region": region,
+    }
+
+    # Check if this company already exists → enrich instead of creating duplicate
+    if _find_and_enrich_existing(company_name, region, fb_url_norm, root_domain,
+                                  result.get("snippet", ""), enrich_data, source_label):
+        return fb_total, fb_new
+
+    # Not in DB — run full pipeline and save as new record
     if process_and_save_company(info, website_url, root_domain, source_label, fallback_region):
         fb_new += 1
 
@@ -4182,12 +4423,48 @@ def run_nzsa_import(found_urls=None, limit=None, fresh=False):
         # --- Member has a website ---
         if website and website.startswith("http"):
             root_domain = get_root_domain(website)
-            if root_domain in found_urls or get_domain_record(root_domain):
-                print(f"  [Already in DB] {name} ({root_domain})")
+            existing_by_domain = get_domain_record(root_domain) if root_domain not in found_urls else None
+            if root_domain in found_urls or existing_by_domain:
+                if existing_by_domain:
+                    print(f"  [Domain match] {name} ({root_domain}) — checking for enrichment")
+                    nzsa_enrich = {
+                        "nzsa_member": "true",
+                        "nzsa_member_name": name,
+                        "nzsa_accredited": "true" if m.get("accredited") else None,
+                        "nzsa_grade": m.get("grade"),
+                        "nzsa_contact_name": m.get("contact_name"),
+                        "nzsa_phone": m.get("phone"),
+                        "nzsa_email": m.get("email"),
+                        "nzsa_overview": m.get("overview"),
+                        "phone": m.get("phone"),
+                        "email": m.get("email"),
+                    }
+                    enrich_existing_record(existing_by_domain["id"], existing_by_domain, nzsa_enrich, "NZSA directory")
+                else:
+                    print(f"  [Already in DB] {name} ({root_domain})")
                 continue
             if company_name_exists(name):
-                print(f"  [Already in DB by name] {name}")
-                found_urls.add(root_domain)
+                print(f"  [Already in DB by name] {name} — checking for enrichment")
+                existing_stub = get_company_by_name(name)
+                if existing_stub:
+                    full_existing = get_company_by_id(existing_stub["id"])
+                    if full_existing:
+                        nzsa_enrich = {
+                            "nzsa_member": "true",
+                            "nzsa_member_name": name,
+                            "nzsa_accredited": "true" if m.get("accredited") else None,
+                            "nzsa_grade": m.get("grade"),
+                            "nzsa_contact_name": m.get("contact_name"),
+                            "nzsa_phone": m.get("phone"),
+                            "nzsa_email": m.get("email"),
+                            "nzsa_overview": m.get("overview"),
+                            "phone": m.get("phone"),
+                            "email": m.get("email"),
+                            "region": (m.get("locations") or [""])[0],
+                        }
+                        enrich_existing_record(full_existing["id"], full_existing, nzsa_enrich, "NZSA directory")
+                if root_domain:
+                    found_urls.add(root_domain)
                 continue
             found_urls.add(root_domain)
             total_found += 1
@@ -4235,7 +4512,25 @@ def run_nzsa_import(found_urls=None, limit=None, fresh=False):
         else:
             # --- No website: search Google ---
             if company_name_exists(name):
-                print(f"  [Already in DB by name] {name}")
+                print(f"  [Already in DB by name] {name} — checking for enrichment")
+                existing_stub = get_company_by_name(name)
+                if existing_stub:
+                    full_existing = get_company_by_id(existing_stub["id"])
+                    if full_existing:
+                        nzsa_enrich = {
+                            "nzsa_member": "true",
+                            "nzsa_member_name": name,
+                            "nzsa_accredited": "true" if m.get("accredited") else None,
+                            "nzsa_grade": m.get("grade"),
+                            "nzsa_contact_name": m.get("contact_name"),
+                            "nzsa_phone": m.get("phone"),
+                            "nzsa_email": m.get("email"),
+                            "nzsa_overview": m.get("overview"),
+                            "phone": m.get("phone"),
+                            "email": m.get("email"),
+                            "region": (m.get("locations") or [""])[0],
+                        }
+                        enrich_existing_record(full_existing["id"], full_existing, nzsa_enrich, "NZSA directory")
                 continue
 
             processed += 1
@@ -4385,7 +4680,13 @@ def run_linkedin_import(found_urls=None, limit=None, fresh=False):
             company_name_guess = slug.replace("-", " ").title()
 
             if company_name_exists(company_name_guess):
-                print(f"  [Already in DB by name] {company_name_guess}")
+                print(f"  [Already in DB by name] {company_name_guess} — adding LinkedIn URL")
+                existing_stub = get_company_by_name(company_name_guess)
+                if existing_stub:
+                    full_existing = get_company_by_id(existing_stub["id"])
+                    if full_existing:
+                        enrich_existing_record(full_existing["id"], full_existing,
+                                               {"linkedin_url": li_norm}, "LinkedIn directory")
                 continue
 
             processed += 1
@@ -4417,8 +4718,14 @@ def run_linkedin_import(found_urls=None, limit=None, fresh=False):
                 continue
 
             root_domain = get_root_domain(website_url)
-            if root_domain in found_urls or get_domain_record(root_domain):
-                print(f"  [Domain already in DB] {root_domain}")
+            existing_by_domain = get_domain_record(root_domain) if root_domain not in found_urls else None
+            if root_domain in found_urls or existing_by_domain:
+                if existing_by_domain:
+                    print(f"  [Domain match] {root_domain} — adding LinkedIn URL")
+                    enrich_existing_record(existing_by_domain["id"], existing_by_domain,
+                                           {"linkedin_url": li_norm}, "LinkedIn directory")
+                else:
+                    print(f"  [Domain already in DB] {root_domain}")
                 continue
             found_urls.add(root_domain)
             total_found += 1
