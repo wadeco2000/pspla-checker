@@ -2073,6 +2073,72 @@ function escHtml(s) {
 }
 load();
 </script>
+
+<!-- ── Claude Code Context Panel ──────────────────────────────────────────── -->
+<div id="claude-context-panel" style="
+    position:fixed; bottom:18px; right:18px; z-index:9999;
+    font-family:monospace; font-size:12px;">
+  <button onclick="document.getElementById('claude-context-box').style.display=
+      document.getElementById('claude-context-box').style.display==='none'?'block':'none'"
+      style="padding:5px 12px; background:#2c3e50; color:#ecf0f1; border:none;
+             border-radius:6px; cursor:pointer; font-size:12px; box-shadow:0 2px 6px rgba(0,0,0,0.3);">
+    🤖 Claude context
+  </button>
+  <div id="claude-context-box" style="display:none; position:absolute; bottom:36px; right:0;
+       width:560px; max-height:70vh; overflow-y:auto; background:#1e2a38; color:#ecf0f1;
+       border-radius:8px; padding:14px 16px; box-shadow:0 4px 20px rgba(0,0,0,0.5);
+       white-space:pre-wrap; line-height:1.5;">
+<button onclick="
+  navigator.clipboard.writeText(document.getElementById('claude-context-text').innerText)
+  .then(()=>{this.textContent='✓ Copied!';setTimeout(()=>this.textContent='📋 Copy all',1500)})
+" style="float:right;margin-bottom:8px;padding:3px 10px;background:#3498db;color:white;
+         border:none;border-radius:4px;cursor:pointer;font-size:11px;">📋 Copy all</button>
+<div id="claude-context-text">PSPLA Checker — Claude Code context (paste this at the start of a new session)
+
+PROJECT: Automated NZ security company licence checker.
+Finds companies via Google/Facebook/directories, checks PSPLA licence status,
+stores results in Supabase. Flask dashboard for browsing and managing results.
+
+LOCATION: C:\\Users\\WadeAdmin\\pspla-checker\\
+READ FIRST: CLAUDE.md in the project root has full documentation.
+
+KEY FILES:
+- searcher.py      Core engine: search, scrape, match, verify, save (~3500 lines)
+- dashboard.py     Flask web UI + scheduler + all API endpoints (~2500 lines)
+- run_weekly.py    Full Google search pass entry point
+- run_facebook.py  Facebook-only search entry point
+- run_directories.py  NZSA + LinkedIn directory import entry point
+- run_partial.py   Partial/targeted search entry point
+- search_terms.json   Google + Facebook search terms (editable from dashboard)
+- .env             API keys (ANTHROPIC_API_KEY, SERPAPI_KEY, SUPABASE_URL/KEY, SMTP_*)
+
+TECH STACK: Python, Flask, Supabase (PostgreSQL via REST), Claude Haiku (LLM),
+SerpAPI (Google searches), APScheduler, Windows 11.
+
+PIPELINE: Google/Facebook search → scrape website → extract company info (LLM)
+→ Companies Office check → PSPLA Solr check → LLM verify match → NZSA check
+→ LLM cross-check sources → Facebook page scrape → save to Supabase.
+
+PSPLA API: https://forms.justice.govt.nz/forms/publicSolrProxy/solr/PSPLA/select
+
+KEY PATTERNS:
+- RECORD_TEMPLATE in searcher.py = all DB columns with None defaults
+- check_schema() validates columns exist in Supabase before search starts
+- running.flag / pause.flag = file-based IPC, deleted on dashboard startup
+- LLM graceful degradation: API failure returns low-confidence acceptance not rejection
+- Sold company detection: CO "Removed" status → successor search → retry PSPLA
+- FB snippet cache (_FB_SNIPPET_CACHE): populated by find_facebook_url, used by
+  scrape_facebook_page tier 1 (no direct FB hit needed)
+- All LLM decisions written to AuditLog (action=llm_decision) — viewable per company
+- All run_*.py files have __main__ guards to prevent accidental execution on import
+
+SUPABASE TABLES: Companies (main), AuditLog (corrections + LLM decisions)
+GIT: yes, git repo, dashboard has rollback button. Commit after significant changes.
+
+For full detail on every function, column, and endpoint — read CLAUDE.md.</div>
+  </div>
+</div>
+
 </body>
 </html>
 """
