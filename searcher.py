@@ -569,13 +569,16 @@ PSPLA registered name: "{pspla_company}"
 PSPLA address: "{pspla_address or 'unknown'}"
 
 Consider:
-- Trading name vs registered name: a shorter name can be the same company as a longer registered name.
+- Trading name vs registered name: a shorter trading name can match a longer registered name.
 - If the website name appears word-for-word inside the PSPLA name, that is a strong match signal.
-- Location/region compatibility matters: if the region matches a word in the PSPLA name, that confirms the match.
+- Some companies have multiple regional legal entities (e.g. "Watchu Security Waikato Ltd" and "Watchu Security South Island Ltd") — if the PSPLA name is clearly the same brand with a regional qualifier added, and the address/region is compatible, that is a match.
+- Location: use the PSPLA address (not just the name) for location matching. "South Island" covers Canterbury, Christchurch, Otago etc.
 - Word differences matter: "Coast" and "Coastal" are DIFFERENT words. Only match if the exact words from the website name appear in the PSPLA name.
 - Examples:
-  - "Coast Security" vs "Kapiti Coast Security Limited" (region: Kapiti) → YES — "Coast Security" words appear in the PSPLA name and region "Kapiti" matches.
-  - "Coast Security" vs "Coastal Security Limited" → NO — "coast" does not appear as a whole word in "Coastal Security Limited".
+  - "Coast Security" vs "Kapiti Coast Security Limited" (region: Kapiti) → YES — same words, region matches.
+  - "Coast Security" vs "Coastal Security Limited" → NO — "coast" is not a word in "Coastal Security Limited".
+  - "Watchu Security" vs "Watchu Security South Island Limited" (address: Christchurch, region: Canterbury) → YES — same brand, South Island covers Canterbury.
+  - "Watchu Security" vs "Watchu Security Waikato Limited" (address: Cambridge, region: Canterbury) → NO — Canterbury is not in the Waikato.
   - "Addz Livewire" vs "Livewire Electrical Wellington" → NO — different first word, different city.
   - "Hines Security" vs "Hines Electrical & Security NZ" → YES — same family name, same business type.
 
