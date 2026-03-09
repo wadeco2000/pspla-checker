@@ -27,6 +27,113 @@ NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
+# LLM debug log — captures every prompt and response for inspection
+LLM_LOG_FILE = os.path.join(BASE_DIR, "llm_debug.log")
+
+def _llm_log(fn_name, prompt, response_text):
+    """Append an LLM call prompt and response to llm_debug.log."""
+    try:
+        with open(LLM_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"\n{'='*80}\n")
+            f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] FUNCTION: {fn_name}\n")
+            f.write(f"{'─'*40} PROMPT {'─'*40}\n")
+            f.write(prompt.strip() + "\n")
+            f.write(f"{'─'*40} RESPONSE {'─'*39}\n")
+            f.write(response_text.strip() + "\n")
+    except Exception:
+        pass
+
+
+class _LoggingAnthropicClient:
+    """Thin wrapper around the Anthropic client that logs every messages.create call."""
+    def __init__(self, real_client):
+        self._client = real_client
+        self.messages = self
+
+    def create(self, model, max_tokens, messages, **kwargs):
+        # Extract the user prompt text for logging
+        prompt_text = " | ".join(
+            m.get("content", "") if isinstance(m.get("content"), str)
+            else str(m.get("content", ""))
+            for m in messages if m.get("role") == "user"
+        )
+        response = self._client.messages.create(
+            model=model, max_tokens=max_tokens, messages=messages, **kwargs
+        )
+        raw = response.content[0].text if response.content else ""
+        # Accumulate token usage
+        if hasattr(response, "usage") and response.usage:
+            _accumulate_tokens(model, response.usage.input_tokens, response.usage.output_tokens)
+        # Determine caller function name from the call stack
+        import traceback
+        stack = traceback.extract_stack()
+        fn_name = next(
+            (f.name for f in reversed(stack[:-1])
+             if f.name not in ("create", "_llm_log", "<module>") and not f.name.startswith("_LoggingAnthropicClient")),
+            "unknown"
+        )
+        _llm_log(fn_name, prompt_text, raw)
+        return response
+
+
+client = _LoggingAnthropicClient(client)
+
+# Token usage tracking — written to file so dashboard process can read it
+TOKEN_USAGE_FILE = os.path.join(BASE_DIR, "token_usage.json")
+
+# Approximate cost per million tokens (USD) — update if Anthropic changes pricing
+_TOKEN_COST = {
+    "haiku":  {"input": 0.80, "output": 4.00},
+    "sonnet": {"input": 3.00, "output": 15.00},
+    "opus":   {"input": 15.00, "output": 75.00},
+}
+
+
+def _accumulate_tokens(model: str, input_tokens: int, output_tokens: int):
+    """Add tokens to the persistent usage file so dashboard can read it cross-process."""
+    try:
+        try:
+            with open(TOKEN_USAGE_FILE) as f:
+                data = json.load(f)
+        except Exception:
+            data = {"input": 0, "output": 0, "by_model": {}}
+        data["input"]  = data.get("input", 0)  + input_tokens
+        data["output"] = data.get("output", 0) + output_tokens
+        key = "haiku" if "haiku" in model.lower() else "sonnet" if "sonnet" in model.lower() else "opus"
+        if key not in data["by_model"]:
+            data["by_model"][key] = {"input": 0, "output": 0}
+        data["by_model"][key]["input"]  += input_tokens
+        data["by_model"][key]["output"] += output_tokens
+        with open(TOKEN_USAGE_FILE, "w") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
+def reset_token_usage():
+    """Reset token counters — clears the file at the start of each search run."""
+    try:
+        with open(TOKEN_USAGE_FILE, "w") as f:
+            json.dump({"input": 0, "output": 0, "by_model": {}}, f)
+    except Exception:
+        pass
+
+
+def get_token_usage():
+    """Return token totals and estimated USD cost — reads from file, works cross-process."""
+    try:
+        with open(TOKEN_USAGE_FILE) as f:
+            data = json.load(f)
+    except Exception:
+        data = {"input": 0, "output": 0, "by_model": {}}
+    cost = 0.0
+    for model_key, counts in data.get("by_model", {}).items():
+        rates = _TOKEN_COST.get(model_key, _TOKEN_COST["haiku"])
+        cost += counts["input"]  / 1_000_000 * rates["input"]
+        cost += counts["output"] / 1_000_000 * rates["output"]
+    data["estimated_cost_usd"] = round(cost, 4)
+    return data
+
 # LLM health tracking — counts consecutive API failures across all LLM functions
 _llm_consecutive_errors = 0
 _LLM_ERROR_THRESHOLD = 3  # write an audit warning after this many consecutive failures
@@ -216,12 +323,18 @@ def google_search(query, num_results=100, time_filter=None):
                 })
         elif "error" in data:
             error_msg = data["error"]
+            err_lower = error_msg.lower()
             # "no results" is normal for narrow queries — don't log it as an error
-            no_results = "no results" in error_msg.lower() or "hasn't returned any results" in error_msg.lower()
+            no_results = "no results" in err_lower or "hasn't returned any results" in err_lower
             if not no_results:
                 print(f"  [SerpAPI error] {error_msg}")
-            if "run out" in error_msg.lower() or "limit" in error_msg.lower() or "credits" in error_msg.lower():
+            # Real quota exhaustion — search must stop
+            if "run out" in err_lower or "out of searches" in err_lower or ("plan" in err_lower and "search" in err_lower):
                 return SERPAPI_EXHAUSTED
+            # Temporary rate limiting — back off and return empty (search continues)
+            if "rate" in err_lower or "too many" in err_lower or "throttl" in err_lower:
+                print("  [SerpAPI rate limit] Backing off 30s...")
+                time.sleep(30)
         return results
     except Exception as e:
         print(f"  [Search error] {e}")
@@ -289,7 +402,14 @@ def get_google_business_profile(company_name, region=""):
         if kg.get("rating") is not None:
             result["rating"] = str(kg["rating"])
         if kg.get("reviews") is not None:
-            result["reviews"] = str(kg["reviews"])
+            rev = kg["reviews"]
+            if isinstance(rev, dict):
+                rev = rev.get("value") or rev.get("count") or rev.get("total") or ""
+            # strip anything that isn't a digit (e.g. URL strings)
+            rev_str = str(rev)
+            digits = ''.join(c for c in rev_str if c.isdigit())
+            if digits:
+                result["reviews"] = digits
         phone = kg.get("phone") or kg.get("main_phone")
         if phone:
             result["phone"] = str(phone)
@@ -317,7 +437,12 @@ def get_google_business_profile(company_name, region=""):
         if not result["rating"] and place.get("rating") is not None:
             result["rating"] = str(place["rating"])
         if not result["reviews"] and place.get("reviews") is not None:
-            result["reviews"] = str(place["reviews"])
+            rev = place["reviews"]
+            if isinstance(rev, dict):
+                rev = rev.get("value") or rev.get("count") or rev.get("total") or ""
+            digits = ''.join(c for c in str(rev) if c.isdigit())
+            if digits:
+                result["reviews"] = digits
         if not result["phone"] and place.get("phone"):
             result["phone"] = str(place["phone"])
         if not result["address"] and place.get("address"):
@@ -350,6 +475,7 @@ def get_google_business_profile(company_name, region=""):
 
 # Cache: fb_url -> Google snippet text (populated by find_facebook_url, consumed by scrape_facebook_page)
 _FB_SNIPPET_CACHE: dict = {}
+_LI_SNIPPET_CACHE: dict = {}
 
 
 def _parse_fb_snippet(snippet: str) -> dict:
@@ -369,8 +495,8 @@ def _parse_fb_snippet(snippet: str) -> dict:
     if not snippet:
         return data
 
-    # Followers — "1,234 followers" or "1.2K followers"
-    m = _re.search(r'([\d,]+(?:\.\d+)?[KkMm]?)\s+followers', snippet, _re.I)
+    # Followers/likes — "1,234 followers", "1.2K followers", "723 likes"
+    m = _re.search(r'([\d,]+(?:\.\d+)?[KkMm]?)\s+(?:followers|likes)', snippet, _re.I)
     if m:
         data["followers"] = m.group(1).replace(",", "")
 
@@ -410,6 +536,20 @@ def _parse_fb_snippet(snippet: str) -> dict:
                 and not _re.search(r'\d{3,}', part)):
             data["category"] = part
             break
+
+    # Description — text after "N were here." or "N likes ·" or the last long sentence
+    # Snippet format: "Company. 723 likes · 3 were here. Description text here."
+    desc = None
+    m = _re.search(r'\d+\s+were\s+here\.\s*(.+)', snippet, _re.I | _re.DOTALL)
+    if m:
+        desc = m.group(1).strip()
+    else:
+        # Try: text after the last "· " block if it's long enough
+        after_dots = [p.strip() for p in _re.split(r'[·•]', snippet) if len(p.strip()) > 40]
+        if after_dots:
+            desc = after_dots[-1]
+    if desc and len(desc) > 20:
+        data["description"] = desc[:400]
 
     return data
 
@@ -604,7 +744,358 @@ def find_facebook_url(company_name, page_text=""):
     return None
 
 
-def scrape_facebook_page(fb_url):
+def scrape_linkedin_page(li_url, company_name=None):
+    """Extract LinkedIn company page data.
+
+    Tier 1: parse SerpAPI snippet cache — followers, industry, location, description.
+    Tier 2: if cache empty + company_name, do a fresh SerpAPI search to warm cache.
+    Tier 3: fetch the public LinkedIn page and parse structured data — website,
+            headquarters, industry, size, founded. Fails gracefully if blocked.
+
+    Returns dict: followers, description, industry, location, website, size, founded
+    """
+    import re as _re
+
+    result = {
+        "followers": None, "description": None, "industry": None,
+        "location": None, "website": None, "size": None, "founded": None,
+    }
+
+    def _parse_li_snippet(snippet):
+        out = {}
+        # Followers: "1,234 followers on LinkedIn" or "1234 followers"
+        m = _re.search(r'([\d,]+)\s+followers', snippet, _re.I)
+        if m:
+            out["followers"] = m.group(1).replace(",", "")
+        # LinkedIn snippet structure: "Name | N followers on LinkedIn. Industry | Location. Description"
+        # Split on " | " — first meaningful non-name parts tend to be industry and location
+        parts = [p.strip() for p in _re.split(r'\s*\|\s*', snippet)]
+        # Remove the company name part (usually first) and "N followers on LinkedIn" part
+        clean = []
+        for p in parts:
+            if _re.search(r'\d+\s+followers', p, _re.I):
+                continue
+            if len(p) > 5:
+                clean.append(p)
+        # First clean part is usually industry
+        if clean:
+            candidate = clean[0].split(".")[0].strip()
+            if len(candidate) < 60:
+                out["industry"] = candidate
+        # Second clean part or text after first "." in first clean part is often location
+        if len(clean) >= 2:
+            loc = clean[1].split(".")[0].strip()
+            if len(loc) < 80:
+                out["location"] = loc
+        # Description: longest remaining part
+        desc_parts = [p for p in clean[1:] if len(p) > 30]
+        if desc_parts:
+            out["description"] = max(desc_parts, key=len)[:300]
+        return out
+
+    # ── Tier 1 / 2: snippet ────────────────────────────────────────────────────
+    cached = _LI_SNIPPET_CACHE.get(li_url, "")
+    if not cached and company_name:
+        try:
+            results = google_search(f'site:linkedin.com/company "{company_name}"', num_results=5)
+            if results and results is not SERPAPI_EXHAUSTED:
+                _LI_RE = _re.compile(r'linkedin\.com/company/', _re.I)
+                for r in results:
+                    if _LI_RE.search(r.get("link", "")):
+                        snippet = r.get("snippet", "")
+                        if snippet:
+                            _LI_SNIPPET_CACHE[li_url] = snippet
+                            cached = snippet
+                        break
+        except Exception:
+            pass
+
+    if cached:
+        parsed = _parse_li_snippet(cached)
+        for k, v in parsed.items():
+            if v:
+                result[k] = v
+
+    # ── Tier 3: fetch public LinkedIn page for structured details ──────────────
+    missing = [k for k, v in result.items() if v is None]
+    if missing:
+        try:
+            resp = requests.get(
+                li_url,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    ),
+                    "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "en-NZ,en;q=0.9",
+                },
+                timeout=12,
+                allow_redirects=True,
+            )
+            if resp.status_code == 200 and "authwall" not in resp.url and len(resp.text) > 500:
+                soup = BeautifulSoup(resp.text, "html.parser")
+                text = soup.get_text(separator="\n", strip=True)
+                lines = [l.strip() for l in text.split("\n") if l.strip()]
+
+                def _after_label(label):
+                    """Return the line immediately after a label line."""
+                    label_l = label.lower()
+                    for i, line in enumerate(lines):
+                        if line.lower().strip().rstrip(":") == label_l and i + 1 < len(lines):
+                            val = lines[i + 1].strip()
+                            if val and val.lower() != label_l:
+                                return val
+                    return None
+
+                if not result["website"]:
+                    ws = _after_label("website")
+                    if ws and "linkedin" not in ws.lower():
+                        result["website"] = ws
+                if not result["industry"]:
+                    result["industry"] = _after_label("industry")
+                if not result["size"]:
+                    result["size"] = _after_label("company size")
+                if not result["founded"]:
+                    result["founded"] = _after_label("founded")
+                if not result["location"]:
+                    result["location"] = _after_label("headquarters")
+
+                # Description: og:description meta tag is often available
+                if not result["description"]:
+                    og = soup.find("meta", property="og:description")
+                    if og and og.get("content"):
+                        content = og["content"].strip()
+                        if len(content) > 30:
+                            result["description"] = content[:300]
+        except Exception:
+            pass
+
+    return result
+
+
+_SERVICE_SLUGS = (
+    "service", "services", "product", "products", "solution", "solutions",
+    "what-we-do", "whatwedo", "what-we-offer", "offerings", "capabilities",
+    "security", "alarm", "alarms", "cctv", "camera", "cameras", "monitoring",
+    "surveillance", "about", "about-us",
+)
+
+def gather_service_text(website_url, homepage_text):
+    """Return homepage_text plus text scraped from up to 3 service-related sub-pages.
+    Fetches the homepage a second time (lightweight) just to parse internal links."""
+    import re
+    from urllib.parse import urlparse, urljoin, urlunparse
+
+    try:
+        base = urlparse(website_url)
+        base_root = urlunparse(base._replace(path="", query="", fragment=""))
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+        # Always start from root homepage so we get the main nav links
+        fetch_url = base_root if base_root else website_url
+        resp = requests.get(fetch_url, headers=headers, timeout=8)
+        if not resp.ok:
+            return homepage_text
+        soup = BeautifulSoup(resp.text, "html.parser")
+        # Save href strings before any decompose (decompose orphans child tags)
+        all_hrefs = [a.get("href", "") for a in soup.find_all("a", href=True) if a.get("href")]
+        # Strip chrome and get root page text
+        for tag in soup.find_all(["nav", "header", "footer", "script", "style", "noscript"]):
+            tag.decompose()
+        root_text = " ".join(soup.get_text(separator=" ", strip=True).split())[:3000]
+
+        seen = {fetch_url.rstrip("/")}
+        candidates = []
+        for href_raw in all_hrefs:
+            href = href_raw.split("?")[0].split("#")[0].rstrip("/")
+            full = urljoin(fetch_url, href)
+            parsed = urlparse(full)
+            # Internal links only, same domain
+            if parsed.netloc and parsed.netloc != base.netloc:
+                continue
+            if full.rstrip("/") in seen:
+                continue
+            path_lower = parsed.path.lower()
+            if any(slug in path_lower for slug in _SERVICE_SLUGS):
+                seen.add(full.rstrip("/"))
+                candidates.append(full)
+            if len(candidates) >= 6:
+                break
+
+        extra_texts = []
+        for sub_url in candidates[:3]:
+            try:
+                r = requests.get(sub_url, headers=headers, timeout=8)
+                if not r.ok:
+                    continue
+                s = BeautifulSoup(r.text, "html.parser")
+                for tag in s.find_all(["nav", "header", "footer", "script", "style", "noscript"]):
+                    tag.decompose()
+                extra_texts.append(" ".join(s.get_text(separator=" ", strip=True).split())[:2000])
+                print(f"  [Service page] scraped {sub_url}")
+            except Exception:
+                pass
+
+        # Combine: root homepage text + any extra service pages scraped
+        parts = [root_text]
+        if extra_texts:
+            parts.extend(extra_texts)
+        return " ".join(parts)
+
+    except Exception as e:
+        print(f"  [gather_service_text error] {e}")
+        return homepage_text
+
+
+def llm_verify_associations(company_name, website_url, region,
+                            linkedin_url=None, facebook_url=None,
+                            co_name=None, co_address=None,
+                            pspla_name=None, pspla_address=None, pspla_status=None,
+                            nzsa_name=None,
+                            google_address=None, google_phone=None,
+                            fb_description=None):
+    """Use Claude Haiku to sanity-check ALL gathered associations before saving.
+    Reviews PSPLA, CO, NZSA, LinkedIn, Facebook, and Google profile data.
+    Returns a dict of fields to reject (set to None), with reasons."""
+
+    # Build the context block — only include fields we actually have
+    lines = []
+    if linkedin_url:
+        lines.append(f"LinkedIn URL: {linkedin_url}")
+    if facebook_url:
+        lines.append(f"Facebook URL: {facebook_url}")
+        if fb_description:
+            lines.append(f"Facebook description: {fb_description[:200]}")
+    if co_name:
+        lines.append(f"Companies Office registered name: {co_name}")
+        if co_address:
+            lines.append(f"Companies Office address: {co_address}")
+    if pspla_name:
+        lines.append(f"PSPLA matched name: {pspla_name}")
+        if pspla_address:
+            lines.append(f"PSPLA address: {pspla_address}")
+        if pspla_status:
+            lines.append(f"PSPLA status: {pspla_status}")
+    if nzsa_name:
+        lines.append(f"NZSA member name: {nzsa_name}")
+    if google_address:
+        lines.append(f"Google Business address: {google_address}")
+        if google_phone:
+            lines.append(f"Google Business phone: {google_phone}")
+
+    if not lines:
+        return {}
+
+    prompt = f"""You are doing a final sanity-check on all data gathered for a New Zealand security company record before it is saved to the database.
+
+Company name: {company_name}
+Website: {website_url or "unknown"}
+Region: {region or "unknown"}
+
+Data gathered automatically:
+{chr(10).join(lines)}
+
+For each piece of data, decide if it genuinely belongs to this company or is likely a false match from an automated search.
+
+Rules:
+- LinkedIn/Facebook URL slugs should share meaningful words with the company name. A completely unrelated slug is wrong.
+- Companies Office name: minor variations (Ltd/Limited, (2008), punctuation) are fine. A completely different business is wrong.
+- PSPLA name: should be a plausible variation of the company name or a known trading name. Totally unrelated is wrong.
+- NZSA name: same rules as CO name.
+- Google address: region should roughly match "{region or 'unknown'}". A different NZ city is suspicious but not necessarily wrong (company may operate nationally).
+- When in doubt, TRUST it — only reject if you are confident it is a different company entirely.
+- Do not reject just because of capitalisation, abbreviations, or minor word order differences.
+
+Reply with ONLY valid JSON. List only the fields you are REJECTING. If everything looks correct return {{}}.
+Valid rejection keys: linkedin_url, facebook_url, co_name, pspla_name, nzsa_name, google_profile
+Example: {{"linkedin_url": "slug evolve-fire-protection shares no words with Alarmtech"}}"""
+
+    try:
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        _llm_ok()
+        raw = response.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        rejections = json.loads(raw.strip())
+        if rejections:
+            print(f"  [LLM verify] Rejected for {company_name}: {list(rejections.keys())}")
+            for field, reason in rejections.items():
+                print(f"    {field}: {reason}")
+        return rejections
+    except Exception as e:
+        _llm_error("llm_verify_associations", e)
+        return {}
+
+
+def detect_services(page_text):
+    """Use Claude Haiku to detect if a company's website mentions alarm systems,
+    CCTV/cameras, or alarm monitoring services. Returns dict with three bool keys:
+    has_alarm_systems, has_cctv_cameras, has_alarm_monitoring.
+    Falls back to False for all on error or empty page_text."""
+    if not page_text or len(page_text.strip()) < 50:
+        return {"has_alarm_systems": False, "has_cctv_cameras": False, "has_alarm_monitoring": False}
+
+    # Truncate to avoid huge token usage — Haiku handles this easily
+    snippet = page_text[:10000]
+
+    prompt = f"""You are analysing text from a New Zealand security company's website.
+Determine whether the website mentions each of the following three service categories.
+Use a broad interpretation — include synonyms and related terms.
+
+SERVICE CATEGORIES AND THEIR SYNONYMS:
+1. Alarm Systems — intruder alarms, burglar alarms, security alarms, alarm installation,
+   alarm systems, house alarm, residential alarm, commercial alarm, alarm panels,
+   motion detectors, door/window sensors, PIR sensors, alarm equipment.
+2. CCTV / Cameras — CCTV, surveillance cameras, IP cameras, security cameras,
+   video surveillance, camera systems, NVR, DVR, PTZ cameras, dashcam monitoring,
+   remote video, video analytics.
+3. Alarm Monitoring — 24/7 monitoring, alarm monitoring, monitoring centre, monitoring center,
+   monitoring station, monitored alarm, central station monitoring, remote monitoring,
+   emergency response, guard response, patrol response.
+
+Website text to analyse:
+---
+{snippet}
+---
+
+Reply with ONLY valid JSON, no markdown fences:
+{{"has_alarm_systems": true/false, "has_cctv_cameras": true/false, "has_alarm_monitoring": true/false}}"""
+
+    try:
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=64,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        _llm_ok()
+        raw = response.content[0].text.strip()
+        # Strip markdown fences if present
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        result = json.loads(raw.strip())
+        return {
+            "has_alarm_systems": bool(result.get("has_alarm_systems", False)),
+            "has_cctv_cameras": bool(result.get("has_cctv_cameras", False)),
+            "has_alarm_monitoring": bool(result.get("has_alarm_monitoring", False)),
+        }
+    except Exception as e:
+        _llm_error("detect_services", e)
+        return {"has_alarm_systems": False, "has_cctv_cameras": False, "has_alarm_monitoring": False}
+
+
+def scrape_facebook_page(fb_url, company_name=None):
     """Gather public Facebook business page data using three tiers:
 
     1. Google/SerpAPI snippet cache — populated by find_facebook_url, no FB hit.
@@ -627,7 +1118,23 @@ def scrape_facebook_page(fb_url):
     }
 
     # ── Tier 1: parse the Google snippet we already fetched ──────────────────
+    # If cache is cold (e.g. re-check on existing URL) and company_name is known,
+    # do a quick SerpAPI search to warm the cache — zero direct FB hits needed.
     cached_snippet = _FB_SNIPPET_CACHE.get(fb_url, "")
+    if not cached_snippet and company_name:
+        try:
+            warm_results = google_search(f'site:facebook.com "{company_name}"', num_results=5)
+            if warm_results and warm_results is not SERPAPI_EXHAUSTED:
+                for r in warm_results:
+                    link = r.get("link", "")
+                    if "facebook.com" in link:
+                        snippet = r.get("snippet", "")
+                        if snippet:
+                            _FB_SNIPPET_CACHE[fb_url] = snippet
+                            cached_snippet = snippet
+                        break
+        except Exception:
+            pass
     if cached_snippet:
         parsed = _parse_fb_snippet(cached_snippet)
         for k, v in parsed.items():
@@ -830,10 +1337,18 @@ def find_linkedin_url(company_name, page_text=""):
     if not candidates:
         return None
 
-    # Pick highest-scoring candidate; require at least one word match
+    # Pick highest-scoring candidate; require at least one actual word match in the slug
+    # (NZ hit alone is not enough — it would accept unrelated companies)
     candidates.sort(key=lambda x: -x[1])
-    best_url, best_score, _ = candidates[0]
-    return best_url if best_score >= 1 else None
+    best_url, best_score, best_result = candidates[0]
+    slug = best_url.lower().replace("-", " ").replace("_", " ").replace("/", " ")
+    slug_word_hits = sum(1 for w in name_words if w in slug)
+    if best_score >= 1 and slug_word_hits >= 1:
+        snippet = best_result.get("snippet", "")
+        if snippet:
+            _LI_SNIPPET_CACHE[best_url] = snippet
+        return best_url
+    return None
 
 
 def scrape_website(url):
@@ -961,7 +1476,7 @@ def pspla_search(query):
     url = "https://forms.justice.govt.nz/forms/publicSolrProxy/solr/PSPLA/select"
     params = {
         "facet": "true",
-        "rows": "10",
+        "rows": "25",
         "fl": "*, score",
         "facet.limit": "-1",
         "facet.mincount": "-1",
@@ -1601,6 +2116,39 @@ def check_pspla(company_name, website_region=None, page_text=None, co_result=Non
                 return sorted(same_permit,
                               key=lambda d: (_STATUS_SORT.get(_get_status(d), 99), _date_sort_key(d)))[0]
 
+            def _best_doc_for_company(all_docs, verified_doc):
+                """Return the best doc across ALL permits for the same company name.
+
+                A company may have been licensed multiple times — each renewal/reissue gets a
+                NEW permit number, so _best_doc_for_permit (same permit only) misses them.
+                We match by exact company name, then pick Active > Expired > Withdrawn and
+                within the same status the most-recent expiry date wins.
+
+                Falls back to verified_doc if nothing better is found.
+                """
+                norm_name = (
+                    get_field(verified_doc, "name_txt") or
+                    get_field(verified_doc, "caseTitle_s") or ""
+                ).strip().upper()
+                if not norm_name:
+                    return verified_doc
+                same_company = [
+                    d for d in all_docs
+                    if (get_field(d, "name_txt") or get_field(d, "caseTitle_s") or "").strip().upper() == norm_name
+                ]
+                if not same_company:
+                    return verified_doc
+                best = sorted(same_company,
+                              key=lambda d: (_STATUS_SORT.get(_get_status(d), 99), _date_sort_key(d)))[0]
+                # Log if we upgraded to a better/newer permit
+                best_permit = get_field(best, "permitNumber_txt")
+                orig_permit = get_field(verified_doc, "permitNumber_txt")
+                if best_permit and orig_permit and best_permit != orig_permit:
+                    print(f"  [PSPLA] Upgraded from permit {orig_permit} "
+                          f"({_get_status(verified_doc)}) → {best_permit} "
+                          f"({_get_status(best)}) for '{norm_name}'")
+                return best
+
             # For keyword/partial/variant matches, verify with Claude before trusting.
             # Use Solr's original text-score order, but boost candidates whose PSPLA name
             # contains whole-word matches from the website region (e.g. "Kapiti Coast" in
@@ -1690,21 +2238,15 @@ def check_pspla(company_name, website_region=None, page_text=None, co_result=Non
                             "pspla_address": None, "pspla_license_number": None,
                             "pspla_license_status": None, "pspla_license_expiry": None}
 
-                # Upgrade: find the best-status doc for the same permit number
-                permit_num = get_field(verified_doc, "permitNumber_txt")
-                if permit_num:
-                    matched = _best_doc_for_permit(docs, permit_num) or verified_doc
-                else:
-                    matched = verified_doc
+                # Upgrade: find the best doc across ALL permits for the same company name.
+                # A company can be reissued a new permit number on renewal — _best_doc_for_permit
+                # (same permit only) would miss newer active permits. _best_doc_for_company
+                # looks across all docs in this result set by exact name match.
+                matched = _best_doc_for_company(docs, verified_doc)
             else:
                 # Single company in results and full-name match — no verification needed.
-                # Upgrade to best-status doc for that permit number (e.g. Active renewal).
-                candidate = docs[0]
-                permit_num = get_field(candidate, "permitNumber_txt")
-                if permit_num:
-                    matched = _best_doc_for_permit(docs, permit_num) or candidate
-                else:
-                    matched = candidate
+                # Still upgrade in case there are multiple permit rows for this company.
+                matched = _best_doc_for_company(docs, docs[0])
 
             has_active = _get_status(matched) == "active"
 
@@ -2091,12 +2633,15 @@ def check_pspla_individual(name):
     """Search PSPLA for an individual license."""
     try:
         url = "https://forms.justice.govt.nz/forms/publicSolrProxy/solr/PSPLA/select"
+        # Require ALL words present (AND) to avoid false matches on first name only
+        words = [w for w in name.split() if len(w) >= 2]
+        q = " AND ".join(f"name_txt:{w}" for w in words) if words else f"name_txt:({name})"
         params = {
             "rows": "5",
             "fl": "*, score",
             "sort": "score desc",
             "json.nl": "map",
-            "q": f"name_txt:({name})",
+            "q": q,
             "fq": "jurisdictionCode_s:PSPLA AND permitHasBeenIssued_b:true",
             "wt": "json"
         }
@@ -2118,6 +2663,10 @@ def check_pspla_individual(name):
             matched = active[0]
             name_field = matched.get("name_txt") or matched.get("caseTitle_s", name)
             if isinstance(name_field, list): name_field = name_field[0]
+            # Verify the last name of the input appears in the matched name
+            last_name = name.split()[-1].lower()
+            if last_name not in name_field.lower():
+                return {"found": False, "name": None}
             return {"found": True, "name": name_field}
     except Exception as e:
         print(f"  [Individual PSPLA error] {e}")
@@ -2394,10 +2943,22 @@ RECORD_TEMPLATE = {
     "google_phone": None,
     "google_address": None,
     "google_email": None,
+    "linkedin_followers": None,
+    "linkedin_description": None,
+    "linkedin_industry": None,
+    "linkedin_location": None,
+    "linkedin_website": None,
+    "linkedin_size": None,
     "root_domain": None,
     "source_url": None,
     "last_checked": None,
     "notes": None,
+    "has_alarm_systems": None,
+    "has_cctv_cameras": None,
+    "has_alarm_monitoring": None,
+    "fb_alarm_systems": None,
+    "fb_cctv_cameras": None,
+    "fb_alarm_monitoring": None,
 }
 
 
@@ -2573,7 +3134,7 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
     fb_page_data = {}
     if info.get("facebook_url"):
         print(f"  [Facebook scrape] {info['facebook_url']}")
-        fb_page_data = scrape_facebook_page(info["facebook_url"])
+        fb_page_data = scrape_facebook_page(info["facebook_url"], company_name=company_name)
         if any(v for v in fb_page_data.values()):
             print(f"  [Facebook data] followers={fb_page_data.get('followers')} "
                   f"phone={fb_page_data.get('phone')} email={fb_page_data.get('email')}")
@@ -2581,6 +3142,15 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         if not info.get("email") and fb_page_data.get("email"):
             info["email"] = fb_page_data["email"]
             print(f"  [Email from FB] {info['email']}")
+
+    # Detect services from Facebook content (description + category + search snippet)
+    fb_service_text = " ".join(filter(None, [
+        fb_page_data.get("description"),
+        fb_page_data.get("category"),
+        info.get("_fb_snippet", ""),
+    ]))
+    fb_services = detect_services(fb_service_text) if fb_service_text.strip() else \
+        {"has_alarm_systems": False, "has_cctv_cameras": False, "has_alarm_monitoring": False}
 
     # Fetch Google Business Profile (rating, reviews, phone, address from knowledge graph)
     print(f"  [Google profile] Looking up: {company_name}")
@@ -2799,6 +3369,73 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         else:
             print(f"  [Cross-check OK] Sources consistent ({cross_check.get('confidence','?')} confidence): {cross_check.get('notes', '')}")
 
+    # Scrape LinkedIn page for followers/description if we have a URL
+    li_page_data = {}
+    if info.get("linkedin_url"):
+        li_page_data = scrape_linkedin_page(info["linkedin_url"], company_name=company_name)
+        if any(v for v in li_page_data.values()):
+            print(f"  [LinkedIn data] followers={li_page_data.get('followers')} desc={bool(li_page_data.get('description'))}")
+
+    # LLM pre-save review: sanity-check ALL gathered associations before saving
+    rejections = llm_verify_associations(
+        company_name, website_url, website_region,
+        linkedin_url=info.get("linkedin_url"),
+        facebook_url=info.get("facebook_url"),
+        co_name=co_result.get("name"),
+        co_address=co_result.get("address"),
+        pspla_name=pspla_result.get("matched_name"),
+        pspla_address=pspla_result.get("pspla_address"),
+        pspla_status=pspla_result.get("pspla_license_status"),
+        nzsa_name=nzsa_result.get("member_name") if nzsa_result.get("member") else None,
+        google_address=google_profile.get("address"),
+        google_phone=google_profile.get("phone"),
+        fb_description=fb_page_data.get("description"),
+    )
+    if rejections.get("linkedin_url"):
+        write_audit("llm_decision", None, company_name,
+                    changes=f"LinkedIn rejected: {rejections['linkedin_url']}",
+                    triggered_by="llm_verify_associations")
+        info["linkedin_url"] = None
+        li_page_data = {}
+    if rejections.get("facebook_url"):
+        write_audit("llm_decision", None, company_name,
+                    changes=f"Facebook rejected: {rejections['facebook_url']}",
+                    triggered_by="llm_verify_associations")
+        info["facebook_url"] = None
+        fb_page_data = {}
+    if rejections.get("co_name"):
+        write_audit("llm_decision", None, company_name,
+                    changes=f"CO name rejected: {rejections['co_name']}",
+                    triggered_by="llm_verify_associations")
+        co_result = {}
+    if rejections.get("pspla_name"):
+        write_audit("llm_decision", None, company_name,
+                    changes=f"PSPLA rejected: {rejections['pspla_name']}",
+                    triggered_by="llm_verify_associations")
+        pspla_result = {"licensed": False, "matched_name": None, "license_type": None,
+                        "match_method": f"rejected by pre-save review: {rejections['pspla_name']}",
+                        "pspla_address": None, "pspla_license_number": None,
+                        "pspla_license_status": None, "pspla_license_expiry": None}
+    if rejections.get("nzsa_name"):
+        write_audit("llm_decision", None, company_name,
+                    changes=f"NZSA rejected: {rejections['nzsa_name']}",
+                    triggered_by="llm_verify_associations")
+        nzsa_result = {"member": False, "member_name": None, "accredited": False,
+                       "grade": None, "contact_name": None, "phone": None,
+                       "email": None, "overview": None}
+    if rejections.get("google_profile"):
+        write_audit("llm_decision", None, company_name,
+                    changes=f"Google profile rejected: {rejections['google_profile']}",
+                    triggered_by="llm_verify_associations")
+        google_profile = {}
+
+    # Detect services mentioned on the company website (homepage + service sub-pages)
+    service_text = gather_service_text(website_url, page_text) if website_url else page_text
+    services = detect_services(service_text)
+    detected = [k for k, v in services.items() if v]
+    if detected:
+        print(f"  [Services detected] {', '.join(detected)}")
+
     record = {
         "company_name": company_name,
         "website": website_url,
@@ -2841,6 +3478,12 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         "google_address": google_profile.get("address"),
         "google_email": google_profile.get("email"),
         "linkedin_url": info.get("linkedin_url"),
+        "linkedin_followers": li_page_data.get("followers"),
+        "linkedin_description": li_page_data.get("description"),
+        "linkedin_industry": li_page_data.get("industry"),
+        "linkedin_location": li_page_data.get("location"),
+        "linkedin_website": li_page_data.get("website"),
+        "linkedin_size": li_page_data.get("size"),
         "nzsa_member": "true" if nzsa_result["member"] else "false",
         "nzsa_member_name": nzsa_result["member_name"],
         "nzsa_accredited": "true" if nzsa_result["accredited"] else "false",
@@ -2853,6 +3496,12 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         "source_url": info.get("_fb_url") or website_url,
         "last_checked": datetime.now(timezone.utc).isoformat(),
         "notes": f"Found via: {source_label}",
+        "has_alarm_systems":    services.get("has_alarm_systems"),
+        "has_cctv_cameras":     services.get("has_cctv_cameras"),
+        "has_alarm_monitoring": services.get("has_alarm_monitoring"),
+        "fb_alarm_systems":     fb_services.get("has_alarm_systems"),
+        "fb_cctv_cameras":      fb_services.get("has_cctv_cameras"),
+        "fb_alarm_monitoring":  fb_services.get("has_alarm_monitoring"),
     }
 
     # Final dedup guard — catches same company found via different URLs/paths
@@ -3657,6 +4306,7 @@ def run_search(triggered_by="manual"):
     print("=" * 60)
     started_iso = datetime.now(timezone.utc).isoformat()
     reset_session_log()
+    reset_token_usage()
 
     # Sanity check — abort if the database is missing any required columns
     print("  Checking database schema...")

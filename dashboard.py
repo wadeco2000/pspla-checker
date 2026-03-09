@@ -15,6 +15,7 @@ load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SERPAPI_KEY  = os.getenv("SERPAPI_KEY")
 GITHUB_PAT = os.getenv("GITHUB_PAT")
 EXPORT_PASSWORD = os.getenv("EXPORT_PASSWORD") or os.getenv("PAGES_PASSWORD", "")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "wadeco2000/pspla-checker")
@@ -185,6 +186,14 @@ HTML_TEMPLATE = """
         <div>
             <h1>PSPLA Security Camera Company Checker</h1>
             <p class="subtitle">NZ companies found installing security cameras — checked against PSPLA licensing register.</p>
+            <div id="api-credits-bar" style="display:flex; gap:14px; flex-wrap:wrap; margin-top:6px; font-size:12px;">
+                <span id="credit-serp" style="color:#aaa;">
+                    <i class="fa-solid fa-magnifying-glass"></i> SerpAPI: <span style="font-weight:bold;">loading…</span>
+                </span>
+                <span id="credit-tokens" style="color:#aaa;">
+                    <i class="fa-solid fa-robot"></i> Claude: <span style="font-weight:bold;">–</span>
+                </span>
+            </div>
         </div>
         <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end; margin-top:10px;">
             <div style="display:flex; gap:6px; align-items:center; flex-wrap:nowrap;">
@@ -227,6 +236,7 @@ HTML_TEMPLATE = """
                     <button class="btn btn-dark" style="background:#8e44ad;">&#x1F310; Publish Live</button>
                 </form>
                 <button class="btn btn-dark" onclick="document.getElementById('export-modal').style.display='flex';">&#x2B07; Export CSV</button>
+                <a href="/search-history" class="btn btn-dark" style="text-decoration:none;">&#x1F4CB; Search History</a>
                 <a href="/history" class="btn btn-dark" style="text-decoration:none;">&#x1F4DC; Version History</a>
                 <a href="/duplicates" class="btn btn-dark" style="text-decoration:none; background:#c0392b;">&#x26A0; Duplicates</a>
                 <a href="/audit-log" class="btn btn-dark" style="text-decoration:none; background:#6c3483;">&#x1F4CB; Audit Log</a>
@@ -363,6 +373,8 @@ HTML_TEMPLATE = """
                             llmBanner.style.display = 'none';
                         }
                     }
+                    // Update token counter from live status
+                    updateTokenWidget(s.tokens);
                 })
                 .catch(function() {});
         }
@@ -370,47 +382,56 @@ HTML_TEMPLATE = """
         setInterval(poll, 3000);
     })();
 
-    // Search history
-    (function() {
-        var TYPE_LABELS = {'full':'Full','google-weekly':'Weekly','facebook':'Facebook','google-partial':'Partial','directories':'Directories'};
-        var STATUS_COLORS = {'completed':'#27ae60','stopped':'#e67e22','error':'#e74c3c'};
-        function loadHistory() {
-            fetch('/search-history')
-                .then(function(r){return r.json();})
-                .then(function(rows) {
-                    var el = document.getElementById('history-table');
-                    if (!rows.length) { el.innerHTML='<span style="color:#aaa;">No searches recorded yet.</span>'; return; }
-                    var html = '<table style="width:100%;border-collapse:collapse;">'
-                        + '<tr style="color:#888;border-bottom:1px solid #eee;">'
-                        + '<th style="text-align:left;padding:3px 6px;font-weight:normal;">Date (NZT)</th>'
-                        + '<th style="text-align:left;padding:3px 6px;font-weight:normal;">Type</th>'
-                        + '<th style="text-align:left;padding:3px 6px;font-weight:normal;">By</th>'
-                        + '<th style="text-align:right;padding:3px 6px;font-weight:normal;">Mins</th>'
-                        + '<th style="text-align:right;padding:3px 6px;font-weight:normal;">Found</th>'
-                        + '<th style="text-align:right;padding:3px 6px;font-weight:normal;">New</th>'
-                        + '<th style="text-align:left;padding:3px 6px;font-weight:normal;">Status</th></tr>';
-                    rows.forEach(function(r) {
-                        var d = new Date(r.started.replace('+00:00','Z'));
-                        var dt = d.toLocaleDateString('en-NZ',{day:'2-digit',month:'short'})
-                               + ' ' + d.toLocaleTimeString('en-NZ',{hour:'2-digit',minute:'2-digit'});
-                        var col = STATUS_COLORS[r.status] || '#888';
-                        var lbl = TYPE_LABELS[r.type] || r.type;
-                        html += '<tr style="border-bottom:1px solid #f5f5f5;">'
-                            + '<td style="padding:3px 6px;color:#555;">' + dt + '</td>'
-                            + '<td style="padding:3px 6px;">' + lbl + '</td>'
-                            + '<td style="padding:3px 6px;color:#888;">' + (r.triggered_by||'') + '</td>'
-                            + '<td style="padding:3px 6px;text-align:right;color:#888;">' + (r.duration_minutes||'-') + '</td>'
-                            + '<td style="padding:3px 6px;text-align:right;">' + (r.total_found||0) + '</td>'
-                            + '<td style="padding:3px 6px;text-align:right;font-weight:bold;">' + (r.total_new||0) + '</td>'
-                            + '<td style="padding:3px 6px;color:' + col + ';font-weight:bold;">' + r.status + '</td></tr>';
-                    });
-                    html += '</table>';
-                    el.innerHTML = html;
-                }).catch(function(){});
+    // ── API Credits widget ───────────────────────────────────────────────────
+    function updateTokenWidget(tokens) {
+        var el = document.getElementById('credit-tokens');
+        if (!el || !tokens) return;
+        var inp = (tokens.input || 0).toLocaleString();
+        var out = (tokens.output || 0).toLocaleString();
+        var cost = tokens.estimated_cost_usd != null ? ' (~$' + tokens.estimated_cost_usd.toFixed(3) + ' USD)' : '';
+        var total = (tokens.input || 0) + (tokens.output || 0);
+        if (total === 0) {
+            el.innerHTML = '<i class="fa-solid fa-robot"></i> Claude: <span style="font-weight:bold;color:#aaa;">no usage this session</span>';
+        } else {
+            el.innerHTML = '<i class="fa-solid fa-robot"></i> Claude: <span style="font-weight:bold;color:#a29bfe;">'
+                + total.toLocaleString() + ' tokens' + cost + '</span>'
+                + ' <span style="color:#888;font-size:11px;">(' + inp + ' in / ' + out + ' out)</span>';
         }
-        loadHistory();
-        setInterval(loadHistory, 15000);
-    })();
+    }
+
+    function loadApiCredits() {
+        fetch('/api-credits')
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                // SerpAPI
+                var serpEl = document.getElementById('credit-serp');
+                if (serpEl) {
+                    if (d.serp_error) {
+                        serpEl.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> SerpAPI: <span style="color:#e74c3c;font-weight:bold;">' + d.serp_error + '</span>';
+                    } else {
+                        var left  = d.serp_searches_left != null ? d.serp_searches_left.toLocaleString() : '?';
+                        var month = d.serp_searches_month != null ? d.serp_searches_month.toLocaleString() : '?';
+                        var used  = d.serp_this_month != null ? d.serp_this_month.toLocaleString() : '?';
+                        var pct   = d.serp_searches_month ? Math.round((1 - d.serp_searches_left / d.serp_searches_month) * 100) : null;
+                        var color = d.serp_searches_left < 100 ? '#e74c3c' : d.serp_searches_left < 500 ? '#e67e22' : '#2ecc71';
+                        serpEl.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> SerpAPI: <span style="font-weight:bold;color:' + color + ';">'
+                            + left + ' searches left</span>'
+                            + ' <span style="color:#888;font-size:11px;">(' + used + ' used of ' + month + ' this month'
+                            + (pct != null ? ', ' + pct + '%' : '') + ')</span>';
+                    }
+                }
+                // Claude tokens
+                updateTokenWidget(d.tokens);
+            })
+            .catch(function() {
+                var serpEl = document.getElementById('credit-serp');
+                if (serpEl) serpEl.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> SerpAPI: <span style="color:#888;">unavailable</span>';
+            });
+    }
+    loadApiCredits();
+    // Refresh SerpAPI balance every 5 minutes (token count updates via poll())
+    setInterval(loadApiCredits, 300000);
+
     </script>
 
     {% if message %}
@@ -446,41 +467,6 @@ HTML_TEMPLATE = """
                 <tr><td style="color:#666; padding:2px 0;"><i class="fa-solid fa-calendar-week" style="width:14px;"></i> Weekly scan</td><td style="color:#2c3e50;">8th, 15th, 22nd, 2am</td></tr>
                 <tr><td style="color:#666; padding:2px 0;"><i class="fa-brands fa-facebook-f" style="width:14px; color:#1877f2;"></i> Facebook scan</td><td style="color:#2c3e50;">Tue &amp; Fri, 3am</td></tr>
             </table>
-        </div>
-
-        <div style="flex:2; min-width:360px; background:white; border-radius:8px;
-                    box-shadow:0 2px 4px rgba(0,0,0,0.1); padding:14px 18px;">
-            <strong style="color:#2c3e50; font-size:14px;">&#128196; Search History</strong>
-            <div id="history-table" style="margin-top:10px; font-size:12px;">
-                {% if not init_history %}
-                <span style="color:#aaa;">No searches recorded yet.</span>
-                {% else %}
-                <table style="width:100%;border-collapse:collapse;">
-                <tr style="color:#888;border-bottom:1px solid #eee;">
-                    <th style="text-align:left;padding:3px 6px;font-weight:normal;">Date (NZT)</th>
-                    <th style="text-align:left;padding:3px 6px;font-weight:normal;">Type</th>
-                    <th style="text-align:left;padding:3px 6px;font-weight:normal;">By</th>
-                    <th style="text-align:right;padding:3px 6px;font-weight:normal;">Mins</th>
-                    <th style="text-align:right;padding:3px 6px;font-weight:normal;">Found</th>
-                    <th style="text-align:right;padding:3px 6px;font-weight:normal;">New</th>
-                    <th style="text-align:left;padding:3px 6px;font-weight:normal;">Status</th>
-                </tr>
-                {% set type_labels = {'full':'Full','google-weekly':'Weekly','facebook':'Facebook','google-partial':'Partial','directories':'Directories'} %}
-                {% set status_colors = {'completed':'#27ae60','stopped':'#e67e22','error':'#e74c3c'} %}
-                {% for r in init_history %}
-                <tr style="border-bottom:1px solid #f5f5f5;">
-                    <td style="padding:3px 6px;color:#555;">{{ r.started[:16].replace('T',' ') if r.started else '-' }}</td>
-                    <td style="padding:3px 6px;">{{ type_labels.get(r.type, r.type) }}</td>
-                    <td style="padding:3px 6px;color:#888;">{{ r.triggered_by or '' }}</td>
-                    <td style="padding:3px 6px;text-align:right;color:#888;">{{ r.duration_minutes or '-' }}</td>
-                    <td style="padding:3px 6px;text-align:right;">{{ r.total_found or 0 }}</td>
-                    <td style="padding:3px 6px;text-align:right;font-weight:bold;">{{ r.total_new or 0 }}</td>
-                    <td style="padding:3px 6px;color:{{ status_colors.get(r.status, '#888') }};font-weight:bold;">{{ r.status }}</td>
-                </tr>
-                {% endfor %}
-                </table>
-                {% endif %}
-            </div>
         </div>
 
     </div>
@@ -758,10 +744,22 @@ HTML_TEMPLATE = """
             <option value="no">Not NZSA</option>
         </select>
         <select id="serviceFilter" onchange="filterTable()">
-            <option value="">All Services</option>
+            <option value="">All Services (Website)</option>
             <option value="alarm_systems">Alarm Systems</option>
             <option value="cctv">CCTV / Cameras</option>
             <option value="monitoring">Alarm Monitoring</option>
+        </select>
+        <select id="fbServiceFilter" onchange="filterTable()">
+            <option value="">All Services (Facebook)</option>
+            <option value="fb_alarm_systems">Alarm Systems</option>
+            <option value="fb_cctv">CCTV / Cameras</option>
+            <option value="fb_monitoring">Alarm Monitoring</option>
+        </select>
+        <select id="sortSelect" onchange="sortTable()" style="margin-left:8px;">
+            <option value="name-asc">Sort: Name (A–Z)</option>
+            <option value="name-desc">Sort: Name (Z–A)</option>
+            <option value="date-desc">Sort: Newest First</option>
+            <option value="date-asc">Sort: Oldest First</option>
         </select>
         <button class="btn btn-dark" onclick="window.location.reload()">Refresh</button>
     </div>
@@ -781,6 +779,7 @@ HTML_TEMPLATE = """
                 <th><i class="fa-solid fa-hashtag"></i> License #</th>
                 <th><i class="fa-regular fa-calendar"></i> Expiry</th>
                 <th><i class="fa-solid fa-landmark"></i> Companies Office</th>
+                <th><i class="fa-regular fa-calendar-plus"></i> Added</th>
                 <th></th>
             </tr>
         </thead>
@@ -798,6 +797,10 @@ HTML_TEMPLATE = """
                 data-alarm-systems="{{ 'yes' if c.has_alarm_systems else 'no' }}"
                 data-cctv="{{ 'yes' if c.has_cctv_cameras else 'no' }}"
                 data-monitoring="{{ 'yes' if c.has_alarm_monitoring else 'no' }}"
+                data-fb-alarm-systems="{{ 'yes' if c.fb_alarm_systems else 'no' }}"
+                data-fb-cctv="{{ 'yes' if c.fb_cctv_cameras else 'no' }}"
+                data-fb-monitoring="{{ 'yes' if c.fb_alarm_monitoring else 'no' }}"
+                data-date="{{ c.date_added or '' }}"
                 data-id="{{ loop.index }}">
                 <td class="company-cell">
                     {% if c.website %}<a href="{{ c.website }}" target="_blank">{{ c.company_name or '-' }}</a>{% else %}{{ c.company_name or '-' }}{% endif %}
@@ -857,12 +860,13 @@ HTML_TEMPLATE = """
                     {{ c.companies_office_name or '-' }}
                     {% if c.companies_office_address %}<div class="detail-block">{{ c.companies_office_address }}</div>{% endif %}
                 </td>
+                <td style="white-space:nowrap; font-size:12px; color:#666;">{{ (c.date_added or '')[:10] or '-' }}</td>
                 <td>
                     <button class="expand-btn" onclick="var r=document.getElementById('detail-{{ loop.index }}');if(r){var o=r.classList.toggle('open');this.textContent=o?'\u25b2 less':'\u25bc more';}">&#x25BC; more</button>
                 </td>
             </tr>
             <tr class="detail-row" id="detail-{{ loop.index }}">
-                <td colspan="10">
+                <td colspan="14">
                     {% if c.match_reason %}
                     <div style="background:#eaf4fb; border-left:4px solid #2980b9; padding:10px 14px; margin-bottom:10px; border-radius:4px; font-size:13px;">
                         <strong style="color:#2471a3;">Why this classification?</strong><br>
@@ -1061,7 +1065,7 @@ HTML_TEMPLATE = """
                             <span><strong style="color:#555;">Date added:</strong> {{ (c.date_added or '')[:10] or '-' }}</span>
                             <span><strong style="color:#555;">Last checked:</strong> {{ (c.last_checked or '')[:10] or '-' }}</span>
                             <span style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;" id="services-row-{{ c.id }}">
-                                <strong style="color:#555;">Services:</strong>
+                                <strong style="color:#555;">Website Services:</strong>
                                 {% if c.has_alarm_systems %}<span class="svc-tag svc-alarm" style="background:#1a6e3c; color:white; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600;">Alarm Systems</span>{% endif %}
                                 {% if c.has_cctv_cameras %}<span class="svc-tag svc-cctv" style="background:#1a4b8a; color:white; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600;">CCTV / Cameras</span>{% endif %}
                                 {% if c.has_alarm_monitoring %}<span class="svc-tag svc-mon" style="background:#7a3a99; color:white; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600;">Alarm Monitoring</span>{% endif %}
@@ -1069,6 +1073,13 @@ HTML_TEMPLATE = """
                                 <button onclick="recheckServices({{ c.id }}, this)"
                                         data-website="{{ (c.website or '') | e }}"
                                         style="padding:1px 8px; font-size:10px; background:#555; color:white; border:none; border-radius:4px; cursor:pointer; white-space:nowrap;">Re-check</button>
+                            </span>
+                            <span style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                                <strong style="color:#1877f2;">Facebook Services:</strong>
+                                {% if c.fb_alarm_systems %}<span style="background:#1a6e3c; color:white; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600;">Alarm Systems</span>{% endif %}
+                                {% if c.fb_cctv_cameras %}<span style="background:#1a4b8a; color:white; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600;">CCTV / Cameras</span>{% endif %}
+                                {% if c.fb_alarm_monitoring %}<span style="background:#7a3a99; color:white; padding:2px 8px; border-radius:10px; font-size:10px; font-weight:600;">Alarm Monitoring</span>{% endif %}
+                                {% if not c.fb_alarm_systems and not c.fb_cctv_cameras and not c.fb_alarm_monitoring %}<span style="color:#bbb; font-size:10px;">none detected</span>{% endif %}
                             </span>
                         </div>
 
@@ -1170,6 +1181,7 @@ HTML_TEMPLATE = """
             const linkedin = document.getElementById('linkedinFilter').value;
             const nzsa = document.getElementById('nzsaFilter').value;
             const service = document.getElementById('serviceFilter').value;
+            const fbService = document.getElementById('fbServiceFilter').value;
             const rows = document.querySelectorAll('.company-row');
             rows.forEach(row => {
                 const nameMatch = !search || row.dataset.name.includes(search);
@@ -1182,10 +1194,36 @@ HTML_TEMPLATE = """
                 if (service === 'alarm_systems') serviceMatch = row.dataset.alarmSystems === 'yes';
                 else if (service === 'cctv') serviceMatch = row.dataset.cctv === 'yes';
                 else if (service === 'monitoring') serviceMatch = row.dataset.monitoring === 'yes';
-                const visible = nameMatch && regionMatch && statusMatch && facebookMatch && linkedinMatch && nzsaMatch && serviceMatch;
+                let fbServiceMatch = true;
+                if (fbService === 'fb_alarm_systems') fbServiceMatch = row.dataset.fbAlarmSystems === 'yes';
+                else if (fbService === 'fb_cctv') fbServiceMatch = row.dataset.fbCctv === 'yes';
+                else if (fbService === 'fb_monitoring') fbServiceMatch = row.dataset.fbMonitoring === 'yes';
+                const visible = nameMatch && regionMatch && statusMatch && facebookMatch && linkedinMatch && nzsaMatch && serviceMatch && fbServiceMatch;
                 row.style.display = visible ? '' : 'none';
                 const detailRow = document.getElementById('detail-' + row.dataset.id);
                 if (detailRow && !visible) detailRow.classList.remove('open');
+            });
+        }
+
+        function sortTable() {
+            const sel = document.getElementById('sortSelect').value;
+            const tbody = document.querySelector('#companyTable tbody');
+            const rows = Array.from(document.querySelectorAll('.company-row'));
+            rows.sort(function(a, b) {
+                if (sel === 'name-asc' || sel === 'name-desc') {
+                    const cmp = a.dataset.name.localeCompare(b.dataset.name);
+                    return sel === 'name-asc' ? cmp : -cmp;
+                } else {
+                    const da = a.dataset.date || '';
+                    const db = b.dataset.date || '';
+                    const cmp = da < db ? -1 : da > db ? 1 : 0;
+                    return sel === 'date-desc' ? -cmp : cmp;
+                }
+            });
+            rows.forEach(function(row) {
+                const detailRow = document.getElementById('detail-' + row.dataset.id);
+                tbody.appendChild(row);
+                if (detailRow) tbody.appendChild(detailRow);
             });
         }
 
@@ -1769,14 +1807,6 @@ def index():
         except Exception:
             pass
 
-    # Pre-load history for immediate render (AJAX refreshes it later)
-    init_history = []
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE) as f:
-                init_history = json.load(f)[:20]
-        except Exception:
-            pass
 
     # Pre-load search terms for immediate render
     init_terms = _load_terms()
@@ -1807,7 +1837,6 @@ def index():
         search_paused=search_paused,
         schedule_enabled=os.path.exists(SCHEDULE_FLAG),
         init_status=init_status,
-        init_history=init_history,
         init_terms=init_terms,
         init_log_lines=init_log_lines,
     )
@@ -2115,14 +2144,50 @@ def search_status():
         except Exception as e:
             status["log_lines"] = [f"[log read error: {e}]"]
     try:
-        from searcher import get_llm_status
+        from searcher import get_llm_status, get_token_usage
         llm_errors = get_llm_status()
         if llm_errors >= 3:
             status["llm_warning"] = f"LLM API appears unavailable ({llm_errors} consecutive failures). Matches are being saved as low-confidence. Check Anthropic API key / credit balance."
+        status["tokens"] = get_token_usage()
     except Exception:
         pass
     from flask import jsonify
     return jsonify(status)
+
+
+@app.route("/api-credits")
+def api_credits():
+    from flask import jsonify
+    result = {}
+
+    # SerpAPI — fetch account info
+    if SERPAPI_KEY:
+        try:
+            r = requests.get(
+                "https://serpapi.com/account",
+                params={"api_key": SERPAPI_KEY},
+                timeout=6,
+            )
+            if r.ok:
+                data = r.json()
+                result["serp_searches_left"]  = data.get("plan_searches_left")
+                result["serp_searches_month"] = data.get("searches_per_month")
+                result["serp_this_month"]     = data.get("this_month_usage")
+            else:
+                result["serp_error"] = f"HTTP {r.status_code}"
+        except Exception as e:
+            result["serp_error"] = str(e)
+    else:
+        result["serp_error"] = "SERPAPI_KEY not set"
+
+    # Claude token usage — from current searcher session
+    try:
+        from searcher import get_token_usage
+        result["tokens"] = get_token_usage()
+    except Exception as e:
+        result["tokens"] = {"error": str(e)}
+
+    return jsonify(result)
 
 
 @app.route("/search-log")
@@ -2197,8 +2262,8 @@ def start_partial_search():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-@app.route("/search-history")
-def search_history():
+@app.route("/search-history-data")
+def search_history_data():
     from flask import jsonify
     history = []
     if os.path.exists(HISTORY_FILE):
@@ -2207,7 +2272,153 @@ def search_history():
                 history = json.load(f)
         except Exception:
             pass
-    return jsonify(history[:20])
+    return jsonify(history)
+
+
+SEARCH_HISTORY_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Search History — PSPLA Checker</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer" />
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f4f4f4; }
+        .page-header { background: #2c3e50; color: white; padding: 14px 24px;
+                       display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+        .page-header h1 { margin: 0; font-size: 18px; }
+        .content { padding: 24px; }
+        .back { color: #aac; text-decoration: none; font-size: 13px; }
+        .back:hover { color: white; }
+        table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px;
+                overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1); font-size: 13px; }
+        th { background: #2c3e50; color: white; padding: 10px 14px; text-align: left; white-space: nowrap; }
+        th.right { text-align: right; }
+        td { padding: 9px 14px; border-bottom: 1px solid #eee; vertical-align: middle; }
+        td.right { text-align: right; }
+        tr:hover td { background: #f9f9f9; }
+        .badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: bold; white-space: nowrap; }
+        .stat-row { display: flex; gap: 15px; margin-bottom: 24px; flex-wrap: wrap; }
+        .stat-box { background: white; padding: 14px 20px; border-radius: 8px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1); text-align: center; min-width: 120px; }
+        .stat-box h2 { margin: 0; font-size: 1.8em; color: #2c3e50; }
+        .stat-box p { margin: 4px 0 0; color: #888; font-size: 12px; }
+        .filter-row { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+        .filter-row select, .filter-row input {
+            padding: 7px 11px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
+    </style>
+</head>
+<body>
+<div class="page-header">
+    <h1><i class="fa-solid fa-clock-rotate-left"></i> Search History</h1>
+    <a href="/" class="back"><i class="fa-solid fa-arrow-left"></i> Back to Dashboard</a>
+</div>
+<div class="content">
+    <div class="stat-row" id="stats"></div>
+    <div class="filter-row">
+        <select id="typeFilter" onchange="renderTable()">
+            <option value="">All Types</option>
+            <option value="full">Full</option>
+            <option value="google-weekly">Weekly</option>
+            <option value="facebook">Facebook</option>
+            <option value="google-partial">Partial</option>
+            <option value="directories">Directories</option>
+        </select>
+        <select id="statusFilter" onchange="renderTable()">
+            <option value="">All Statuses</option>
+            <option value="completed">Completed</option>
+            <option value="stopped">Stopped</option>
+            <option value="error">Error</option>
+        </select>
+        <input type="text" id="searchBox" placeholder="Search..." oninput="renderTable()" style="min-width:180px;">
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>Date (NZT)</th>
+                <th>Type</th>
+                <th>Triggered by</th>
+                <th class="right">Duration</th>
+                <th class="right">Found</th>
+                <th class="right">New</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody"><tr><td colspan="7" style="text-align:center;color:#aaa;padding:30px;">Loading...</td></tr></tbody>
+    </table>
+</div>
+<script>
+var TYPE_LABELS   = {full:'Full','google-weekly':'Weekly',facebook:'Facebook','google-partial':'Partial',directories:'Directories'};
+var STATUS_COLORS = {completed:'#27ae60',stopped:'#e67e22',error:'#e74c3c'};
+var _allRows = [];
+
+function fmt(iso) {
+    if (!iso) return '-';
+    var d = new Date(iso.replace('+00:00','Z'));
+    return d.toLocaleDateString('en-NZ',{day:'2-digit',month:'short',year:'numeric'})
+         + ' ' + d.toLocaleTimeString('en-NZ',{hour:'2-digit',minute:'2-digit'});
+}
+
+function renderStats(rows) {
+    var total = rows.length, totalNew = 0, totalFound = 0;
+    rows.forEach(function(r){ totalNew += (r.total_new||0); totalFound += (r.total_found||0); });
+    document.getElementById('stats').innerHTML =
+        '<div class="stat-box"><h2>' + total + '</h2><p>Total Runs</p></div>' +
+        '<div class="stat-box"><h2>' + totalFound.toLocaleString() + '</h2><p>Total Found</p></div>' +
+        '<div class="stat-box"><h2>' + totalNew.toLocaleString() + '</h2><p>Total New Added</p></div>';
+}
+
+function renderTable() {
+    var type   = document.getElementById('typeFilter').value;
+    var status = document.getElementById('statusFilter').value;
+    var search = document.getElementById('searchBox').value.toLowerCase();
+    var rows = _allRows.filter(function(r) {
+        return (!type   || r.type === type)
+            && (!status || r.status === status)
+            && (!search || (r.type||'').toLowerCase().includes(search)
+                        || (r.status||'').toLowerCase().includes(search)
+                        || (r.triggered_by||'').toLowerCase().includes(search));
+    });
+    if (!rows.length) {
+        document.getElementById('tableBody').innerHTML =
+            '<tr><td colspan="7" style="text-align:center;color:#aaa;padding:30px;">No records match.</td></tr>';
+        return;
+    }
+    var html = '';
+    rows.forEach(function(r) {
+        var col = STATUS_COLORS[r.status] || '#888';
+        var lbl = TYPE_LABELS[r.type] || r.type;
+        var dur = r.duration_minutes ? r.duration_minutes + ' min' : '-';
+        html += '<tr>'
+            + '<td>' + fmt(r.started) + '</td>'
+            + '<td>' + lbl + '</td>'
+            + '<td style="color:#888;">' + (r.triggered_by||'-') + '</td>'
+            + '<td class="right" style="color:#888;">' + dur + '</td>'
+            + '<td class="right">' + (r.total_found||0).toLocaleString() + '</td>'
+            + '<td class="right" style="font-weight:bold;">' + (r.total_new||0).toLocaleString() + '</td>'
+            + '<td><span class="badge" style="background:' + col + '20;color:' + col + ';">' + r.status + '</span></td>'
+            + '</tr>';
+    });
+    document.getElementById('tableBody').innerHTML = html;
+}
+
+fetch('/search-history-data')
+    .then(function(r){ return r.json(); })
+    .then(function(data) {
+        _allRows = data;
+        renderStats(data);
+        renderTable();
+    })
+    .catch(function(){ document.getElementById('tableBody').innerHTML =
+        '<tr><td colspan="7" style="text-align:center;color:#e74c3c;padding:30px;">Failed to load history.</td></tr>'; });
+</script>
+</body>
+</html>"""
+
+
+@app.route("/search-history")
+def search_history():
+    return render_template_string(SEARCH_HISTORY_TEMPLATE)
 
 
 @app.route("/audit-log-data")
@@ -2251,6 +2462,9 @@ def llm_log_page():
         content = open(log_path, encoding="utf-8").read() if os.path.exists(log_path) else ""
     except Exception as e:
         content = f"Error reading log: {e}"
+    all_entries = _parse_llm_log(content)
+    total_count = len(all_entries)
+    entries = all_entries[-100:]  # show last 100 only
     return render_template_string("""<!DOCTYPE html>
 <html>
 <head>
@@ -2278,6 +2492,7 @@ def llm_log_page():
 <body>
 <div class="toolbar">
   <h1>&#x1F916; LLM Debug Log</h1>
+  <span style="color:#888; font-size:12px;">Showing last {{ entries|length }} of {{ total_count }} entries</span>
   <div class="controls">
     <input type="text" id="search" placeholder="Filter entries..." oninput="filterEntries()">
     <button onclick="scrollToBottom()">&#x2193; Latest</button>
@@ -2314,7 +2529,7 @@ function scrollToBottom() {
 window.onload = function() { scrollToBottom(); };
 </script>
 </body>
-</html>""", entries=_parse_llm_log(content))
+</html>""", entries=entries, total_count=total_count)
 
 
 def _parse_llm_log(content):

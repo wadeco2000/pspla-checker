@@ -227,6 +227,12 @@ STATIC_TEMPLATE = """<!DOCTYPE html>
             <option value="fb_cctv">CCTV / Cameras</option>
             <option value="fb_monitoring">Alarm Monitoring</option>
         </select>
+        <select id="sortSelect" onchange="sortTable()" style="margin-left:8px;">
+            <option value="name-asc">Sort: Name (A–Z)</option>
+            <option value="name-desc">Sort: Name (Z–A)</option>
+            <option value="date-desc">Sort: Newest First</option>
+            <option value="date-asc">Sort: Oldest First</option>
+        </select>
     </div>
 
     <!-- Table -->
@@ -241,11 +247,12 @@ STATIC_TEMPLATE = """<!DOCTYPE html>
                 <th><i class="fa-solid fa-id-card"></i> PSPLA Name</th>
                 <th>License #</th>
                 <th>Expiry</th>
+                <th>Added</th>
                 <th></th>
             </tr>
         </thead>
         <tbody id="tableBody">
-            <tr><td colspan="9" class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading data...</td></tr>
+            <tr><td colspan="10" class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading data...</td></tr>
         </tbody>
     </table>
 </div>
@@ -303,7 +310,7 @@ function loadData() {{
     }})
     .catch(function(e) {{
         document.getElementById('tableBody').innerHTML =
-            '<tr><td colspan="9" class="loading" style="color:#e74c3c;">Error loading data. Retrying in 5 minutes.</td></tr>';
+            '<tr><td colspan="10" class="loading" style="color:#e74c3c;">Error loading data. Retrying in 5 minutes.</td></tr>';
     }});
 }}
 
@@ -473,6 +480,8 @@ function renderTable(companies) {{
                 '<span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><strong>Facebook Services:</strong> ' + (fbSvcTags || '<span style="color:#aaa;font-size:11px;">none detected</span>') + '</span>' +
             '</div>';
 
+        var dateAdded = (c.date_added || '').slice(0, 10) || '-';
+
         html +=
             '<tr class="company-row"' +
                 ' data-name="' + esc((c.company_name||'').toLowerCase()) + '"' +
@@ -484,6 +493,7 @@ function renderTable(companies) {{
                 ' data-fb-alarm-systems="' + fbAlarmSys + '"' +
                 ' data-fb-cctv="' + fbCctv + '"' +
                 ' data-fb-monitoring="' + fbMonitor + '"' +
+                ' data-date="' + esc(c.date_added||'') + '"' +
                 ' data-id="' + id + '">' +
                 '<td class="company-cell">' + nameCell + '</td>' +
                 '<td>' + esc(c.region||'-') + '</td>' +
@@ -493,13 +503,14 @@ function renderTable(companies) {{
                 '<td>' + psplaCell + '</td>' +
                 '<td>' + licCell + '</td>' +
                 '<td>' + esc(c.pspla_license_expiry||'-') + '</td>' +
+                '<td style="white-space:nowrap;font-size:12px;color:#666;">' + dateAdded + '</td>' +
                 '<td><button class="expand-btn" onclick="toggleDetail(' + id + ')"><i class="fa-solid fa-chevron-down"></i> Details</button></td>' +
             '</tr>' +
             '<tr class="detail-row" id="detail-' + id + '">' +
-                '<td colspan="9">' + detail + '</td>' +
+                '<td colspan="10">' + detail + '</td>' +
             '</tr>';
     }});
-    document.getElementById('tableBody').innerHTML = html || '<tr><td colspan="9" class="loading">No companies found.</td></tr>';
+    document.getElementById('tableBody').innerHTML = html || '<tr><td colspan="10" class="loading">No companies found.</td></tr>';
     filterTable();
 }}
 
@@ -526,6 +537,29 @@ function filterTable() {{
         row.style.display = visible ? '' : 'none';
         var dr = document.getElementById('detail-' + row.dataset.id);
         if (dr && !visible) dr.classList.remove('open');
+    }});
+}}
+
+// ── Sort table ────────────────────────────────────────────────────────────────
+function sortTable() {{
+    var sel = document.getElementById('sortSelect').value;
+    var tbody = document.getElementById('tableBody');
+    var rows = Array.from(document.querySelectorAll('.company-row'));
+    rows.sort(function(a, b) {{
+        if (sel === 'name-asc' || sel === 'name-desc') {{
+            var cmp = a.dataset.name.localeCompare(b.dataset.name);
+            return sel === 'name-asc' ? cmp : -cmp;
+        }} else {{
+            var da = a.dataset.date || '';
+            var db = b.dataset.date || '';
+            var cmp = da < db ? -1 : da > db ? 1 : 0;
+            return sel === 'date-desc' ? -cmp : cmp;
+        }}
+    }});
+    rows.forEach(function(row) {{
+        var detailRow = document.getElementById('detail-' + row.dataset.id);
+        tbody.appendChild(row);
+        if (detailRow) tbody.appendChild(detailRow);
     }});
 }}
 
