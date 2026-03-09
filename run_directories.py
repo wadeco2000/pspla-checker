@@ -17,6 +17,7 @@ from searcher import (
     run_nzsa_import, run_linkedin_import, check_schema,
     clear_status, append_history,
     reset_session_log, get_session_log, send_search_email,
+    clear_dir_progress, reset_token_usage,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -29,6 +30,7 @@ if __name__ == "__main__":
     test_mode = "--test" in sys.argv
     nzsa_only = "--nzsa-only" in sys.argv
     linkedin_only = "--linkedin-only" in sys.argv
+    fresh = "--fresh" in sys.argv
     limit = 5 if test_mode else None
 
     started_iso = datetime.now(timezone.utc).isoformat()
@@ -47,6 +49,7 @@ if __name__ == "__main__":
     if os.path.exists(PAUSE_FLAG):
         os.remove(PAUSE_FLAG)
     reset_session_log()
+    reset_token_usage()
     open(RUNNING_FLAG, "w").close()
 
     found_urls = set()
@@ -55,17 +58,18 @@ if __name__ == "__main__":
 
     try:
         if not linkedin_only:
-            nzsa_found, nzsa_new = run_nzsa_import(found_urls, limit=limit)
+            nzsa_found, nzsa_new = run_nzsa_import(found_urls, limit=limit, fresh=fresh)
             total_found += nzsa_found
             total_new += nzsa_new
 
         if not nzsa_only:
-            li_found, li_new = run_linkedin_import(found_urls, limit=limit)
+            li_found, li_new = run_linkedin_import(found_urls, limit=limit, fresh=fresh)
             total_found += li_found
             total_new += li_new
 
         append_history("directories", started_iso, total_found, total_new, "completed", triggered_by)
         send_search_email("directories", started_iso, total_found, total_new, triggered_by, get_session_log())
+        clear_dir_progress()
 
     except Exception as e:
         append_history("directories", started_iso, total_found, total_new, f"error: {e}", triggered_by)

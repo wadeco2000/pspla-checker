@@ -13,7 +13,8 @@ from datetime import datetime, timezone
 from searcher import (
     run_facebook_search, check_schema, clear_status,
     append_history, RUNNING_FLAG, PAUSE_FLAG,
-    reset_session_log, get_session_log, send_search_email,
+    reset_session_log, reset_token_usage, get_session_log, send_search_email,
+    clear_fb_progress,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -23,6 +24,7 @@ PAUSE_FLAG = os.path.join(BASE_DIR, "pause.flag")
 
 if __name__ == "__main__":
     triggered_by = "scheduled" if "--scheduled" in sys.argv else "manual"
+    fresh = "--fresh" in sys.argv
     started_iso = datetime.now(timezone.utc).isoformat()
 
     print("=" * 60)
@@ -37,11 +39,13 @@ if __name__ == "__main__":
     if os.path.exists(PAUSE_FLAG):
         os.remove(PAUSE_FLAG)
     reset_session_log()
+    reset_token_usage()
     open(RUNNING_FLAG, "w").close()
     try:
-        fb_found, fb_new = run_facebook_search(set())
+        fb_found, fb_new = run_facebook_search(set(), fresh=fresh)
         append_history("facebook", started_iso, fb_found, fb_new, "completed", triggered_by)
         send_search_email("facebook", started_iso, fb_found, fb_new, triggered_by, get_session_log())
+        clear_fb_progress()
     except Exception as e:
         append_history("facebook", started_iso, 0, 0, f"error: {e}", triggered_by)
         raise

@@ -216,12 +216,26 @@ HTML_TEMPLATE = """
                     <form method="POST" action="/start-weekly-search" onsubmit="return confirm('Run a weekly light scan (last 7 days only)?')">
                         <button class="btn" style="background:#16a085; color:white;">&#9654; Weekly Scan</button>
                     </form>
-                    <form method="POST" action="/start-facebook-search" onsubmit="return confirm('Run Facebook-only search? This adds Facebook-sourced companies on top of existing data.')">
-                        <button class="btn" style="background:#1877f2; color:white;"><i class="fa-brands fa-facebook-f"></i> Facebook</button>
-                    </form>
-                    <form method="POST" action="/start-directory-import" onsubmit="return confirm('Import from NZSA and LinkedIn directories? Adds members not already in the database.')">
-                        <button class="btn" style="background:#c0392b; color:white;">&#9707; Directories</button>
-                    </form>
+                    <span style="display:inline-flex; align-items:center; gap:4px;">
+                        <form method="POST" action="/start-facebook-search" onsubmit="return confirm('Run Facebook-only search? This adds Facebook-sourced companies on top of existing data.')">
+                            <button class="btn" style="background:#1877f2; color:white;"><i class="fa-brands fa-facebook-f"></i> Facebook</button>
+                        </form>
+                        <small id="fb-progress-badge" style="display:none; color:#e67e22; font-size:11px; white-space:nowrap;"></small>
+                        <form method="POST" action="/start-facebook-search" onsubmit="return confirm('Start Facebook search fresh (clear all saved progress)?');" style="display:none;" id="fb-fresh-form">
+                            <input type="hidden" name="fresh" value="1">
+                            <button class="btn" style="background:#d68910; color:white; font-size:11px; padding:3px 8px;" title="Start Fresh">&#8635; Fresh</button>
+                        </form>
+                    </span>
+                    <span style="display:inline-flex; align-items:center; gap:4px;">
+                        <form method="POST" action="/start-directory-import" onsubmit="return confirm('Import from NZSA and LinkedIn directories? Adds members not already in the database.')">
+                            <button class="btn" style="background:#c0392b; color:white;">&#9707; Directories</button>
+                        </form>
+                        <small id="dir-progress-badge" style="display:none; color:#e67e22; font-size:11px; white-space:nowrap;"></small>
+                        <form method="POST" action="/start-directory-import" onsubmit="return confirm('Start directory import fresh (clear all saved progress)?');" style="display:none;" id="dir-fresh-form">
+                            <input type="hidden" name="fresh" value="1">
+                            <button class="btn" style="background:#d68910; color:white; font-size:11px; padding:3px 8px;" title="Start Fresh">&#8635; Fresh</button>
+                        </form>
+                    </span>
                 </span>
                 <form method="POST" action="/dedupe-db" onsubmit="return confirm('Merge duplicate company names? Keeps the best record and combines all regions into one entry.')">
                     <button class="btn" style="background:#8e44ad; color:white;"><i class="fa-solid fa-filter"></i> Dedupe DB</button>
@@ -381,6 +395,64 @@ HTML_TEMPLATE = """
         poll();
         setInterval(poll, 3000);
     })();
+
+    // ── Search progress badges ────────────────────────────────────────────────
+    function loadSearchProgress() {
+        fetch('/search-progress')
+            .then(function(r) { return r.json(); })
+            .then(function(p) {
+                // Facebook progress badge
+                var fbBadge = document.getElementById('fb-progress-badge');
+                var fbFresh = document.getElementById('fb-fresh-form');
+                if (fbBadge && p.facebook) {
+                    var done = p.facebook.done;
+                    var total = p.facebook.total;
+                    var nwDone = p.facebook.nationwide_done ? ' + NW' : '';
+                    fbBadge.textContent = done + '/' + (total - 1) + ' regions' + nwDone + ' saved';
+                    fbBadge.style.display = 'inline';
+                    if (fbFresh) fbFresh.style.display = 'inline';
+                } else if (fbBadge) {
+                    fbBadge.style.display = 'none';
+                    if (fbFresh) fbFresh.style.display = 'none';
+                }
+                // Directory progress badge
+                var dirBadge = document.getElementById('dir-progress-badge');
+                var dirFresh = document.getElementById('dir-fresh-form');
+                if (dirBadge && p.directory) {
+                    var d = p.directory;
+                    var parts = [];
+                    if (d.nzsa_done) parts.push('NZSA done');
+                    else if (d.nzsa_last_idx >= 0) parts.push('NZSA @' + (d.nzsa_last_idx + 1));
+                    if (d.linkedin_done) parts.push('LinkedIn done');
+                    else if (d.linkedin_queries_done > 0) parts.push('LI ' + d.linkedin_queries_done + '/' + d.linkedin_total + ' queries');
+                    dirBadge.textContent = parts.join(', ') + ' saved';
+                    dirBadge.style.display = 'inline';
+                    if (dirFresh) dirFresh.style.display = 'inline';
+                } else if (dirBadge) {
+                    dirBadge.style.display = 'none';
+                    if (dirFresh) dirFresh.style.display = 'none';
+                }
+                // Partial progress badge
+                var partialBadge = document.getElementById('partial-progress-badge');
+                var partialFreshBtn = document.getElementById('partial-fresh-btn');
+                if (partialBadge && p.partial) {
+                    var pp = p.partial;
+                    var pparts = [];
+                    if (pp.google_done) pparts.push('Google done');
+                    else if (pp.completed_regions > 0) pparts.push(pp.completed_regions + ' regions done');
+                    if (pp.fb_done) pparts.push('FB done');
+                    partialBadge.textContent = pparts.join(', ') + ' saved';
+                    partialBadge.style.display = 'inline';
+                    if (partialFreshBtn) partialFreshBtn.style.display = 'inline';
+                } else if (partialBadge) {
+                    partialBadge.style.display = 'none';
+                    if (partialFreshBtn) partialFreshBtn.style.display = 'none';
+                }
+            })
+            .catch(function() {});
+    }
+    loadSearchProgress();
+    setInterval(loadSearchProgress, 15000);
 
     // ── API Credits widget ───────────────────────────────────────────────────
     function updateTokenWidget(tokens) {
@@ -641,7 +713,7 @@ HTML_TEMPLATE = """
                     <i class="fa-brands fa-facebook-f" style="color:#1877f2;"></i> Facebook (NZ-wide, no town)
                 </label>
                 <script>
-                function runPartialSearch() {
+                function runPartialSearch(fresh) {
                     var regions = Array.from(document.querySelectorAll('.partial-region-cb:checked')).map(function(cb){ return cb.value; });
                     var terms = Array.from(document.querySelectorAll('.partial-term-cb:checked')).map(function(cb){ return cb.value; });
                     var extraRaw = document.getElementById('partial-extra-terms').value.trim();
@@ -657,7 +729,7 @@ HTML_TEMPLATE = """
                     fetch('/start-partial-search', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({regions: regions, google_terms: allTerms, include_facebook: includeFb, include_nationwide: includeFbNw})
+                        body: JSON.stringify({regions: regions, google_terms: allTerms, include_facebook: includeFb, include_nationwide: includeFbNw, fresh: !!fresh})
                     }).then(function(r){ return r.json(); }).then(function(d) {
                         if (d.ok) {
                             statusEl.style.color = '#27ae60';
@@ -671,6 +743,7 @@ HTML_TEMPLATE = """
                                 if (logBtn) logBtn.textContent = 'Hide log';
                                 wrap.scrollIntoView({behavior: 'smooth', block: 'start'});
                             }
+                            loadSearchProgress();
                             setTimeout(function(){ statusEl.textContent = ''; }, 8000);
                         } else {
                             statusEl.style.color = '#e74c3c';
@@ -679,11 +752,18 @@ HTML_TEMPLATE = """
                     }).catch(function(){ statusEl.style.color = '#e74c3c'; statusEl.textContent = 'Request failed.'; });
                 }
                 </script>
-                <button onclick="runPartialSearch()"
+                <button onclick="runPartialSearch(false)"
                     style="padding:7px 18px; background:#8e44ad; color:white; border:none; border-radius:5px;
                            cursor:pointer; font-size:13px; font-weight:bold;">
                     <i class="fa-solid fa-play"></i> Run Partial Search
                 </button>
+                <button onclick="if(confirm('Start partial search fresh (clear all saved progress)?')) runPartialSearch(true);"
+                    id="partial-fresh-btn"
+                    style="display:none; padding:5px 10px; background:#d68910; color:white; border:none; border-radius:5px;
+                           cursor:pointer; font-size:11px;" title="Start Fresh">
+                    &#8635; Fresh
+                </button>
+                <small id="partial-progress-badge" style="display:none; color:#e67e22; font-size:11px; white-space:nowrap;"></small>
                 <span id="partial-status" style="font-size:12px; color:#888;"></span>
             </div>
         </div>
@@ -1967,10 +2047,21 @@ def start_weekly_search():
         return redirect(url_for("index", message=f"Failed: {e}", type="error"))
 
 
+@app.route("/search-progress")
+def search_progress_endpoint():
+    from flask import jsonify
+    from searcher import get_all_progress
+    try:
+        return jsonify(get_all_progress())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/start-facebook-search", methods=["POST"])
 def start_facebook_search():
     try:
-        _launch("run_facebook.py")
+        fresh = request.form.get("fresh") == "1"
+        _launch("run_facebook.py", ["--fresh"] if fresh else [])
         return redirect(url_for("index", message="Facebook search started.", type="success"))
     except Exception as e:
         return redirect(url_for("index", message=f"Failed to start Facebook search: {e}", type="error"))
@@ -1979,7 +2070,8 @@ def start_facebook_search():
 @app.route("/start-directory-import", methods=["POST"])
 def start_directory_import():
     try:
-        _launch("run_directories.py")
+        fresh = request.form.get("fresh") == "1"
+        _launch("run_directories.py", ["--fresh"] if fresh else [])
         return redirect(url_for("index", message="Directory import started (NZSA + LinkedIn).", type="success"))
     except Exception as e:
         return redirect(url_for("index", message=f"Failed to start directory import: {e}", type="error"))
@@ -2254,9 +2346,10 @@ def start_partial_search():
             "include_facebook": bool(data.get("include_facebook", False)),
             "include_nationwide": bool(data.get("include_nationwide", False)),
         }
+        fresh = bool(data.get("fresh", False))
         with open(PARTIAL_CONFIG_FILE, "w") as f:
             json.dump(config, f, indent=2)
-        _launch("run_partial.py", [])
+        _launch("run_partial.py", ["--fresh"] if fresh else [])
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500

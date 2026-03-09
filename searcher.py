@@ -2888,6 +2888,9 @@ def check_nzsa(company_name, website=None):
 PAUSE_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pause.flag")
 RUNNING_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "running.flag")
 PROGRESS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "search_progress.json")
+FB_PROGRESS_FILE = os.path.join(BASE_DIR, "facebook_progress.json")
+DIR_PROGRESS_FILE = os.path.join(BASE_DIR, "directory_progress.json")
+PARTIAL_PROGRESS_FILE = os.path.join(BASE_DIR, "partial_progress.json")
 STATUS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "search_status.json")
 HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "search_history.json")
 
@@ -3025,6 +3028,88 @@ def save_progress(completed_regions, total_found, total_new):
 def clear_progress():
     if os.path.exists(PROGRESS_FILE):
         os.remove(PROGRESS_FILE)
+
+
+# ── Facebook progress ──────────────────────────────────────────────────────────
+def load_fb_progress():
+    if os.path.exists(FB_PROGRESS_FILE):
+        with open(FB_PROGRESS_FILE) as f:
+            return json.load(f)
+    return {"completed_regions": [], "nationwide_done": False, "total_found": 0, "total_new": 0}
+
+def save_fb_progress(completed_regions, nationwide_done, total_found, total_new):
+    with open(FB_PROGRESS_FILE, "w") as f:
+        json.dump({"completed_regions": completed_regions, "nationwide_done": nationwide_done,
+                   "total_found": total_found, "total_new": total_new}, f)
+
+def clear_fb_progress():
+    if os.path.exists(FB_PROGRESS_FILE):
+        os.remove(FB_PROGRESS_FILE)
+
+
+# ── Directory progress ─────────────────────────────────────────────────────────
+def load_dir_progress():
+    if os.path.exists(DIR_PROGRESS_FILE):
+        with open(DIR_PROGRESS_FILE) as f:
+            return json.load(f)
+    return {"nzsa_last_idx": -1, "nzsa_done": False, "linkedin_done_indices": [], "linkedin_done": False}
+
+def save_dir_progress(data):
+    with open(DIR_PROGRESS_FILE, "w") as f:
+        json.dump(data, f)
+
+def clear_dir_progress():
+    if os.path.exists(DIR_PROGRESS_FILE):
+        os.remove(DIR_PROGRESS_FILE)
+
+
+# ── Partial progress ───────────────────────────────────────────────────────────
+def load_partial_progress():
+    if os.path.exists(PARTIAL_PROGRESS_FILE):
+        with open(PARTIAL_PROGRESS_FILE) as f:
+            return json.load(f)
+    return {"completed_regions": [], "google_done": False, "fb_done": False}
+
+def save_partial_progress(data):
+    with open(PARTIAL_PROGRESS_FILE, "w") as f:
+        json.dump(data, f)
+
+def clear_partial_progress():
+    if os.path.exists(PARTIAL_PROGRESS_FILE):
+        os.remove(PARTIAL_PROGRESS_FILE)
+
+
+def get_all_progress():
+    """Return progress summaries for all search types (for dashboard display)."""
+    out = {}
+    if os.path.exists(FB_PROGRESS_FILE):
+        p = load_fb_progress()
+        done = len(p.get("completed_regions", []))
+        total = len(NZ_REGIONS) + 1  # regions + nationwide
+        out["facebook"] = {"done": done, "total": total, "nationwide_done": p.get("nationwide_done", False)}
+    else:
+        out["facebook"] = None
+    if os.path.exists(DIR_PROGRESS_FILE):
+        p = load_dir_progress()
+        out["directory"] = {
+            "nzsa_done": p.get("nzsa_done", False),
+            "nzsa_last_idx": p.get("nzsa_last_idx", -1),
+            "linkedin_done": p.get("linkedin_done", False),
+            "linkedin_queries_done": len(p.get("linkedin_done_indices", [])),
+            "linkedin_total": len(_LINKEDIN_IMPORT_QUERIES),
+        }
+    else:
+        out["directory"] = None
+    if os.path.exists(PARTIAL_PROGRESS_FILE):
+        p = load_partial_progress()
+        out["partial"] = {
+            "completed_regions": len(p.get("completed_regions", [])),
+            "google_done": p.get("google_done", False),
+            "fb_done": p.get("fb_done", False),
+        }
+    else:
+        out["partial"] = None
+    return out
 
 
 def write_status(phase, region, term, region_idx, term_idx, total_regions, total_terms, total_found, total_new):
@@ -3727,20 +3812,41 @@ def _process_fb_result(result, found_urls_all, fb_total, fb_new, term, fallback_
     return fb_total, fb_new
 
 
-def run_facebook_search(found_urls_all, regions=None, include_nationwide=True):
+def run_facebook_search(found_urls_all, regions=None, include_nationwide=True, fresh=False, track_progress=True):
     """Search Facebook for NZ security camera companies. Returns (total_found, total_new).
     - regions: subset of NZ_REGIONS to search; defaults to all.
     - include_nationwide: also run a 'New Zealand' wide pass to catch businesses
-      that don't mention a specific town on their Facebook page."""
+      that don't mention a specific town on their Facebook page.
+    - fresh: if True, clear any saved FB progress before starting.
+    - track_progress: if False (e.g. called from run_partial), skip FB progress file entirely."""
     search_regions = regions if regions is not None else NZ_REGIONS
     print("\n" + "=" * 60)
     print("  Facebook Search Pass")
     print("=" * 60)
 
-    fb_total = 0
-    fb_new = 0
+    # Load/clear progress (only when running as standalone, not when called from partial)
+    if track_progress:
+        if fresh:
+            clear_fb_progress()
+        progress = load_fb_progress()
+        completed_regions = progress.get("completed_regions", [])
+        nationwide_done = progress.get("nationwide_done", False)
+        fb_total = progress.get("total_found", 0)
+        fb_new = progress.get("total_new", 0)
+        if completed_regions:
+            print(f"  Resuming — {len(completed_regions)}/{len(search_regions)} regions already done: {', '.join(completed_regions)}")
+        if nationwide_done:
+            print("  Nationwide pass already done — will skip")
+    else:
+        completed_regions = []
+        nationwide_done = False
+        fb_total = 0
+        fb_new = 0
 
     for region in search_regions:
+        if track_progress and region in completed_regions:
+            print(f"  [Skipping] {region} — already done")
+            continue
         check_pause()
         print(f"\n[Facebook] {region}")
 
@@ -3768,34 +3874,47 @@ def run_facebook_search(found_urls_all, regions=None, include_nationwide=True):
                 fb_total, fb_new = _process_fb_result(
                     result, found_urls_all, fb_total, fb_new, term, region)
 
+        if track_progress:
+            completed_regions.append(region)
+            save_fb_progress(completed_regions, nationwide_done, fb_total, fb_new)
+            print(f"  [Progress saved] {region} done ({len(completed_regions)}/{len(search_regions)} regions)")
+
     # Nationwide pass — catches NZ businesses that don't mention a specific town
     if include_nationwide:
-        print("\n[Facebook] NZ-wide pass (no region filter)")
-        total_regions_display = len(search_regions) + 1
-        for term in FACEBOOK_SEARCH_TERMS:
-            check_pause()
-            term_idx = FACEBOOK_SEARCH_TERMS.index(term) + 1
-            write_status("facebook", "NZ nationwide", term,
-                         total_regions_display, term_idx,
-                         total_regions_display, len(FACEBOOK_SEARCH_TERMS),
-                         fb_total, fb_new)
-            query = f'site:facebook.com "{term}" "New Zealand" -group -marketplace -"for sale"'
-            print(f"  Query: {query}")
-
-            results = google_search(query, num_results=50)
-            time.sleep(1)
-
-            if results is SERPAPI_EXHAUSTED:
-                print("\n  [STOPPED] SerpAPI exhausted during nationwide Facebook pass.")
-                return fb_total, fb_new
-
-            if not results:
-                continue
-
-            for result in results:
+        if track_progress and nationwide_done:
+            print("  [Skipping] Nationwide pass — already done")
+        else:
+            print("\n[Facebook] NZ-wide pass (no region filter)")
+            total_regions_display = len(search_regions) + 1
+            for term in FACEBOOK_SEARCH_TERMS:
                 check_pause()
-                fb_total, fb_new = _process_fb_result(
-                    result, found_urls_all, fb_total, fb_new, term, "")
+                term_idx = FACEBOOK_SEARCH_TERMS.index(term) + 1
+                write_status("facebook", "NZ nationwide", term,
+                             total_regions_display, term_idx,
+                             total_regions_display, len(FACEBOOK_SEARCH_TERMS),
+                             fb_total, fb_new)
+                query = f'site:facebook.com "{term}" "New Zealand" -group -marketplace -"for sale"'
+                print(f"  Query: {query}")
+
+                results = google_search(query, num_results=50)
+                time.sleep(1)
+
+                if results is SERPAPI_EXHAUSTED:
+                    print("\n  [STOPPED] SerpAPI exhausted during nationwide Facebook pass.")
+                    return fb_total, fb_new
+
+                if not results:
+                    continue
+
+                for result in results:
+                    check_pause()
+                    fb_total, fb_new = _process_fb_result(
+                        result, found_urls_all, fb_total, fb_new, term, "")
+
+            if track_progress:
+                nationwide_done = True
+                save_fb_progress(completed_regions, nationwide_done, fb_total, fb_new)
+                print("  [Progress saved] Nationwide pass done")
 
     return fb_total, fb_new
 
@@ -4017,9 +4136,10 @@ def apply_correction_and_recheck(company_id, company_name, old_pspla_name, websi
     }
 
 
-def run_nzsa_import(found_urls=None, limit=None):
+def run_nzsa_import(found_urls=None, limit=None, fresh=False):
     """Import all NZSA members not already in the database.
     limit: stop after processing this many new candidates (for testing).
+    fresh: if True, clear any saved directory progress before starting.
     Returns (total_found, total_new)."""
     if found_urls is None:
         found_urls = set()
@@ -4031,12 +4151,24 @@ def run_nzsa_import(found_urls=None, limit=None):
     members = _get_nzsa_members()
     print(f"  {len(members)} NZSA members loaded")
 
+    if fresh:
+        clear_dir_progress()
+    dir_progress = load_dir_progress()
+    if dir_progress.get("nzsa_done"):
+        print("  [Skipping] NZSA import already completed in a previous run.")
+        return 0, 0
+    nzsa_last_idx = dir_progress.get("nzsa_last_idx", -1)
+    if nzsa_last_idx >= 0:
+        print(f"  Resuming from member index {nzsa_last_idx + 1} (skipping {nzsa_last_idx + 1} already processed)")
+
     total_found = 0
     total_new = 0
     processed = 0
 
     for idx, m in enumerate(members):
         check_pause()
+        if idx <= nzsa_last_idx:
+            continue
         if limit is not None and processed >= limit:
             print(f"  [Limit reached] Stopping at {limit} processed")
             break
@@ -4167,13 +4299,23 @@ def run_nzsa_import(found_urls=None, limit=None):
                     total_new += 1
                 break  # only process first good result per member
 
+        # Save progress every 10 members
+        if (idx + 1) % 10 == 0:
+            dir_progress["nzsa_last_idx"] = idx
+            save_dir_progress(dir_progress)
+
+    dir_progress["nzsa_done"] = True
+    dir_progress["nzsa_last_idx"] = len(members) - 1
+    save_dir_progress(dir_progress)
+
     print(f"\n  NZSA import complete. Found: {total_found}, New: {total_new}")
     return total_found, total_new
 
 
-def run_linkedin_import(found_urls=None, limit=None):
+def run_linkedin_import(found_urls=None, limit=None, fresh=False):
     """Search LinkedIn via Google for NZ security companies not already in the database.
     limit: stop after processing this many new candidates (for testing).
+    fresh: if True, clear any saved directory progress before starting.
     Returns (total_found, total_new)."""
     import re as _lire
     if found_urls is None:
@@ -4188,7 +4330,18 @@ def run_linkedin_import(found_urls=None, limit=None):
     seen_li_urls = set()
     processed = 0
 
+    dir_progress = load_dir_progress()
+    if dir_progress.get("linkedin_done"):
+        print("  [Skipping] LinkedIn import already completed in a previous run.")
+        return 0, 0
+    linkedin_done_indices = set(dir_progress.get("linkedin_done_indices", []))
+    if linkedin_done_indices:
+        print(f"  Resuming — {len(linkedin_done_indices)}/{len(_LINKEDIN_IMPORT_QUERIES)} queries already done")
+
     for q_idx, query in enumerate(_LINKEDIN_IMPORT_QUERIES):
+        if q_idx in linkedin_done_indices:
+            print(f"  [Skipping] Query {q_idx+1} — already done")
+            continue
         check_pause()
         print(f"\n  Query: {query}")
         write_status("linkedin-import", f"query {q_idx+1}/{len(_LINKEDIN_IMPORT_QUERIES)}", query,
@@ -4295,6 +4448,14 @@ def run_linkedin_import(found_urls=None, limit=None):
             region = info.get("region", "")
             if process_and_save_company(info, website_url, root_domain, "LinkedIn directory", region):
                 total_new += 1
+
+        linkedin_done_indices.add(q_idx)
+        dir_progress["linkedin_done_indices"] = list(linkedin_done_indices)
+        save_dir_progress(dir_progress)
+        print(f"  [Progress saved] Query {q_idx+1}/{len(_LINKEDIN_IMPORT_QUERIES)} done")
+
+    dir_progress["linkedin_done"] = True
+    save_dir_progress(dir_progress)
 
     print(f"\n  LinkedIn import complete. Found: {total_found}, New: {total_new}")
     return total_found, total_new

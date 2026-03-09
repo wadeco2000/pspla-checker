@@ -19,6 +19,8 @@ from searcher import (
     SKIP_DOMAINS, SERPAPI_EXHAUSTED, run_facebook_search,
     is_directory_listing_url,
     reset_session_log, get_session_log, send_search_email,
+    load_partial_progress, save_partial_progress, clear_partial_progress,
+    reset_token_usage,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,7 +29,7 @@ PAUSE_FLAG = os.path.join(BASE_DIR, "pause.flag")
 PARTIAL_CONFIG_FILE = os.path.join(BASE_DIR, "partial_config.json")
 
 
-def run_partial(triggered_by="manual"):
+def run_partial(triggered_by="manual", fresh=False):
     if not os.path.exists(PARTIAL_CONFIG_FILE):
         print("No partial_config.json found. Aborting.")
         return
@@ -49,6 +51,7 @@ def run_partial(triggered_by="manual"):
 
     started_iso = datetime.now(timezone.utc).isoformat()
     reset_session_log()
+    reset_token_usage()
     print("=" * 60)
     print(f"  PSPLA Partial Search")
     print(f"  Regions: {len(regions)}  |  Terms: {len(google_terms)}  |  Facebook: {include_facebook}  |  NZ-wide FB: {include_nationwide}")
@@ -65,95 +68,120 @@ def run_partial(triggered_by="manual"):
     total_new = 0
     found_urls = set()
 
+    if fresh:
+        clear_partial_progress()
+    partial_progress = load_partial_progress()
+    completed_regions = partial_progress.get("completed_regions", [])
+    if partial_progress.get("google_done"):
+        print("  [Skipping] Google search already completed — resuming from Facebook/completion")
+    elif completed_regions:
+        print(f"  Resuming Google search — {len(completed_regions)} regions already done: {', '.join(completed_regions)}")
+
     try:
-        for region in regions:
-            print(f"\nSearching: {region}")
-
-            for term in google_terms:
-                check_pause()
-                region_idx = regions.index(region) + 1
-                term_idx = google_terms.index(term) + 1
-                write_status("google-partial", region, term, region_idx, term_idx,
-                             len(regions), len(google_terms), total_found, total_new)
-
-                query = f"{term} {region} New Zealand"
-                print(f"  Query: {query}")
-                results = google_search(query, num_results=100)
-                time.sleep(1)
-
-                if results is SERPAPI_EXHAUSTED:
-                    print("\n  [STOPPED] SerpAPI exhausted.")
-                    append_history("google-partial", started_iso, total_found, total_new,
-                                   "stopped", triggered_by)
-                    send_search_email("google-partial", started_iso, total_found, total_new, triggered_by, get_session_log())
-                    return
-
-                if not results:
+        if not partial_progress.get("google_done"):
+            for region in regions:
+                if region in completed_regions:
+                    print(f"  [Skipping] {region} — already done")
                     continue
+                print(f"\nSearching: {region}")
 
-                for result in results:
+                for term in google_terms:
                     check_pause()
-                    url = result["link"]
+                    region_idx = regions.index(region) + 1
+                    term_idx = google_terms.index(term) + 1
+                    write_status("google-partial", region, term, region_idx, term_idx,
+                                 len(regions), len(google_terms), total_found, total_new)
 
-                    if url in found_urls:
-                        continue
-                    found_urls.add(url)
-
-                    if any(domain in url for domain in SKIP_DOMAINS):
-                        continue
-                    if is_directory_listing_url(url):
-                        print(f"  [Skipped] Directory/listing page: {url}")
-                        continue
-                    if company_exists(url):
-                        continue
-
-                    root_domain = get_root_domain(url)
-                    if get_domain_record(root_domain):
-                        continue
-
-                    print(f"  [Found] {url}")
-                    total_found += 1
-
-                    page_text, scraped_email, scraped_facebook, scraped_linkedin = scrape_website(url)
+                    query = f"{term} {region} New Zealand"
+                    print(f"  Query: {query}")
+                    results = google_search(query, num_results=100)
                     time.sleep(1)
 
-                    info = extract_company_info(url, page_text, result["snippet"])
-                    if not info or not info.get("company_name"):
-                        print("  [Skipped] Could not extract company name")
+                    if results is SERPAPI_EXHAUSTED:
+                        print("\n  [STOPPED] SerpAPI exhausted.")
+                        append_history("google-partial", started_iso, total_found, total_new,
+                                       "stopped", triggered_by)
+                        send_search_email("google-partial", started_iso, total_found, total_new, triggered_by, get_session_log())
+                        return
+
+                    if not results:
                         continue
 
-                    info["_page_text"] = page_text
+                    for result in results:
+                        check_pause()
+                        url = result["link"]
 
-                    if not info.get("email") and scraped_email:
-                        info["email"] = scraped_email
-                    if not info.get("email"):
-                        found_email = find_email_via_google(root_domain)
-                        if found_email:
-                            info["email"] = found_email
+                        if url in found_urls:
+                            continue
+                        found_urls.add(url)
 
-                    print(f"  [Company] {info['company_name']}")
-                    fb_url = find_facebook_url(info["company_name"], page_text)
-                    if fb_url:
-                        info["facebook_url"] = fb_url
-                    li_url = scraped_linkedin or find_linkedin_url(info["company_name"], page_text)
-                    if li_url:
-                        info["linkedin_url"] = li_url
-                    if process_and_save_company(info, url, root_domain,
-                                                f"partial {term} {region}", region):
-                        total_new += 1
+                        if any(domain in url for domain in SKIP_DOMAINS):
+                            continue
+                        if is_directory_listing_url(url):
+                            print(f"  [Skipped] Directory/listing page: {url}")
+                            continue
+                        if company_exists(url):
+                            continue
+
+                        root_domain = get_root_domain(url)
+                        if get_domain_record(root_domain):
+                            continue
+
+                        print(f"  [Found] {url}")
+                        total_found += 1
+
+                        page_text, scraped_email, scraped_facebook, scraped_linkedin = scrape_website(url)
+                        time.sleep(1)
+
+                        info = extract_company_info(url, page_text, result["snippet"])
+                        if not info or not info.get("company_name"):
+                            print("  [Skipped] Could not extract company name")
+                            continue
+
+                        info["_page_text"] = page_text
+
+                        if not info.get("email") and scraped_email:
+                            info["email"] = scraped_email
+                        if not info.get("email"):
+                            found_email = find_email_via_google(root_domain)
+                            if found_email:
+                                info["email"] = found_email
+
+                        print(f"  [Company] {info['company_name']}")
+                        fb_url = find_facebook_url(info["company_name"], page_text)
+                        if fb_url:
+                            info["facebook_url"] = fb_url
+                        li_url = scraped_linkedin or find_linkedin_url(info["company_name"], page_text)
+                        if li_url:
+                            info["linkedin_url"] = li_url
+                        if process_and_save_company(info, url, root_domain,
+                                                    f"partial {term} {region}", region):
+                            total_new += 1
+
+                completed_regions.append(region)
+                partial_progress["completed_regions"] = completed_regions
+                save_partial_progress(partial_progress)
+                print(f"  [Progress saved] {region} done ({len(completed_regions)}/{len(regions)} regions)")
+
+            partial_progress["google_done"] = True
+            save_partial_progress(partial_progress)
 
         if include_facebook or include_nationwide:
             fb_found, fb_new = run_facebook_search(
                 found_urls,
                 regions=regions if include_facebook else [],
                 include_nationwide=include_nationwide,
+                track_progress=False,
             )
             total_found += fb_found
             total_new += fb_new
+            partial_progress["fb_done"] = True
+            save_partial_progress(partial_progress)
 
         append_history("google-partial", started_iso, total_found, total_new,
                        "completed", triggered_by)
         send_search_email("google-partial", started_iso, total_found, total_new, triggered_by, get_session_log())
+        clear_partial_progress()
 
     finally:
         clear_status()
@@ -170,4 +198,5 @@ def run_partial(triggered_by="manual"):
 
 if __name__ == "__main__":
     triggered_by = "scheduled" if "--scheduled" in sys.argv else "manual"
-    run_partial(triggered_by)
+    fresh = "--fresh" in sys.argv
+    run_partial(triggered_by, fresh=fresh)
