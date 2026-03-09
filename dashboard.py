@@ -732,12 +732,16 @@ HTML_TEMPLATE = """
                 <td>{{ c.phone or '-' }}</td>
                 <td>{% if c.email %}<a href="mailto:{{ c.email }}">{{ c.email }}</a>{% else %}-{% endif %}</td>
                 <td>
-                    {% if lic == 'true' and c.individual_license and (not c.pspla_license_status or c.pspla_license_status|lower != 'active') %}
+                    {% if lic == 'true' and c.individual_license and (not c.pspla_license_status or c.pspla_license_status|lower != 'active') and c.pspla_name %}
+                        <span class="badge badge-expired"><i class="fa-solid fa-user-check status-icon"></i>EXP + INDIVIDUAL</span>
+                    {% elif lic == 'true' and c.individual_license and (not c.pspla_license_status or c.pspla_license_status|lower != 'active') %}
                         <span class="badge badge-expired"><i class="fa-solid fa-user-check status-icon"></i>INDIVIDUAL ONLY</span>
                     {% elif lic == 'true' %}
                         <span class="badge badge-licensed"><i class="fa-solid fa-circle-check status-icon"></i>LICENSED</span>
                     {% elif c.pspla_license_status and c.pspla_license_status|lower == 'expired' %}
                         <span class="badge badge-expired"><i class="fa-solid fa-triangle-exclamation status-icon"></i>EXPIRED</span>
+                    {% elif lic == 'false' and c.individual_license and c.pspla_name %}
+                        <span class="badge badge-expired"><i class="fa-solid fa-user-check status-icon"></i>EXP + INDIVIDUAL</span>
                     {% elif lic == 'false' and c.individual_license %}
                         <span class="badge badge-expired"><i class="fa-solid fa-user-check status-icon"></i>INDIVIDUAL ONLY</span>
                     {% elif lic == 'false' %}
@@ -911,6 +915,14 @@ HTML_TEMPLATE = """
                     result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
                     btn.textContent = 'Re-check';
                     btn.disabled = false;
+                } else if (d.licensed && d.individual_license && d.pspla_name) {
+                    result.innerHTML = '<strong style="color:#e67e22">Exp + Individual</strong> — company: ' + d.pspla_name + ' (' + (d.pspla_license_status || 'expired') + '), individual: ' + d.individual_license;
+                    btn.textContent = 'Done';
+                    btn.style.background = '#e67e22';
+                } else if (d.licensed && d.individual_license) {
+                    result.innerHTML = '<strong style="color:#e67e22">Individual Only</strong> — ' + d.individual_license;
+                    btn.textContent = 'Done';
+                    btn.style.background = '#e67e22';
                 } else if (d.licensed) {
                     result.innerHTML = '<strong style="color:#27ae60">Licensed</strong> — ' + (d.pspla_name || '');
                     btn.textContent = 'Done';
@@ -1698,6 +1710,8 @@ def recheck_pspla_for_company():
         return jsonify({
             "licensed": licensed,
             "pspla_name": pspla_name,
+            "individual_license": individual_license,
+            "pspla_license_status": result.get("pspla_license_status"),
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
