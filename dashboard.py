@@ -2112,12 +2112,14 @@ HTML_TEMPLATE = """
                 }
             }).catch(function(){ status.style.color='#e74c3c'; status.textContent='Request failed.'; });
         }
+        var _recheckPending = {};
+
         function saveCorrection(id, companyName) {
             var status = document.getElementById('correction-status-' + id);
             var text = document.getElementById('correction-text-' + id).value.trim();
             if (!text) { status.style.color='#e74c3c'; status.textContent='Please enter a note first.'; return; }
             status.style.color = '#888';
-            status.textContent = 'Saving...';
+            status.textContent = 'Saving and re-checking... this may take a moment.';
             fetch('/save-correction', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -2126,21 +2128,58 @@ HTML_TEMPLATE = """
             .then(function(d) {
                 if (d.ok) {
                     status.style.color = '#27ae60';
-                    var msg = 'Saved!';
-                    if (d.recheck_summary) {
-                        msg += ' Re-checked: ' + d.recheck_summary;
+                    status.textContent = 'Correction saved. See review panel.';
+                    setTimeout(function(){ status.textContent = ''; }, 5000);
+
+                    var p = d.proposed;
+                    _recheckPending = {id: id, company_name: companyName, proposed: p};
+
+                    var resultDiv = document.getElementById('recheck-result');
+                    if (p && p.pspla_name) {
+                        resultDiv.innerHTML =
+                            '<b>Proposed match:</b> ' + p.pspla_name + '<br>' +
+                            '<b>Status:</b> ' + (p.pspla_license_status || '—') + '<br>' +
+                            '<b>Licence #:</b> ' + (p.pspla_license_number || '—') + '<br>' +
+                            '<b>Expiry:</b> ' + (p.pspla_license_expiry || '—') + '<br>' +
+                            '<b>Found via:</b> ' + (p.match_method || '—') + '<br>' +
+                            (p.match_reason ? '<b>Reason:</b> ' + p.match_reason : '');
+                    } else {
+                        resultDiv.innerHTML = '<b style="color:#e74c3c;">No PSPLA match found.</b><br>' +
+                            'Approving will mark this company as <b>Not Licensed</b>.';
                     }
-                    if (d.lesson_rule) {
-                        msg += ' | Lesson learned: ' + d.lesson_rule.substring(0, 80) + (d.lesson_rule.length > 80 ? '...' : '');
-                    }
-                    status.textContent = msg;
-                    setTimeout(function(){ status.textContent = ''; }, 8000);
+                    document.getElementById('recheck-lesson').textContent =
+                        d.lesson_rule ? 'Lesson learned: ' + d.lesson_rule : '';
+                    document.getElementById('recheck-modal').style.display = 'flex';
                 } else {
                     status.style.color = '#e74c3c';
                     status.textContent = d.error || 'Error saving.';
                 }
             }).catch(function(){ status.style.color='#e74c3c'; status.textContent='Request failed.'; });
         }
+
+        function confirmRecheck(approved) {
+            document.getElementById('recheck-modal').style.display = 'none';
+            if (!_recheckPending.id) return;
+            fetch('/confirm-recheck', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    id: _recheckPending.id,
+                    company_name: _recheckPending.company_name,
+                    approved: approved,
+                    proposed: _recheckPending.proposed
+                })
+            }).then(function(r){ return r.json(); }).then(function(d){
+                if (d.ok) {
+                    var msg = approved ? 'Match approved and saved.' : 'Match rejected — marked as Not Licensed.';
+                    alert(msg + ' Refresh the page to see the update.');
+                }
+                _recheckPending = {};
+            });
+        }
+
+        document.getElementById('recheck-approve-btn').onclick = function(){ confirmRecheck(true); };
+        document.getElementById('recheck-reject-btn').onclick  = function(){ confirmRecheck(false); };
 
         function deleteCompany(id, name) {
             if (!confirm('Delete "' + name + '"?\\nThis cannot be undone.')) return;
@@ -2208,6 +2247,32 @@ HTML_TEMPLATE = """
         </form>
         <button onclick="document.getElementById('clear-db-modal').style.display='none';"
             style="margin-top:10px; background:none; border:none; color:#999; cursor:pointer; font-size:13px;">Cancel</button>
+    </div>
+</div>
+
+<!-- Recheck Review Modal -->
+<div id="recheck-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+     background:rgba(44,62,80,0.97); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:white; padding:36px; border-radius:12px; max-width:480px; width:90%;">
+        <h2 style="margin:0 0 6px; color:#2c3e50;"><i class="fa-solid fa-magnifying-glass"></i> Recheck Result</h2>
+        <p style="color:#666; font-size:13px; margin-bottom:18px;">Your correction was saved. Here's what the system found — is this a better match?</p>
+        <div id="recheck-result" style="background:#f8f9fa; border-radius:8px; padding:16px; margin-bottom:20px; font-size:14px; line-height:1.7;"></div>
+        <div id="recheck-lesson" style="font-size:12px; color:#888; margin-bottom:20px; font-style:italic;"></div>
+        <div style="display:flex; gap:10px;">
+            <button id="recheck-approve-btn"
+                style="flex:1; padding:11px; background:#27ae60; color:white; border:none;
+                       border-radius:6px; font-size:14px; font-weight:bold; cursor:pointer;">
+                <i class="fa-solid fa-check"></i> Yes, use this match
+            </button>
+            <button id="recheck-reject-btn"
+                style="flex:1; padding:11px; background:#e74c3c; color:white; border:none;
+                       border-radius:6px; font-size:14px; font-weight:bold; cursor:pointer;">
+                <i class="fa-solid fa-xmark"></i> No, not a match
+            </button>
+        </div>
+        <button onclick="document.getElementById('recheck-modal').style.display='none';"
+            style="margin-top:10px; background:none; border:none; color:#999; cursor:pointer;
+                   font-size:13px; width:100%;">Close without changing</button>
     </div>
 </div>
 
@@ -4450,26 +4515,75 @@ def save_correction():
                     triggered_by="manual (dashboard)",
                     notes=correction)
 
-        # 5. Auto-recheck PSPLA and generate lesson (only if it was a false PSPLA match)
-        recheck_summary = None
+        # 5. Run recheck and generate lesson — but don't save to DB yet, return for user review
+        proposed = None
         lesson_rule = None
-        if correction_type == "false_pspla_match" and old_pspla_name:
-            recheck = apply_correction_and_recheck(
-                company_id, company_name, old_pspla_name, website_region=website_region
-            )
-            recheck_summary = recheck.get("summary")
-            lesson_rule = recheck.get("lesson", {}).get("rule_to_apply")
+        if old_pspla_name:
+            from searcher import check_pspla, _generate_and_save_lesson
+            new_result = check_pspla(company_name, website_region=website_region)
+            lesson = _generate_and_save_lesson(company_name, old_pspla_name, new_result)
+            lesson_rule = lesson.get("rule_to_apply", "")
+            proposed = {
+                "licensed": new_result.get("licensed"),
+                "pspla_name": new_result.get("matched_name"),
+                "pspla_address": new_result.get("pspla_address"),
+                "pspla_license_number": new_result.get("pspla_license_number"),
+                "pspla_license_status": new_result.get("pspla_license_status"),
+                "pspla_license_expiry": new_result.get("pspla_license_expiry"),
+                "license_type": new_result.get("license_type"),
+                "match_method": new_result.get("match_method"),
+                "match_reason": new_result.get("match_reason"),
+            }
 
         return jsonify({
             "ok": True,
             "type": correction_type,
             "summary": summary,
-            "recheck_summary": recheck_summary,
+            "proposed": proposed,
             "lesson_rule": lesson_rule,
         })
     except Exception as e:
         import traceback
         traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/confirm-recheck", methods=["POST"])
+def confirm_recheck():
+    """User approved or rejected the proposed PSPLA match after a correction."""
+    from flask import jsonify
+    from searcher import write_audit
+    company_id  = request.json.get("id")
+    company_name = request.json.get("company_name", "Unknown")
+    approved    = request.json.get("approved", False)
+    proposed    = request.json.get("proposed", {})
+
+    if approved and proposed:
+        patch = {k: v for k, v in proposed.items() if v is not None}
+        patch["pspla_licensed"] = proposed.get("licensed")  # always include
+    else:
+        # Rejected — clear the PSPLA fields
+        patch = {
+            "pspla_licensed": False,
+            "pspla_name": None,
+            "pspla_license_number": None,
+            "pspla_license_status": None,
+            "pspla_license_expiry": None,
+            "license_type": None,
+            "match_method": "correction-rejected",
+        }
+
+    try:
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
+                   "Content-Type": "application/json", "Prefer": "return=minimal"}
+        requests.patch(f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
+                       headers=headers, json=patch, timeout=15)
+        action = "approved" if approved else "rejected"
+        write_audit("updated", company_id, company_name,
+                    changes=f"Recheck {action} by user. New PSPLA: {proposed.get('pspla_name') if approved else 'None'}",
+                    triggered_by="manual (correction confirm)")
+        return jsonify({"ok": True, "approved": approved})
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
