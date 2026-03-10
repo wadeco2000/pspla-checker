@@ -408,6 +408,11 @@ HTML_TEMPLATE = """
           <span>Review Near-Matches<span class="dd-sub">Manually review possible duplicates</span></span>
         </a>
 
+        <a href="/suspect-records" class="dd-item">
+          <i class="fa-solid fa-triangle-exclamation dd-icon" style="color:#e74c3c;"></i>
+          <span>Suspect Records<span class="dd-sub">Review low-quality or possibly wrong entries</span></span>
+        </a>
+
         <div class="dd-divider"></div>
 
         <form method="POST" action="/publish" onsubmit="return confirm('Publish current data to the live GitHub Pages site?')">
@@ -4830,6 +4835,171 @@ function deleteDup(id, name) {
             alert('Delete failed: ' + (d.error || 'unknown'));
         }
     });
+}
+</script>
+</body>
+</html>
+"""
+
+
+@app.route("/suspect-records")
+def suspect_records():
+    """Show records that may be wrong, low-quality, or overseas — for manual review."""
+    import re as _re
+
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    resp = requests.get(
+        f"{SUPABASE_URL}/rest/v1/Companies?select=*&order=id.asc&limit=3000",
+        headers=headers,
+    )
+    all_companies = resp.json() if resp.ok else []
+
+    _OVERSEAS = ["united states", "united states of america", " usa ", "u.s.a.",
+                 "us-based", "u.s. based", " u.s. ", "(usa)", "(u.s.)",
+                 "co.uk", "united kingdom", ".com.au", "australia"]
+
+    suspects = []
+    for c in all_companies:
+        reasons = []
+        name      = c.get("company_name") or ""
+        website   = c.get("website") or ""
+        fb_url    = c.get("facebook_url") or ""
+        src_url   = c.get("source_url") or ""
+        fb_desc   = c.get("fb_description") or ""
+        notes     = c.get("notes") or ""
+        pspla     = c.get("pspla_licensed")
+        co_name   = c.get("companies_office_name") or ""
+        nzsa      = c.get("nzsa_member")
+        email     = c.get("email") or ""
+        phone     = c.get("phone") or ""
+
+        # 1. No real website — using FB page as website
+        if fb_url and website and website.rstrip("/") == fb_url.rstrip("/"):
+            reasons.append("No real website — only a Facebook page URL")
+
+        # 2. Overseas signals in FB description
+        overseas_hits = [s for s in _OVERSEAS if s in fb_desc.lower()]
+        if overseas_hits:
+            reasons.append(f"Overseas signal in FB description: {overseas_hits[0]!r}")
+
+        # 3. Non-ASCII / non-English company name
+        if name and not all(ord(ch) < 128 for ch in name):
+            reasons.append("Company name contains non-ASCII characters")
+
+        # 4. Thin record — found via Facebook, no PSPLA, no CO, no NZSA, no email, no phone
+        from_fb = "facebook" in notes.lower() or "facebook.com" in src_url.lower()
+        if from_fb and pspla is None and not co_name and nzsa not in ("true", True) and not email and not phone:
+            reasons.append("Found via Facebook with no corroborating data (no CO/NZSA/email/phone)")
+
+        # 5. Source URL is a Facebook group post (should have been filtered)
+        if "facebook.com/groups/" in src_url.lower():
+            reasons.append("Source URL is a Facebook group post (not a business page)")
+
+        # 6. FB URL slug looks non-NZ: ends in 'us', 'uk', 'au', 'ca' as a word boundary
+        if fb_url:
+            slug_m = _re.search(r"facebook\.com/([^/?#]+)", fb_url)
+            if slug_m:
+                slug = slug_m.group(1).lower()
+                for suffix in ("us", "uk", "au", "ca", "usa"):
+                    if slug.endswith(suffix) and len(slug) > len(suffix) + 2:
+                        reasons.append(f"Facebook slug ends with country suffix: '…{suffix}'")
+                        break
+
+        if reasons:
+            suspects.append({"record": c, "reasons": reasons})
+
+    # Sort: most reasons first
+    suspects.sort(key=lambda x: -len(x["reasons"]))
+
+    return render_template_string(SUSPECTS_TEMPLATE, suspects=suspects)
+
+
+SUSPECTS_TEMPLATE = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Suspect Records</title>
+<style>
+body { font-family: Arial, sans-serif; font-size: 13px; padding: 20px; background: #f5f5f5; }
+h1 { color: #c0392b; }
+.back { margin-bottom: 16px; display: inline-block; color: #2980b9; text-decoration: none; }
+.card { background: white; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 14px; padding: 14px; }
+.card.kept { opacity: 0.4; border-color: #27ae60; }
+.card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.card-name { font-size: 15px; font-weight: bold; color: #2c3e50; }
+.card-id { font-size: 11px; color: #999; margin-left: 6px; }
+.reasons { margin: 8px 0 10px; }
+.reason-tag { display: inline-block; background: #fdecea; color: #c0392b; border: 1px solid #f5c6c0;
+              border-radius: 3px; padding: 2px 7px; font-size: 11px; margin: 2px 3px 2px 0; }
+.meta { font-size: 11px; color: #555; margin-top: 6px; line-height: 1.7; }
+.meta a { color: #2980b9; word-break: break-all; }
+.btns { display: flex; gap: 8px; flex-shrink: 0; }
+.btn-delete { padding: 5px 14px; background: #c0392b; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
+.btn-keep   { padding: 5px 14px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
+.btn-delete:disabled, .btn-keep:disabled { opacity: 0.5; cursor: default; }
+.count { color: #555; font-size: 13px; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<a class="back" href="/">← Back to dashboard</a>
+<h1>&#9888; Suspect Records</h1>
+<p class="count">{{ suspects|length }} record(s) flagged for review. Check each one and Delete or Keep.</p>
+
+{% for s in suspects %}
+{% set c = s.record %}
+<div class="card" id="card-{{ c.id }}">
+  <div class="card-header">
+    <div>
+      <span class="card-name">{{ c.company_name or '(no name)' }}</span>
+      <span class="card-id">ID {{ c.id }}</span>
+      <div class="reasons">
+        {% for r in s.reasons %}
+        <span class="reason-tag">{{ r }}</span>
+        {% endfor %}
+      </div>
+      <div class="meta">
+        {% if c.website %}<div><b>Website:</b> <a href="{{ c.website }}" target="_blank">{{ c.website }}</a></div>{% endif %}
+        {% if c.facebook_url %}<div><b>Facebook:</b> <a href="{{ c.facebook_url }}" target="_blank">{{ c.facebook_url }}</a></div>{% endif %}
+        {% if c.source_url and c.source_url != c.website and c.source_url != c.facebook_url %}
+          <div><b>Found via:</b> <a href="{{ c.source_url }}" target="_blank">{{ c.source_url }}</a></div>
+        {% endif %}
+        <div><b>Region:</b> {{ c.region or '—' }} &nbsp;|&nbsp; <b>Notes:</b> {{ c.notes or '—' }}</div>
+        {% if c.fb_description %}<div><b>FB description:</b> {{ c.fb_description[:200] }}</div>{% endif %}
+      </div>
+    </div>
+    <div class="btns">
+      <button class="btn-keep"   id="keep-{{ c.id }}"   onclick="keepRecord({{ c.id }})">&#10003; Keep</button>
+      <button class="btn-delete" id="del-{{ c.id }}"    onclick="deleteRecord({{ c.id }}, '{{ (c.company_name or '') | replace("'", "\\\\'") }}')">&#10005; Delete</button>
+    </div>
+  </div>
+</div>
+{% else %}
+<p style="color:#27ae60; font-weight:bold;">No suspect records found — database looks clean.</p>
+{% endfor %}
+
+<script>
+function keepRecord(id) {
+  document.getElementById('card-' + id).classList.add('kept');
+  document.getElementById('keep-' + id).disabled = true;
+  document.getElementById('del-' + id).disabled = true;
+}
+function deleteRecord(id, name) {
+  if (!confirm('Delete "' + name + '"?\\nThis cannot be undone.')) return;
+  fetch('/delete-company', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({id: id})
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.ok) {
+      var card = document.getElementById('card-' + id);
+      if (card) card.remove();
+    } else {
+      alert('Delete failed: ' + (d.error || 'unknown'));
+    }
+  })
+  .catch(function() { alert('Delete request failed.'); });
 }
 </script>
 </body>
