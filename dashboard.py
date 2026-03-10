@@ -6904,12 +6904,12 @@ function formatMsg(t){
   t = t.replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>");
   // Auto-link PSPLA case citations e.g. "2025 NZPSPLA 087"
   t = t.replace(/(\d{4}) NZPSPLA (\d{3,4})/g, function(match, year, num){
-    var url = "https://www.justice.govt.nz/tribunals/licences-certificates/pspla/decisions/" + year + "-nzpspla-" + num + "/";
+    var url = "https://www.justice.govt.nz/assets/Documents/Decisions/" + year + "-NZPSPLA-" + num + ".pdf";
     return "<a href=\"" + url + "\" target=\"_blank\">" + match + "</a>";
   });
   // Also handle shorthand like "2025/087"
   t = t.replace(/(\d{4})\/(\d{3,4})(?=[^\d]|$)/g, function(match, year, num){
-    var url = "https://www.justice.govt.nz/tribunals/licences-certificates/pspla/decisions/" + year + "-nzpspla-" + num + "/";
+    var url = "https://www.justice.govt.nz/assets/Documents/Decisions/" + year + "-NZPSPLA-" + num + ".pdf";
     return "<a href=\"" + url + "\" target=\"_blank\">" + year + " NZPSPLA " + num + "</a>";
   });
   t = t.replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank">$1</a>');
