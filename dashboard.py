@@ -338,6 +338,8 @@ HTML_TEMPLATE = """
         html.dark .detail-row div[style*="border-left:4px solid #2980b9"] { border-left-color:#2980b9 !important; }
         html.dark .detail-row div[style*="background:#f0fbf4"] { background:#0f2a1a !important; border-color:#2d6b42 !important; }
         html.dark .detail-row div[style*="border-top:1px solid #a3d9b1"] { border-color:#2d6b42 !important; }
+        html.dark #panel-ew-search > div, html.dark #panel-nzsa-search > div, html.dark #panel-pspla-search > div { background:#1e2d40 !important; }
+        html.dark #util-ew-fname, html.dark #util-ew-lname, html.dark #util-nzsa-name, html.dark #util-pspla-name { background:#131e2b !important; border-color:#3d5166 !important; color:#d0d0d0 !important; }
         html.dark .detail-row [style*="border-top:1px solid"],
         html.dark .detail-row [style*="border-bottom:1px solid"] { border-color:#3d5166 !important; }
         html.dark .detail-row input[type="text"] { background:#1e2d40 !important; border-color:#3d5166 !important; color:#d0d0d0 !important; }
@@ -535,6 +537,28 @@ HTML_TEMPLATE = """
       </div>
     </div>
 
+    <div class="nav-item" id="menu-utilities">
+      <button class="nav-btn" onclick="toggleMenu('menu-utilities')">
+        <i class="fa-solid fa-wrench"></i> Utilities
+        <i class="fa-solid fa-chevron-down nav-chevron"></i>
+      </button>
+      <div class="dropdown">
+        <div class="dd-label">Manual lookups</div>
+        <button type="button" class="dd-item" onclick="togglePanel('panel-ew-search'); closeMenus();">
+          <i class="fa-solid fa-bolt dd-icon" style="color:#27ae60;"></i>
+          <span>Electrical Search<span class="dd-sub">MBIE electrician register lookup</span></span>
+        </button>
+        <button type="button" class="dd-item" onclick="togglePanel('panel-nzsa-search'); closeMenus();">
+          <i class="fa-solid fa-shield-halved dd-icon" style="color:#e67e22;"></i>
+          <span>NZSA Member Search<span class="dd-sub">Security association member lookup</span></span>
+        </button>
+        <button type="button" class="dd-item" onclick="togglePanel('panel-pspla-search'); closeMenus();">
+          <i class="fa-solid fa-id-card dd-icon" style="color:#8e44ad;"></i>
+          <span>PSPLA Search<span class="dd-sub">Security licence register lookup</span></span>
+        </button>
+      </div>
+    </div>
+
   </div><!-- /nav-menus -->
 
   <!-- Right: credits + running state -->
@@ -632,7 +656,7 @@ HTML_TEMPLATE = """
         if (!el) return;
         var opening = el.style.display === 'none';
         // Close all panels first
-        ['panel-terms','panel-partial','panel-bulk','panel-schedule'].forEach(function(pid) {
+        ['panel-terms','panel-partial','panel-bulk','panel-schedule','panel-ew-search','panel-nzsa-search','panel-pspla-search'].forEach(function(pid) {
             var p = document.getElementById(pid);
             if (p) p.style.display = 'none';
         });
@@ -1201,6 +1225,69 @@ HTML_TEMPLATE = """
           <i class="fa-solid fa-triangle-exclamation"></i>
           If a search is already running when a scheduled job fires, it will be skipped automatically.
         </p>
+      </div>
+    </div>
+
+    <!-- ── Utility Panels ─────────────────────────────────────────── -->
+
+    <!-- Electrical Search Panel -->
+    <div id="panel-ew-search" class="panel-wrap" style="display:none;">
+      <div style="background:white; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.1); padding:18px 22px; max-width:480px;">
+        <strong style="color:#1a6b35; font-size:14px; display:block; margin-bottom:12px;">
+          <i class="fa-solid fa-bolt" style="color:#27ae60;"></i> Electrical Search — MBIE Register
+        </strong>
+        <div style="display:flex; gap:8px; margin-bottom:10px;">
+          <input id="util-ew-fname" type="text" placeholder="First name"
+            style="flex:1; padding:6px 10px; border:1px solid #a3d9b1; border-radius:4px; font-size:13px;"
+            onkeydown="if(event.key==='Enter') utilEwSearch()">
+          <input id="util-ew-lname" type="text" placeholder="Last name"
+            style="flex:1; padding:6px 10px; border:1px solid #a3d9b1; border-radius:4px; font-size:13px;"
+            onkeydown="if(event.key==='Enter') utilEwSearch()">
+          <button onclick="utilEwSearch()" id="util-ew-btn"
+            style="padding:6px 16px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px; white-space:nowrap;">
+            Search
+          </button>
+        </div>
+        <div id="util-ew-result" style="font-size:13px; min-height:20px;"></div>
+      </div>
+    </div>
+
+    <!-- NZSA Member Search Panel -->
+    <div id="panel-nzsa-search" class="panel-wrap" style="display:none;">
+      <div style="background:white; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.1); padding:18px 22px; max-width:480px;">
+        <strong style="color:#b7500a; font-size:14px; display:block; margin-bottom:12px;">
+          <i class="fa-solid fa-shield-halved" style="color:#e67e22;"></i> NZSA Member Search
+        </strong>
+        <div style="display:flex; gap:8px; margin-bottom:10px;">
+          <input id="util-nzsa-name" type="text" placeholder="Company name"
+            style="flex:1; padding:6px 10px; border:1px solid #f0c090; border-radius:4px; font-size:13px;"
+            onkeydown="if(event.key==='Enter') utilNzsaSearch()">
+          <button onclick="utilNzsaSearch()" id="util-nzsa-btn"
+            style="padding:6px 16px; background:#e67e22; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px; white-space:nowrap;">
+            Search
+          </button>
+        </div>
+        <div id="util-nzsa-result" style="font-size:13px; min-height:20px;"></div>
+      </div>
+    </div>
+
+    <!-- PSPLA Search Panel -->
+    <div id="panel-pspla-search" class="panel-wrap" style="display:none;">
+      <div style="background:white; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.1); padding:18px 22px; max-width:480px;">
+        <strong style="color:#6c3483; font-size:14px; display:block; margin-bottom:12px;">
+          <i class="fa-solid fa-id-card" style="color:#8e44ad;"></i> PSPLA Search — Licence Register
+        </strong>
+        <div style="display:flex; gap:8px; margin-bottom:6px;">
+          <input id="util-pspla-name" type="text" placeholder="Company or person name"
+            style="flex:1; padding:6px 10px; border:1px solid #d2b4de; border-radius:4px; font-size:13px;"
+            onkeydown="if(event.key==='Enter') utilPsplaSearch()">
+          <button onclick="utilPsplaSearch()" id="util-pspla-btn"
+            style="padding:6px 16px; background:#8e44ad; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px; white-space:nowrap;">
+            Search
+          </button>
+        </div>
+        <div style="font-size:11px; color:#aaa; margin-bottom:10px;">Supports % wildcard — e.g. Smith% finds all Smiths</div>
+        <div id="util-pspla-result" style="font-size:13px; min-height:20px;"></div>
       </div>
     </div>
 
@@ -2068,6 +2155,94 @@ HTML_TEMPLATE = """
                 _recheckTermStop();
             });
         }
+
+        // ── Utility panel searches ──────────────────────────────────────
+        function utilEwSearch() {
+            var fname = document.getElementById('util-ew-fname').value.trim();
+            var lname = document.getElementById('util-ew-lname').value.trim();
+            var btn   = document.getElementById('util-ew-btn');
+            var out   = document.getElementById('util-ew-result');
+            if (!fname || !lname) { out.innerHTML = '<em style="color:#e74c3c">Enter first and last name</em>'; return; }
+            btn.disabled = true; btn.textContent = 'Searching...';
+            out.innerHTML = '<em style="color:#aaa">Searching…</em>';
+            fetch('/util/electrician-search', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({fname: fname, lname: lname})
+            }).then(function(r){return r.json();}).then(function(d){
+                btn.disabled = false; btn.textContent = 'Search';
+                if (d.error) { out.innerHTML = '<em style="color:#e74c3c">Error: '+d.error+'</em>'; return; }
+                if (!d.found) { out.innerHTML = '<em style="color:#aaa">No electrician licence found for '+fname+' '+lname+'</em>'; return; }
+                var html = '<div style="background:#f0fbf4;border:1px solid #a3d9b1;border-radius:6px;padding:10px 14px;">';
+                html += '<strong style="color:#1a6b35;">'+d.ew_name+'</strong>';
+                html += ' &nbsp;<span style="color:#555;">'+d.ew_reg_number+'</span>';
+                html += ' &nbsp;Licensed: <strong style="color:'+(d.ew_licensed?'#27ae60':'#e74c3c')+'">'+(d.ew_licensed?'Yes':'No')+'</strong>';
+                if (d.ew_city||d.ew_region) html += '<br><span style="color:#777;font-size:12px;">'+[d.ew_city,d.ew_region].filter(Boolean).join(', ')+'</span>';
+                html += '</div>';
+                out.innerHTML = html;
+            }).catch(function(){ btn.disabled=false; btn.textContent='Search'; out.innerHTML='<em style="color:#e74c3c">Request failed</em>'; });
+        }
+
+        function utilNzsaSearch() {
+            var name = document.getElementById('util-nzsa-name').value.trim();
+            var btn  = document.getElementById('util-nzsa-btn');
+            var out  = document.getElementById('util-nzsa-result');
+            if (!name) { out.innerHTML = '<em style="color:#e74c3c">Enter a company name</em>'; return; }
+            btn.disabled = true; btn.textContent = 'Searching...';
+            out.innerHTML = '<em style="color:#aaa">Searching…</em>';
+            fetch('/util/nzsa-search', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({name: name})
+            }).then(function(r){return r.json();}).then(function(d){
+                btn.disabled = false; btn.textContent = 'Search';
+                if (d.error) { out.innerHTML = '<em style="color:#e74c3c">Error: '+d.error+'</em>'; return; }
+                if (!d.member) { out.innerHTML = '<em style="color:#aaa">Not found as an NZSA member</em>'; return; }
+                var html = '<div style="background:#fff8f0;border:1px solid #f0c090;border-radius:6px;padding:10px 14px;">';
+                html += '<strong style="color:#b7500a;">'+d.member_name+'</strong>';
+                if (d.accredited) html += ' <em style="color:#27ae60;">(Accredited'+(d.grade?': '+d.grade:'')+')</em>';
+                if (d.contact_name||d.phone||d.email) {
+                    html += '<br><span style="font-size:12px;color:#555;">';
+                    if (d.contact_name) html += '<strong>Contact:</strong> '+d.contact_name+'&nbsp; ';
+                    if (d.phone) html += '&#128222; '+d.phone+'&nbsp; ';
+                    if (d.email) html += '&#9993; <a href="mailto:'+d.email+'">'+d.email+'</a>';
+                    html += '</span>';
+                }
+                if (d.overview) html += '<br><span style="font-size:12px;color:#777;font-style:italic;">'+d.overview.substring(0,250)+(d.overview.length>250?'…':'')+'</span>';
+                html += '</div>';
+                out.innerHTML = html;
+            }).catch(function(){ btn.disabled=false; btn.textContent='Search'; out.innerHTML='<em style="color:#e74c3c">Request failed</em>'; });
+        }
+
+        function utilPsplaSearch() {
+            var name = document.getElementById('util-pspla-name').value.trim();
+            var btn  = document.getElementById('util-pspla-btn');
+            var out  = document.getElementById('util-pspla-result');
+            if (!name) { out.innerHTML = '<em style="color:#e74c3c">Enter a name or term</em>'; return; }
+            btn.disabled = true; btn.textContent = 'Searching...';
+            out.innerHTML = '<em style="color:#aaa">Searching…</em>';
+            fetch('/util/pspla-search', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({name: name})
+            }).then(function(r){return r.json();}).then(function(d){
+                btn.disabled = false; btn.textContent = 'Search';
+                if (d.error) { out.innerHTML = '<em style="color:#e74c3c">Error: '+d.error+'</em>'; return; }
+                if (!d.results || !d.results.length) { out.innerHTML = '<em style="color:#aaa">No results found</em>'; return; }
+                var html = '<div style="display:flex;flex-direction:column;gap:6px;">';
+                d.results.forEach(function(r){
+                    var statusColor = r.status==='Active'?'#27ae60':r.status==='Expired'?'#e74c3c':'#95a5a6';
+                    html += '<div style="background:#f8f0ff;border:1px solid #d2b4de;border-radius:6px;padding:8px 12px;">';
+                    html += '<strong style="color:#6c3483;">'+r.name+'</strong>';
+                    html += ' &nbsp;<span style="color:'+statusColor+';font-weight:bold;">'+r.status+'</span>';
+                    if (r.number) html += ' &nbsp;<span style="color:#888;font-size:12px;">'+r.number+'</span>';
+                    if (r.expiry) html += '<br><span style="font-size:12px;color:#777;">Expires: '+r.expiry+'</span>';
+                    if (r.classes) html += ' &nbsp;<span style="font-size:12px;color:#777;">'+r.classes+'</span>';
+                    if (r.address) html += '<br><span style="font-size:12px;color:#aaa;">'+r.address+'</span>';
+                    html += '</div>';
+                });
+                html += '</div>';
+                out.innerHTML = html;
+            }).catch(function(){ btn.disabled=false; btn.textContent='Search'; out.innerHTML='<em style="color:#e74c3c">Request failed</em>'; });
+        }
+        // ── End utility searches ────────────────────────────────────────
 
         function lookupLinkedIn(id) {
             var btn = document.getElementById('li-btn-' + id);
@@ -5104,6 +5279,79 @@ def recheck_nzsa_for_company():
         return jsonify({"error": str(e)}), 500
     finally:
         _rl.__exit__(None, None, None)
+
+
+@app.route("/util/electrician-search", methods=["POST"])
+def util_electrician_search():
+    """Standalone electrician lookup — no DB save."""
+    from flask import jsonify
+    fname = request.json.get("fname", "").strip()
+    lname = request.json.get("lname", "").strip()
+    if not fname or not lname:
+        return jsonify({"error": "First and last name required"}), 400
+    try:
+        from searcher import check_electrician_licence
+        result = check_electrician_licence(f"{fname} {lname}")
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/util/nzsa-search", methods=["POST"])
+def util_nzsa_search():
+    """Standalone NZSA member lookup — no DB save."""
+    from flask import jsonify
+    name = request.json.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "Company name required"}), 400
+    try:
+        from searcher import check_nzsa
+        result = check_nzsa(name)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/util/pspla-search", methods=["POST"])
+def util_pspla_search():
+    """Standalone PSPLA licence lookup — returns up to 10 raw results, no DB save."""
+    from flask import jsonify
+    name = request.json.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "Name required"}), 400
+    try:
+        import requests as _req
+        url = "https://forms.justice.govt.nz/forms/publicSolrProxy/solr/PSPLA/select"
+        # Support % wildcard: convert to Solr * wildcard, otherwise wrap in quotes for phrase
+        if "%" in name:
+            q = f"name_txt:{name.replace('%','*')}"
+        else:
+            words = [w for w in name.split() if len(w) >= 2]
+            q = " AND ".join(f"name_txt:{w}" for w in words) if words else f"name_txt:{name}"
+        params = {
+            "rows": "10", "fl": "*, score", "sort": "score desc",
+            "json.nl": "map", "q": q,
+            "fq": "jurisdictionCode_s:PSPLA AND permitHasBeenIssued_b:true",
+            "wt": "json"
+        }
+        resp = _req.get(url, params=params,
+                        headers={"User-Agent":"Mozilla/5.0","Referer":"https://forms.justice.govt.nz/search/PSPLA/"},
+                        timeout=15)
+        docs = resp.json().get("response", {}).get("docs", [])
+        results = []
+        for d in docs:
+            def _val(f): v = d.get(f); return (v[0] if isinstance(v,list) else v) or ""
+            results.append({
+                "name":    _val("name_txt") or _val("caseTitle_s"),
+                "status":  _val("permitStatus_s").capitalize(),
+                "number":  _val("permitNumber_s"),
+                "expiry":  _val("permitExpiry_dt")[:10] if _val("permitExpiry_dt") else "",
+                "classes": _val("classOfLicence_s"),
+                "address": _val("address_s"),
+            })
+        return jsonify({"results": results})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/recheck-electrician", methods=["POST"])
