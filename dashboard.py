@@ -4327,17 +4327,19 @@ def recheck_companies_office_for_company():
         from searcher import check_companies_office, write_audit
         # Fetch company region from DB to validate CO address against known location
         _co_region = None
+        _co_stored_addr = None
         if company_id:
             try:
                 _h = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
                 _r = requests.get(
                     f"{SUPABASE_URL}/rest/v1/Companies",
                     headers=_h,
-                    params={"id": f"eq.{company_id}", "select": "region"}
+                    params={"id": f"eq.{company_id}", "select": "region,address"}
                 )
                 _row = (_r.json() or [None])[0]
                 if _row:
                     _co_region = _row.get("region")
+                    _co_stored_addr = _row.get("address")
             except Exception:
                 pass
         print(f"[Companies Office] Searching for: {company_name}" +
@@ -4346,16 +4348,20 @@ def recheck_companies_office_for_company():
 
         # Final region gate: if we have a known region and the found address
         # contains no matching location words, reject the result entirely.
+        # Reference words come from both the region name AND the stored address
+        # (e.g. region="Waikato" but address="Hamilton" — CO address has Hamilton not Waikato).
         if result.get("name") and _co_region:
             import re as _re2
             _skip = {"road", "street", "avenue", "drive", "place", "lane", "suite",
                      "level", "floor", "unit", "post", "box", "zealand", "limited", "new"}
-            _ref_words = {w.lower() for w in _re2.split(r'[\s,./\-]+', _co_region)
+            _ref_src = " ".join(filter(None, [_co_region, _co_stored_addr]))
+            _ref_words = {w.lower() for w in _re2.split(r'[\s,./\-]+', _ref_src)
                           if len(w) >= 4 and w.lower() not in _skip}
             _found_addr = (result.get("address") or "").lower()
             if _ref_words and not any(w in _found_addr for w in _ref_words):
                 print(f"[Companies Office] Region mismatch — discarding result"
-                      f" ({result.get('address')!r} does not match region {_co_region!r})")
+                      f" ({result.get('address')!r} does not match region {_co_region!r}"
+                      f" / address {_co_stored_addr!r})")
                 result = {"name": None}
 
         if result.get("name"):

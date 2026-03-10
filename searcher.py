@@ -4173,12 +4173,15 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
     # Companies Office lookup
     co_search_name = pspla_result.get("matched_name") or company_name
     co_result = check_companies_office(co_search_name, pspla_address=pspla_result.get("pspla_address") or region)
-    # Final region gate: discard CO result if found address doesn't match company region
+    # Final region gate: discard CO result if found address doesn't match company region.
+    # Use region name + PSPLA address (city-level) as reference — e.g. region="Waikato"
+    # but PSPLA address="Hamilton"; CO address has "Hamilton" not "Waikato".
     if co_result.get("name") and region:
         import re as _re_co
         _co_skip = {"road", "street", "avenue", "drive", "place", "lane", "suite",
                     "level", "floor", "unit", "post", "box", "zealand", "limited", "new"}
-        _co_ref = {w.lower() for w in _re_co.split(r'[\s,./\-]+', region)
+        _co_ref_src = " ".join(filter(None, [region, pspla_result.get("pspla_address")]))
+        _co_ref = {w.lower() for w in _re_co.split(r'[\s,./\-]+', _co_ref_src)
                    if len(w) >= 4 and w.lower() not in _co_skip}
         _co_addr = (co_result.get("address") or "").lower()
         if _co_ref and not any(w in _co_addr for w in _co_ref):
