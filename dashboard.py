@@ -4304,6 +4304,21 @@ def recheck_companies_office_for_company():
         print(f"[Companies Office] Searching for: {company_name}" +
               (f" (region: {_co_region})" if _co_region else ""))
         result = check_companies_office(company_name, pspla_address=_co_region)
+
+        # Final region gate: if we have a known region and the found address
+        # contains no matching location words, reject the result entirely.
+        if result.get("name") and _co_region:
+            import re as _re2
+            _skip = {"road", "street", "avenue", "drive", "place", "lane", "suite",
+                     "level", "floor", "unit", "post", "box", "zealand", "limited", "new"}
+            _ref_words = {w.lower() for w in _re2.split(r'[\s,./\-]+', _co_region)
+                          if len(w) >= 4 and w.lower() not in _skip}
+            _found_addr = (result.get("address") or "").lower()
+            if _ref_words and not any(w in _found_addr for w in _ref_words):
+                print(f"[Companies Office] Region mismatch — discarding result"
+                      f" ({result.get('address')!r} does not match region {_co_region!r})")
+                result = {"name": None}
+
         if result.get("name"):
             display = result.get("registered_name") or result.get("name")
             trading = result.get("trading_name")
