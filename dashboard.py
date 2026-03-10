@@ -4332,19 +4332,26 @@ def recheck_companies_office_for_company():
                 print(f"[Companies Office] Website: {result['website']}")
         else:
             print(f"[Companies Office] Not found on Companies Register")
-        patch = {
-            "companies_office_name":    result.get("registered_name") or result.get("name"),
-            "companies_office_address": result.get("address"),
-            "companies_office_number":  result.get("company_number"),
-            "nzbn":                     result.get("nzbn"),
-            "co_status":                result.get("status"),
-            "co_incorporated":          result.get("incorporated"),
-            "co_website":               result.get("website"),
-        }
-        directors = result.get("directors") or []
-        if directors:
-            patch["director_name"] = ", ".join(directors)
-        patch = {k: v for k, v in patch.items() if v is not None}
+        _co_fields = ["companies_office_name", "companies_office_address",
+                      "companies_office_number", "nzbn", "co_status",
+                      "co_incorporated", "co_website", "director_name"]
+        if result.get("name"):
+            patch = {
+                "companies_office_name":    result.get("registered_name") or result.get("name"),
+                "companies_office_address": result.get("address"),
+                "companies_office_number":  result.get("company_number"),
+                "nzbn":                     result.get("nzbn"),
+                "co_status":                result.get("status"),
+                "co_incorporated":          result.get("incorporated"),
+                "co_website":               result.get("website"),
+            }
+            directors = result.get("directors") or []
+            if directors:
+                patch["director_name"] = ", ".join(directors)
+            patch = {k: v for k, v in patch.items() if v is not None}
+        else:
+            # No valid CO match — explicitly clear any previously saved CO data
+            patch = {f: None for f in _co_fields}
         if patch:
             headers = {
                 "apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
