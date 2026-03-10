@@ -19,6 +19,7 @@ SERPAPI_KEY  = os.getenv("SERPAPI_KEY")
 GITHUB_PAT = os.getenv("GITHUB_PAT")
 EXPORT_PASSWORD = os.getenv("EXPORT_PASSWORD") or os.getenv("PAGES_PASSWORD", "")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "wadeco2000/pspla-checker")
+DROPBOX_TOKEN = os.getenv("DROPBOX_TOKEN", "")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PAUSE_FLAG = os.path.join(BASE_DIR, "pause.flag")
@@ -2183,11 +2184,14 @@ HTML_TEMPLATE = """
             <strong style="color:#c0392b;">{{ total }} {{ 'entry' if total == 1 else 'entries' }}</strong>
             from the database.
         </p>
-        <p style="color:#888; font-size:13px; margin-bottom:24px;">
+        <p style="color:#888; font-size:13px; margin-bottom:16px;">
             Search progress will also be reset so the next full search starts from scratch.
-            <strong>This cannot be undone.</strong>
+            <strong>This cannot be undone.</strong> A CSV backup will be saved locally and to Dropbox first.
         </p>
         <form method="POST" action="/clear-db">
+            <input type="password" name="clear_password" placeholder="Enter password to confirm"
+                style="width:100%; padding:10px 14px; border:1px solid #e74c3c; border-radius:6px;
+                       font-size:15px; box-sizing:border-box; margin-bottom:12px;">
             <button type="submit"
                 style="width:100%; padding:11px; background:#e74c3c; color:white; border:none;
                        border-radius:6px; font-size:15px; font-weight:bold; cursor:pointer;">
@@ -2726,6 +2730,77 @@ def dedupe_db():
 
 @app.route("/clear-db", methods=["POST"])
 def clear_db():
+    # Password check
+    if EXPORT_PASSWORD and request.form.get("clear_password") != EXPORT_PASSWORD:
+        return redirect(url_for("index", message="Incorrect password — database not cleared.", type="error"))
+
+    companies = get_companies()
+    if not companies:
+        return redirect(url_for("index", message="Database is already empty.", type="error"))
+
+    # Build CSV
+    fields = [
+        "company_name", "website_url", "region", "phone", "email", "address",
+        "facebook_url", "linkedin_url",
+        "nzsa_member", "nzsa_accredited", "nzsa_grade", "nzsa_member_name",
+        "nzsa_contact_name", "nzsa_phone", "nzsa_email",
+        "pspla_licensed", "pspla_name", "pspla_license_number",
+        "pspla_license_status", "pspla_license_expiry", "license_type",
+        "match_method", "match_reason", "individual_license", "director_name",
+        "companies_office_name", "companies_office_address",
+        "companies_office_number", "nzbn", "date_added", "last_checked", "notes"
+    ]
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    for c in companies:
+        writer.writerow({f: c.get(f, "") or "" for f in fields})
+    csv_data = output.getvalue()
+
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    filename = f"pspla_backup_{timestamp}.csv"
+    backup_notes = []
+
+    # Save local backup
+    backup_dir = os.path.join(BASE_DIR, "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+    local_path = os.path.join(backup_dir, filename)
+    try:
+        with open(local_path, "w", encoding="utf-8", newline="") as f:
+            f.write(csv_data)
+        backup_notes.append(f"Local backup saved to backups/{filename}")
+    except Exception as e:
+        backup_notes.append(f"Local backup FAILED: {e}")
+
+    # Upload to Dropbox
+    if DROPBOX_TOKEN:
+        try:
+            dropbox_path = f"/pspla-backup/{filename}"
+            resp = requests.post(
+                "https://content.dropboxapi.com/2/files/upload",
+                headers={
+                    "Authorization": f"Bearer {DROPBOX_TOKEN}",
+                    "Dropbox-API-Arg": json.dumps({
+                        "path": dropbox_path,
+                        "mode": "add",
+                        "autorename": True,
+                        "mute": False
+                    }),
+                    "Content-Type": "application/octet-stream"
+                },
+                data=csv_data.encode("utf-8"),
+                timeout=30
+            )
+            if resp.status_code == 200:
+                backup_notes.append(f"Dropbox backup saved to {dropbox_path}")
+            else:
+                backup_notes.append(f"Dropbox upload FAILED: {resp.text[:200]}")
+        except Exception as e:
+            backup_notes.append(f"Dropbox upload FAILED: {e}")
+    else:
+        backup_notes.append("Dropbox token not set — skipped Dropbox backup")
+
+    # Delete from Supabase
     try:
         del_url = f"{SUPABASE_URL}/rest/v1/Companies?id=not.is.null"
         headers = {
@@ -2740,12 +2815,12 @@ def clear_db():
                     os.remove(path)
                 except FileNotFoundError:
                     pass
-            msg = "Database cleared — all entries and search state deleted."
+            msg = f"Database cleared ({len(companies)} records). " + " | ".join(backup_notes)
             return redirect(url_for("index", message=msg, type="success"))
         else:
-            return redirect(url_for("index", message=f"Delete failed: {response.text[:200]}", type="error"))
+            return redirect(url_for("index", message=f"Backup done but delete failed: {response.text[:200]}", type="error"))
     except Exception as e:
-        return redirect(url_for("index", message=f"Error: {e}", type="error"))
+        return redirect(url_for("index", message=f"Backup done but error during delete: {e}", type="error"))
 
 
 @app.route("/export.csv", methods=["POST"])
