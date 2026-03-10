@@ -353,6 +353,11 @@ HTML_TEMPLATE = """
           </button>
         </form>
 
+        <a href="https://wadeco2000.github.io/pspla-checker/" target="_blank" class="dd-item">
+          <i class="fa-solid fa-arrow-up-right-from-square dd-icon" style="color:#2980b9;"></i>
+          <span>View Live Site<span class="dd-sub">Open public GitHub Pages site</span></span>
+        </a>
+
         <button type="button" class="dd-item" onclick="document.getElementById('export-modal').style.display='flex'; closeMenus();">
           <i class="fa-solid fa-file-csv dd-icon" style="color:#27ae60;"></i>
           <span>Export CSV<span class="dd-sub">Download all companies as CSV</span></span>
