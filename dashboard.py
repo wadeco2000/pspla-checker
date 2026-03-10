@@ -4639,6 +4639,7 @@ RULES:
 - For Facebook: if the URL slug or description clearly refers to a different business or overseas entity, flag it.
 - For LinkedIn: same as Facebook.
 - For Companies Office: if the registered name is for a completely different business, flag it.
+- For Google Business: if the address or phone clearly belongs to a different business at a different location, flag it.
 
 Respond with ONLY valid JSON — no markdown, no explanation outside the JSON.
 Use this exact structure:
@@ -4652,7 +4653,9 @@ Use this exact structure:
   "clear_linkedin":        false,
   "clear_linkedin_reason": "",
   "clear_companies_office": false,
-  "clear_companies_office_reason": ""
+  "clear_companies_office_reason": "",
+  "clear_google":          false,
+  "clear_google_reason":   ""
 }}
 
 Set a value to true ONLY if you are confident the association is for a different company."""
@@ -4660,7 +4663,7 @@ Set a value to true ONLY if you are confident the association is for a different
         ai_client = _anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         response = ai_client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=600,
+            max_tokens=700,
             messages=[{"role": "user", "content": prompt}]
         )
         raw = response.content[0].text.strip()
@@ -4719,6 +4722,14 @@ Set a value to true ONLY if you are confident the association is for a different
                           "co_status": None, "co_incorporated": None,
                           "director_name": None, "individual_license": None})
             cleared.append(f"Companies Office: {reason}")
+
+        if result.get("clear_google"):
+            reason = result.get("clear_google_reason", "")
+            print(f"[LLM Sense] Clearing Google Business: {reason}")
+            patch.update({"google_rating": None, "google_reviews": None,
+                          "google_phone": None, "google_address": None,
+                          "google_email": None})
+            cleared.append(f"Google: {reason}")
 
         if patch:
             ph = {**headers, "Content-Type": "application/json", "Prefer": "return=minimal"}
