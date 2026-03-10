@@ -3789,7 +3789,8 @@ def company_ai_decisions():
 
 @app.route("/audit-log")
 def audit_log_page():
-    return render_template_string(AUDIT_LOG_TEMPLATE)
+    from flask import Response
+    return Response(AUDIT_LOG_TEMPLATE, mimetype='text/html')
 
 
 @app.route("/llm-log")
