@@ -2807,16 +2807,19 @@ def check_companies_office(company_name, pspla_address=None):
                 found_lower = found_addr.lower()
                 return any(w in found_lower for w in ref_words)
 
+            rejected_co_names = set()  # names rejected by address/overlap checks
+
             def _co_verify_match(hit, via_term):
                 """Verify a fuzzy CO match is actually the same company.
-                First checks address (fast, free). Then asks Haiku if still uncertain.
+                Checks address compatibility and name word overlap.
                 Returns True if the match should be accepted."""
                 found_name = hit.get("name") or hit.get("registered_name") or ""
                 found_addr = hit.get("address") or ""
-                # Address check (free)
+                # Address check
                 if pspla_address and not _co_addr_ok(found_addr, pspla_address):
                     print(f"  [Companies Office] Address mismatch — skipping {found_name!r}"
                           f" ({found_addr}) vs region {pspla_address!r}")
+                    rejected_co_names.add(found_name.upper())
                     return False
                 # Name word overlap check: at least one significant word from original
                 # must appear in found name (guards against totally unrelated companies)
@@ -2829,6 +2832,7 @@ def check_companies_office(company_name, pspla_address=None):
                 if not overlap:
                     print(f"  [Companies Office] No name overlap — skipping {found_name!r}"
                           f" (searched: {company_name!r})")
+                    rejected_co_names.add(found_name.upper())
                     return False
                 return True
 
@@ -2889,6 +2893,8 @@ Do not include terms already tried: {tried_terms}"""
             if result is None:
                 all_candidates = [l for l in lines if l.isupper() and len(l) > 5]
                 all_candidates += [l for l in alt_lines_last if l.isupper() and len(l) > 5]
+                # Exclude companies already rejected by address/overlap checks
+                all_candidates = [c for c in all_candidates if c.upper() not in rejected_co_names]
                 all_candidates = list(dict.fromkeys(all_candidates))[:20]  # dedupe
                 if all_candidates and pspla_address:
                     pick_prompt = f"""From these NZ Companies Office results, which best matches "{company_name}" with address near "{pspla_address}"?
