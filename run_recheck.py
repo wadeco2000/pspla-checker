@@ -112,8 +112,10 @@ def recheck_facebook(company, triggered_by="bulk-recheck"):
                     changes=changes_str, triggered_by=triggered_by,
                     snapshot_before=company)
         print(f"  [Facebook] Updated {company_name}: followers={fb_data.get('followers')}")
+        return True
     else:
         print(f"  [Facebook] No new data for {company_name}")
+        return False
 
 
 def recheck_google(company, triggered_by="bulk-recheck"):
@@ -138,8 +140,10 @@ def recheck_google(company, triggered_by="bulk-recheck"):
                     triggered_by=triggered_by,
                     snapshot_before=company)
         print(f"  [Google] Updated {company_name}: rating={result.get('rating')}")
+        return True
     else:
         print(f"  [Google] No data for {company_name}")
+        return False
 
 
 def recheck_linkedin(company, triggered_by="bulk-recheck"):
@@ -173,6 +177,7 @@ def recheck_linkedin(company, triggered_by="bulk-recheck"):
                 changes=changes_str, triggered_by=triggered_by,
                 snapshot_before=company)
     print(f"  [LinkedIn] Updated {company_name}: {li_url}")
+    return True
 
 
 def recheck_nzsa(company, triggered_by="bulk-recheck"):
@@ -200,6 +205,7 @@ def recheck_nzsa(company, triggered_by="bulk-recheck"):
                 triggered_by=triggered_by,
                 snapshot_before=company)
     print(f"  [NZSA] {company_name}: member={result['member']}")
+    return True
 
 
 def recheck_companies_office(company, triggered_by="bulk-recheck"):
@@ -228,8 +234,10 @@ def recheck_companies_office(company, triggered_by="bulk-recheck"):
                     triggered_by=triggered_by,
                     snapshot_before=company)
         print(f"  [CO] Updated {company_name}: {result.get('name')}")
+        return True
     else:
         print(f"  [CO] No data for {company_name}")
+        return False
 
 
 def recheck_pspla(company, triggered_by="bulk-recheck"):
@@ -290,6 +298,7 @@ def recheck_pspla(company, triggered_by="bulk-recheck"):
                 triggered_by=triggered_by,
                 snapshot_before=company)
     print(f"  [PSPLA] {company_name}: licensed={licensed} name={pspla_name}")
+    return True
 
 
 def recheck_llm_sense(company, triggered_by="bulk-recheck"):
@@ -452,8 +461,10 @@ Set a value to true ONLY if you are confident the association is for a different
                     triggered_by=triggered_by,
                     snapshot_before=c)
         print(f"  [LLM Sense] Cleared {len(cleared)}: {'; '.join(cleared)}")
+        return True
     else:
         print(f"  [LLM Sense] All associations look correct.")
+        return False
 
     time.sleep(1)  # brief pause between Sonnet calls
 
@@ -509,6 +520,7 @@ def run_recheck(triggered_by="manual"):
 
     total_processed = 0
     total_updated = 0
+    total_edits = 0
 
     try:
         print("\n  Fetching companies from database...")
@@ -543,8 +555,10 @@ def run_recheck(triggered_by="manual"):
                 fn = CHECK_FUNCTIONS.get(check)
                 if fn:
                     try:
-                        fn(company, triggered_by=triggered_by)
+                        changed = fn(company, triggered_by=triggered_by)
                         total_updated += 1
+                        if changed:
+                            total_edits += 1
                     except Exception as e:
                         print(f"  [{CHECK_LABELS.get(check, check)} error] {e}")
 
@@ -553,7 +567,8 @@ def run_recheck(triggered_by="manual"):
         append_history("bulk-recheck", started_iso, total_processed, total_updated,
                        "completed", triggered_by)
         send_search_email("bulk-recheck", started_iso, total_processed, total_updated,
-                          triggered_by, get_session_log(), checks_label=check_label)
+                          triggered_by, get_session_log(), checks_label=check_label,
+                          total_edits=total_edits)
 
     except Exception as e:
         tb = _tb.format_exc()

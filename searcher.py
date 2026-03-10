@@ -4923,7 +4923,7 @@ def write_audit(action, company_id, company_name, changes="", triggered_by="manu
         print(f"  [Audit log error] {e}")
 
 
-def send_search_email(search_type, started_iso, total_found, total_new, triggered_by, new_companies=None, checks_label=""):
+def send_search_email(search_type, started_iso, total_found, total_new, triggered_by, new_companies=None, checks_label="", total_edits=None):
     """Send a notification email summarising the completed search run."""
     if not NOTIFY_EMAIL or not SMTP_USER or not SMTP_PASS or not SMTP_HOST:
         return  # email not configured
@@ -4956,8 +4956,9 @@ def send_search_email(search_type, started_iso, total_found, total_new, triggere
     except Exception:
         duration_str = "unknown"
 
+    edits_str = f"{total_edits} edits made" if total_edits is not None else ""
     if is_recheck:
-        subject = f"PSPLA Checker — {label} complete — {total_new} companies updated"
+        subject = f"PSPLA Checker — {label} complete — {total_edits if total_edits is not None else total_new} edits made"
     else:
         subject = f"PSPLA Checker — {label} complete — {total_new} new companies added"
 
@@ -4975,8 +4976,10 @@ def send_search_email(search_type, started_iso, total_found, total_new, triggere
         f"Duration:         {duration_str}",
         f"{found_label}:  {total_found}",
         f"{new_label}:  {total_new}",
-        "",
     ]
+    if total_edits is not None:
+        lines.append(f"Edits made:       {total_edits}")
+    lines.append("")
 
     if not is_recheck and new_companies:
         lines.append(f"New companies added ({len(new_companies)}):")
@@ -4995,6 +4998,7 @@ def send_search_email(search_type, started_iso, total_found, total_new, triggere
 
     # Build HTML body
     checks_row = f"<tr><td style='padding:2px 12px 2px 0;color:#666'>Checks run</td><td>{checks_label}</td></tr>" if checks_label else ""
+    edits_row = f"<tr><td style='padding:2px 12px 2px 0;color:#666'>Edits made</td><td><b>{total_edits}</b></td></tr>" if total_edits is not None else ""
 
     rows_html = ""
     if not is_recheck and new_companies:
@@ -5033,7 +5037,8 @@ def send_search_email(search_type, started_iso, total_found, total_new, triggere
 <tr><td style='padding:2px 12px 2px 0;color:#666'>Triggered by</td><td>{triggered_by}</td></tr>
 <tr><td style='padding:2px 12px 2px 0;color:#666'>Duration</td><td>{duration_str}</td></tr>
 <tr><td style='padding:2px 12px 2px 0;color:#666'>{found_label}</td><td>{total_found}</td></tr>
-<tr><td style='padding:2px 12px 2px 0;color:#666'>{new_label}</td><td><b>{total_new}</b></td></tr>
+<tr><td style='padding:2px 12px 2px 0;color:#666'>{new_label}</td><td>{total_new}</td></tr>
+{edits_row}
 </table>
 {new_section}
 </body></html>"""
