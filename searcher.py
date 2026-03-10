@@ -3143,11 +3143,20 @@ def check_nzsa(company_name, website=None):
         # email/website domain are both company-specific and clearly different, reject.
         # This catches "Livewire Electrical" matching "Sefton Electrical" via shared
         # generic industry word when domains are completely unrelated.
+        # Skip the check if the stored website is a directory/aggregator site — it's
+        # not the company's own domain so a mismatch against it is meaningless.
+        _DIRECTORY_DOMAINS = {
+            "moneyhub.co.nz", "yellowpages.co.nz", "localist.co.nz", "finda.co.nz",
+            "neighbourly.co.nz", "nzpages.co.nz", "truelocal.co.nz", "google.com",
+            "facebook.com", "linkedin.com", "trademe.co.nz", "nowhereelse.co.nz",
+            "aucklandnz.com", "wellingtonnz.com", "zomato.com", "yelp.com",
+        }
         company_dom = _email_domain(website) if website else ""
         member_dom = (_email_domain(best_member.get("email") or "")
                       or _email_domain(best_member.get("website") or ""))
         if (company_dom and member_dom
                 and company_dom not in _FREE_EMAIL
+                and company_dom not in _DIRECTORY_DOMAINS
                 and member_dom not in _FREE_EMAIL
                 and company_dom != member_dom):
             print(f"  [NZSA] Domain mismatch: company={company_dom}, member={member_dom} — rejecting '{best_member['name']}'")
