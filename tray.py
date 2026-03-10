@@ -14,15 +14,38 @@ _process = None
 
 
 def make_icon(running):
-    """Green circle = running, grey circle = stopped."""
+    """Police siren icon — red/blue when running, grey when stopped."""
     img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    # Outer circle
-    color = (39, 174, 96) if running else (120, 120, 120)
-    draw.ellipse([2, 2, 62, 62], fill=color)
-    # Inner white ring (camera lens look)
-    draw.ellipse([16, 16, 48, 48], fill=(255, 255, 255, 200))
-    draw.ellipse([24, 24, 40, 40], fill=color)
+
+    if running:
+        red  = (220, 40,  40)
+        blue = (40,  80, 220)
+        housing = (40, 40, 50)
+        shine_r = (255, 160, 160, 140)
+        shine_b = (160, 160, 255, 140)
+    else:
+        red  = (110, 90,  90)
+        blue = (90,  90, 110)
+        housing = (80, 80, 80)
+        shine_r = shine_b = None
+
+    # Siren housing base
+    draw.rectangle([8, 38, 56, 52], fill=housing)
+    draw.rectangle([12, 50, 52, 58], fill=housing)
+
+    # Left dome (red)
+    draw.ellipse([6, 14, 34, 42], fill=red)
+    # Right dome (blue)
+    draw.ellipse([30, 14, 58, 42], fill=blue)
+    # Centre divider so domes look separate
+    draw.rectangle([29, 14, 35, 42], fill=housing)
+
+    # Shine glints on each dome when running
+    if shine_r:
+        draw.ellipse([10, 18, 22, 27], fill=shine_r)
+        draw.ellipse([42, 18, 54, 27], fill=shine_b)
+
     return img
 
 
