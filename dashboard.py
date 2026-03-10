@@ -6491,6 +6491,8 @@ IMPORTANT RULES:
 - When you have enough information, give a clear, plain-English answer with specific references to the Act.
 - Always end with: "This is general guidance only — contact the PSPLA Licensing Authority (justice.govt.nz/tribunals/licences-certificates/pspla) or a solicitor for definitive advice."
 - Be conversational and friendly, not legalistic.
+- When citing PSPLA decisions, write the case number in full (e.g. 2025 NZPSPLA 087) — the system will automatically hyperlink it to the PDF.
+- When citing news articles from your knowledge base, include the full URL so the user can read the source.
 
 ---
 KNOWLEDGE BASE: Private Security Personnel and Private Investigators Act 2010
@@ -6783,6 +6785,37 @@ PRACTICAL TAKEAWAYS FROM THE FULL DECISIONS REGISTER
 13. Cleaners, IT workers, and others who incidentally provide security services require a COA regardless of job title.
 
 ---
+NEWS ARTICLES AND MEDIA COVERAGE (for reference when advising)
+
+[RNZ, 6 July 2025] Security regulator warns against hospital security guards doubling as cleaners
+URL: https://www.rnz.co.nz/news/national/566105/security-regulator-warns-against-hospital-security-guards-doubling-as-cleaners
+Summary: The PSPLA head Trish McConnell warned against "integrated model" contracts where security guards also perform cleaning/orderly duties. ISS Facility Services had guards doubling as cleaners at Te Kuiti and Tokoroa hospitals. A licensing complaint was ultimately unsubstantiated but the regulator strongly recommended Health New Zealand change its contracting model. Key point: guards performing non-security duties are still bound by PSPLA licensing requirements — their employer can still be investigated.
+
+[Defsec, 7 May 2021] Security licensing body clarifies 'private' investigator confusion
+URL: https://defsec.net.nz/2021/05/07/private-investigator-clarification/
+Summary: PSPLA clarified that employment investigators (companies conducting workplace misconduct investigations) ARE required to hold a PSPLA private investigator licence. The term "private" in private investigator simply means they are in private practice — not that their work must be covert. Lawyers with practising certificates are exempt (s22(d)). No prosecution in this case as the breach was inadvertent based on widespread industry misconception.
+
+[1News, 23 February 2024] Rotorua emergency housing: Security boss fined and barred
+URL: https://www.1news.co.nz/2024/02/23/rotorua-emergency-housing-security-boss-fined-and-barred/
+Summary: Raymond 'Tiny' Deane and Tigers Express Security Ltd were fined $1,750 after knowingly employing security guards with gang affiliations and employing unlicensed guards after their certificate applications were rejected. The company also lacked a valid security business licence. The PSPLA head called it "incomprehensible" that Deane ran both a security company and taxpayer-funded emergency housing charity simultaneously. Company licence cancelled; Deane banned from security management until October 2025. Business subsequently sold to Armourguard.
+
+[NZ Herald, 4 August 2025] Unlicensed security guards accused of listening to police scanner, responding to events
+URL: https://www.nzherald.co.nz/nz/private-security-personnel-licensing-authority-cancels-licences-for-guards-accused-of-turning-up-to-police-events/MUSKLMHOONE4XPJBNXU7DZPK34/
+Summary: Brent and Alison Shaw of House and Farm Security Service had personal security certificates cancelled. Violations: operating without a business licence (despite warnings since 2017), employing unlicensed staff, monitoring police radio and attending incidents before police arrived, and using a vehicle painted to resemble a police car. Fined $800 (equivalent to avoided licence fees).
+
+[RNZ, 25 June 2024] Security guards need more certainty on detaining offenders — association
+URL: https://www.rnz.co.nz/news/national/520544/security-guards-need-more-certainty-on-detaining-offenders-association
+Summary: NZSA chief executive raised concerns that NZ security guards operate under the Crimes Act 1961 which is "poorly worded" on when guards can lawfully use force or restrain someone. Guards risk assault charges for physically apprehending suspects. NZSA is seeking legislative amendment to clarify detention powers. Police Minister confirmed discussions ongoing. Not a licensing issue — more a powers/liability concern for licensed guards.
+
+[Defsec, 8 January 2026] New apprenticeship pathway for alarm and electronic security businesses
+URL: https://defsec.net.nz/2026/01/08/new-alarm-electronic-security-apprenticeship-pathway/
+Summary: NZSA partnered with ETCO (The Electrical Training Company) to launch a group employment apprenticeship model. Apprentices earn the New Zealand Certificate in Electronic Security (Level 4) covering alarm systems, access control, CCTV, networking, commissioning, and maintenance. ETCO directly employs apprentices and places them with host companies. 160 pre-trade trainees available from early 2026. This qualification pathway supports both PSPLA Security Technician licensing requirements and broader career development in the electronic security sector.
+
+[Stuff, 28 December 2022] Sex offender keeps security guard licence after lying on application form
+URL: https://www.stuff.co.nz/national/crime/300775133/sex-offender-keeps-security-guard-licence-after-lying-on-application-form
+Summary: Illustrates that PSPLA can impose conditions rather than cancel — even when an applicant lied on their application. The man was permitted to keep his COA but was prohibited from working around children. Shows the PSPLA has discretion to impose targeted conditions rather than always cancelling outright. Lying on an application (false information) is itself a ground for cancellation but can be mitigated by other factors.
+
+---
 USEFUL REFERENCES
 - The Act: legislation.govt.nz/act/public/2010/0115/latest/DLM1594432.html
 - PSPLA decisions register: justice.govt.nz/tribunals/licences-certificates/pspla/decisions/
@@ -6871,7 +6904,8 @@ html.dark .thinking-status{color:#5d6d7e}
 </header>
 <div class="kb-stats">
   <span><i class="fa-solid fa-database"></i> <strong>482</strong> PSPLA decisions (2019–2026)</span>
-  <span><i class="fa-solid fa-file-lines"></i> Private Security Personnel &amp; Private Investigators Act 2010</span>
+  <span><i class="fa-solid fa-newspaper"></i> <strong>7</strong> news articles</span>
+  <span><i class="fa-solid fa-file-lines"></i> PSPLA Act 2010</span>
   <span><i class="fa-solid fa-file-lines"></i> NZSA Position Statement (July 2025)</span>
   <span><i class="fa-solid fa-file-lines"></i> Electrical Workers Registration Act</span>
   <span><i class="fa-solid fa-arrow-up-right-from-square"></i> <a href="https://www.justice.govt.nz/tribunals/licences-certificates/pspla/decisions/" target="_blank">Full decisions register</a></span>
