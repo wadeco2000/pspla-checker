@@ -34,6 +34,7 @@ PROGRESS_FILE = os.path.join(BASE_DIR, "search_progress.json")
 PID_FILE = os.path.join(BASE_DIR, "search_pid.txt")
 LOG_FILE = os.path.join(BASE_DIR, "search_log.txt")
 START_FILE = os.path.join(BASE_DIR, "search_start.json")
+BACKUP_LOG_FILE = os.path.join(BASE_DIR, "backup_log.txt")
 
 NZ_REGIONS = [
     # Major cities
@@ -2234,6 +2235,32 @@ HTML_TEMPLATE = """
 """
 
 
+def _write_backup_log(trigger, record_count, local_result, dropbox_result):
+    """Append a backup event to backup_log.txt and write to Supabase AuditLog."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] trigger={trigger} records={record_count} local={local_result} dropbox={dropbox_result}\n"
+    try:
+        with open(BACKUP_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception as e:
+        print(f"[backup_log] write failed: {e}")
+    # Also write to Supabase AuditLog
+    try:
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/AuditLog",
+            headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
+                     "Content-Type": "application/json", "Prefer": "return=minimal"},
+            json={"timestamp": datetime.now(timezone.utc).isoformat(),
+                  "action": "backup",
+                  "company_name": None,
+                  "changes": f"records={record_count} | local={local_result} | dropbox={dropbox_result}",
+                  "triggered_by": trigger},
+            timeout=10
+        )
+    except Exception as e:
+        print(f"[backup_log] AuditLog write failed: {e}")
+
+
 def get_companies():
     url = f"{SUPABASE_URL}/rest/v1/Companies?select=*&order=company_name.asc"
     headers = {
@@ -2762,6 +2789,8 @@ def backup_db():
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     filename = f"pspla_backup_{timestamp}.csv"
     notes = []
+    local_result = "skipped"
+    dropbox_result = "skipped"
 
     # Local backup
     backup_dir = os.path.join(BASE_DIR, "backups")
@@ -2769,8 +2798,10 @@ def backup_db():
     try:
         with open(os.path.join(backup_dir, filename), "w", encoding="utf-8", newline="") as f:
             f.write(csv_data)
-        notes.append(f"Local: backups/{filename}")
+        local_result = f"backups/{filename}"
+        notes.append(f"Local: {local_result}")
     except Exception as e:
+        local_result = f"FAILED: {e}"
         notes.append(f"Local FAILED: {e}")
 
     # Dropbox
@@ -2792,14 +2823,19 @@ def backup_db():
                 timeout=30
             )
             if resp.status_code == 200:
-                notes.append(f"Dropbox: /Apps/pspla-backup/{filename}")
+                dropbox_result = f"/Apps/pspla-backup/{filename}"
+                notes.append(f"Dropbox: {dropbox_result}")
             else:
+                dropbox_result = f"FAILED: {resp.text[:200]}"
                 notes.append(f"Dropbox FAILED: {resp.text[:200]}")
         except Exception as e:
+            dropbox_result = f"FAILED: {e}"
             notes.append(f"Dropbox FAILED: {e}")
     else:
+        dropbox_result = "no token"
         notes.append("Dropbox token not set — skipped")
 
+    _write_backup_log("manual", len(companies), local_result, dropbox_result)
     msg = f"Backup complete ({len(companies)} records). " + " | ".join(notes)
     return redirect(url_for("index", message=msg, type="success"))
 
@@ -2836,28 +2872,30 @@ def clear_db():
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     filename = f"pspla_backup_{timestamp}.csv"
     backup_notes = []
+    local_result = "skipped"
+    dropbox_result = "skipped"
 
     # Save local backup
     backup_dir = os.path.join(BASE_DIR, "backups")
     os.makedirs(backup_dir, exist_ok=True)
-    local_path = os.path.join(backup_dir, filename)
     try:
-        with open(local_path, "w", encoding="utf-8", newline="") as f:
+        with open(os.path.join(backup_dir, filename), "w", encoding="utf-8", newline="") as f:
             f.write(csv_data)
-        backup_notes.append(f"Local backup saved to backups/{filename}")
+        local_result = f"backups/{filename}"
+        backup_notes.append(f"Local: {local_result}")
     except Exception as e:
-        backup_notes.append(f"Local backup FAILED: {e}")
+        local_result = f"FAILED: {e}"
+        backup_notes.append(f"Local FAILED: {e}")
 
     # Upload to Dropbox
     if DROPBOX_TOKEN:
         try:
-            dropbox_path = f"/pspla-backup/{filename}"
             resp = requests.post(
                 "https://content.dropboxapi.com/2/files/upload",
                 headers={
                     "Authorization": f"Bearer {DROPBOX_TOKEN}",
                     "Dropbox-API-Arg": json.dumps({
-                        "path": dropbox_path,
+                        "path": f"/pspla-backup/{filename}",
                         "mode": "add",
                         "autorename": True,
                         "mute": False
@@ -2868,13 +2906,19 @@ def clear_db():
                 timeout=30
             )
             if resp.status_code == 200:
-                backup_notes.append(f"Dropbox backup saved to {dropbox_path}")
+                dropbox_result = f"/Apps/pspla-backup/{filename}"
+                backup_notes.append(f"Dropbox: {dropbox_result}")
             else:
-                backup_notes.append(f"Dropbox upload FAILED: {resp.text[:200]}")
+                dropbox_result = f"FAILED: {resp.text[:200]}"
+                backup_notes.append(f"Dropbox FAILED: {resp.text[:200]}")
         except Exception as e:
-            backup_notes.append(f"Dropbox upload FAILED: {e}")
+            dropbox_result = f"FAILED: {e}"
+            backup_notes.append(f"Dropbox FAILED: {e}")
     else:
-        backup_notes.append("Dropbox token not set — skipped Dropbox backup")
+        dropbox_result = "no token"
+        backup_notes.append("Dropbox token not set — skipped")
+
+    _write_backup_log("clear-db", len(companies), local_result, dropbox_result)
 
     # Delete from Supabase
     try:
