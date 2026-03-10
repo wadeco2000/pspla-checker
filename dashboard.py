@@ -194,7 +194,10 @@ HTML_TEMPLATE = """
         h1 { color: #2c3e50; margin-bottom: 5px; }
         .subtitle { color: #666; margin-bottom: 25px; }
         .stats { display: flex; gap: 15px; margin-bottom: 25px; flex-wrap: wrap; }
-        .stat-box { background: white; padding: 15px 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); min-width: 130px; text-align: center; }
+        .stat-box { background: white; padding: 15px 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); min-width: 130px; text-align: center; cursor: pointer; transition: box-shadow 0.15s, transform 0.15s; user-select:none; }
+        .stat-box:hover { box-shadow: 0 4px 10px rgba(0,0,0,0.18); transform: translateY(-2px); }
+        .cam-unlicensed h2 { color: #e67e22; }
+        .fb-cam-unlicensed h2 { color: #e67e22; }
         .stat-box h2 { margin: 0; font-size: 2em; }
         .stat-box p { margin: 5px 0 0; color: #666; font-size: 13px; }
         .unlicensed h2 { color: #e74c3c; }
@@ -299,6 +302,7 @@ HTML_TEMPLATE = """
         html.dark h1,html.dark h2,html.dark h3 { color:#d0d0d0; }
         html.dark .subtitle { color:#7f95b0; }
         html.dark .stat-box { background:#1a2535; box-shadow:0 2px 4px rgba(0,0,0,0.4); }
+        html.dark .cam-unlicensed h2,html.dark .fb-cam-unlicensed h2 { color:#f0a060; }
         html.dark .stat-box p { color:#7f95b0; }
         html.dark .filters select,html.dark .filters input,html.dark select,
         html.dark input[type="text"],html.dark input[type="search"],html.dark input[type="date"],html.dark textarea
@@ -1199,25 +1203,33 @@ HTML_TEMPLATE = """
     </div>
 
     <div class="stats">
-        <div class="stat-box">
+        <div class="stat-box" onclick="filterByStat('total')" title="Show all companies">
             <h2>{{ total }}</h2>
             <p>Total Companies</p>
         </div>
-        <div class="stat-box licensed">
+        <div class="stat-box licensed" onclick="filterByStat('licensed')" title="Filter: PSPLA Licensed">
             <h2>{{ licensed }}</h2>
             <p>PSPLA Licensed</p>
         </div>
-        <div class="stat-box unlicensed">
+        <div class="stat-box unlicensed" onclick="filterByStat('unlicensed')" title="Filter: Not Licensed">
             <h2>{{ unlicensed }}</h2>
             <p>Not Licensed</p>
         </div>
-        <div class="stat-box expired">
+        <div class="stat-box expired" onclick="filterByStat('expired')" title="Filter: Expired License">
             <h2>{{ expired }}</h2>
             <p>Expired License</p>
         </div>
-        <div class="stat-box unknown">
+        <div class="stat-box unknown" onclick="filterByStat('unknown')" title="Filter: Unverified">
             <h2>{{ unknown }}</h2>
             <p>Unverified</p>
+        </div>
+        <div class="stat-box cam-unlicensed" onclick="filterByStat('cam_unlicensed')" title="Website advertises camera services but no PSPLA licence">
+            <h2 id="stat-cam-unlicensed">-</h2>
+            <p>No Licence<br><small style="font-size:10px;">Website Cameras</small></p>
+        </div>
+        <div class="stat-box fb-cam-unlicensed" onclick="filterByStat('fb_cam_unlicensed')" title="Facebook advertises camera services but no PSPLA licence">
+            <h2 id="stat-fb-cam-unlicensed">-</h2>
+            <p>No Licence<br><small style="font-size:10px;">Facebook Cameras</small></p>
         </div>
     </div>
 
@@ -1701,6 +1713,27 @@ HTML_TEMPLATE = """
     </table>
 
     <script>
+        var _statMode = '';
+
+        function filterByStat(type) {
+            document.getElementById('searchBox').value = '';
+            document.getElementById('regionFilter').value = '';
+            document.getElementById('statusFilter').value = '';
+            document.getElementById('facebookFilter').value = '';
+            document.getElementById('linkedinFilter').value = '';
+            document.getElementById('nzsaFilter').value = '';
+            document.getElementById('serviceFilter').value = '';
+            document.getElementById('fbServiceFilter').value = '';
+            _statMode = '';
+            if (type === 'licensed')               document.getElementById('statusFilter').value = 'licensed';
+            else if (type === 'unlicensed')        document.getElementById('statusFilter').value = 'unlicensed';
+            else if (type === 'expired')           document.getElementById('statusFilter').value = 'expired';
+            else if (type === 'unknown')           document.getElementById('statusFilter').value = 'unknown';
+            else if (type === 'cam_unlicensed')    { document.getElementById('serviceFilter').value = 'cctv'; _statMode = 'not_licensed'; }
+            else if (type === 'fb_cam_unlicensed') { document.getElementById('fbServiceFilter').value = 'fb_cctv'; _statMode = 'not_licensed'; }
+            filterTable();
+        }
+
         function filterTable() {
             const search = document.getElementById('searchBox').value.toLowerCase();
             const region = document.getElementById('regionFilter').value.toLowerCase();
@@ -1714,7 +1747,7 @@ HTML_TEMPLATE = """
             rows.forEach(row => {
                 const nameMatch = !search || row.dataset.name.includes(search);
                 const regionMatch = !region || row.dataset.region.includes(region);
-                const statusMatch = !status || row.dataset.status === status;
+                const statusMatch = !status ? (_statMode === 'not_licensed' ? row.dataset.status !== 'licensed' : true) : row.dataset.status === status;
                 const facebookMatch = !facebook || row.dataset.facebook === facebook;
                 const linkedinMatch = !linkedin || row.dataset.linkedin === linkedin;
                 const nzsaMatch = !nzsa || row.dataset.nzsa === nzsa;
@@ -1754,6 +1787,19 @@ HTML_TEMPLATE = """
                 if (detailRow) tbody.appendChild(detailRow);
             });
         }
+
+        // ── Compute client-side stat counts ─────────────────────────────────────
+        (function() {
+            var rows = document.querySelectorAll('.company-row');
+            var camUnlic = 0, fbCamUnlic = 0;
+            rows.forEach(function(r) {
+                var notLic = r.dataset.status !== 'licensed';
+                if (notLic && r.dataset.cctv === 'yes') camUnlic++;
+                if (notLic && r.dataset.fbCctv === 'yes') fbCamUnlic++;
+            });
+            document.getElementById('stat-cam-unlicensed').textContent = camUnlic;
+            document.getElementById('stat-fb-cam-unlicensed').textContent = fbCamUnlic;
+        })();
 
         // ── Bulk Recheck ─────────────────────────────────────────────────────────────
         function toggleBulkPanel() {
