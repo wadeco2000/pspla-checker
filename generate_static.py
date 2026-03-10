@@ -151,6 +151,7 @@ STATIC_TEMPLATE = """<!DOCTYPE html>
         <div class="refresh-badge" onclick="loadData()" title="Click to refresh now">
             <i class="fa-solid fa-rotate"></i> Refreshing in <span id="countdown">5:00</span>
         </div>
+        <div class="updated-badge" title="When this page was last published"><i class="fa-solid fa-code-branch"></i> Published: {published_date}</div>
     </div>
 </div>
 
@@ -589,9 +590,13 @@ function copyAndOpen(e, licNum) {{
 def generate():
     import subprocess
     print("Generating public page (live Supabase JS fetch)...")
+    from datetime import datetime
+    published_date = datetime.utcnow().strftime("%d %b %Y %H:%M UTC")
+
     html = STATIC_TEMPLATE
     html = html.replace("{supabase_url}", SUPABASE_URL or "")
     html = html.replace("{supabase_key}", SUPABASE_KEY or "")
+    html = html.replace("{published_date}", published_date)
     # Template uses {{ }} for JS braces (leftover from .format() style) — collapse to single braces
     html = html.replace("{{", "{").replace("}}", "}")
     os.makedirs("docs", exist_ok=True)

@@ -222,6 +222,7 @@ HTML_TEMPLATE = """
         .credits-bar { display:flex; flex-direction:column; gap:2px; font-size:11px; }
         .credits-bar span { color:#7f95b0; white-space:nowrap; line-height:1.3; }
         .credits-bar b { color:#bdc3c7; }
+        .version-tag { font-size:10px; color:#4a6278; white-space:nowrap; font-family:monospace; margin-top:1px; }
         .running-pill { display:flex; align-items:center; gap:7px; background:rgba(39,174,96,0.12);
                         border:1px solid rgba(39,174,96,0.3); border-radius:20px; padding:3px 10px 3px 7px; }
         .pulse-dot { width:7px; height:7px; border-radius:50%; background:#27ae60; flex-shrink:0;
@@ -411,6 +412,7 @@ HTML_TEMPLATE = """
     <div class="credits-bar" id="api-credits-bar">
       <span id="credit-serp"><i class="fa-solid fa-magnifying-glass"></i> SerpAPI: <b>loading…</b></span>
       <span id="credit-tokens"><i class="fa-solid fa-robot"></i> Claude: <b>–</b></span>
+      <span class="version-tag"><i class="fa-solid fa-code-branch"></i> {{ git_version }}</span>
     </div>
 
     <span id="btns-running" style="display:{{ 'contents' if search_running else 'none' }};">
@@ -2266,6 +2268,13 @@ def index():
     search_alive = _search_process_alive()
     search_paused = search_alive and os.path.exists(PAUSE_FLAG)
 
+    try:
+        _gh = subprocess.run(["git", "log", "-1", "--format=%h %cd", "--date=format:%d %b %Y"],
+                             capture_output=True, text=True, cwd=BASE_DIR)
+        git_version = _gh.stdout.strip() if _gh.returncode == 0 else "unknown"
+    except Exception:
+        git_version = "unknown"
+
     # Read live status for server-side progress bar pre-population
     init_status = {}
     if search_alive and os.path.exists(STATUS_FILE):
@@ -2307,6 +2316,7 @@ def index():
         init_status=init_status,
         init_terms=init_terms,
         init_log_lines=init_log_lines,
+        git_version=git_version,
     )
 
 
