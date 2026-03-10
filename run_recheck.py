@@ -553,7 +553,7 @@ def run_recheck(triggered_by="manual"):
         append_history("bulk-recheck", started_iso, total_processed, total_updated,
                        "completed", triggered_by)
         send_search_email("bulk-recheck", started_iso, total_processed, total_updated,
-                          triggered_by, get_session_log())
+                          triggered_by, get_session_log(), checks_label=check_label)
 
     except Exception as e:
         tb = _tb.format_exc()

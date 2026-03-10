@@ -4923,7 +4923,7 @@ def write_audit(action, company_id, company_name, changes="", triggered_by="manu
         print(f"  [Audit log error] {e}")
 
 
-def send_search_email(search_type, started_iso, total_found, total_new, triggered_by, new_companies=None):
+def send_search_email(search_type, started_iso, total_found, total_new, triggered_by, new_companies=None, checks_label=""):
     """Send a notification email summarising the completed search run."""
     if not NOTIFY_EMAIL or not SMTP_USER or not SMTP_PASS or not SMTP_HOST:
         return  # email not configured
@@ -4937,29 +4937,48 @@ def send_search_email(search_type, started_iso, total_found, total_new, triggere
         "google-partial": "Partial Search",
         "facebook": "Facebook Search",
         "directories": "Directory Import (NZSA + LinkedIn)",
+        "bulk-recheck": "Bulk Recheck",
     }
-    label = type_labels.get(search_type, search_type.title())
+    label = type_labels.get(search_type, search_type.replace("-", " ").title())
+    is_recheck = search_type == "bulk-recheck"
 
     try:
         started_dt = datetime.fromisoformat(started_iso.replace("Z", "+00:00"))
-        duration_mins = round((datetime.now(timezone.utc) - started_dt).total_seconds() / 60)
-        duration_str = f"{duration_mins} min"
+        duration_secs = round((datetime.now(timezone.utc) - started_dt).total_seconds())
+        if duration_secs >= 3600:
+            h = duration_secs // 3600
+            m = (duration_secs % 3600) // 60
+            duration_str = f"{h}h {m}m"
+        elif duration_secs >= 60:
+            duration_str = f"{duration_secs // 60}m {duration_secs % 60}s"
+        else:
+            duration_str = f"{duration_secs}s"
     except Exception:
         duration_str = "unknown"
 
-    subject = f"PSPLA {label} complete -- {total_new} new companies added"
+    if is_recheck:
+        subject = f"PSPLA Checker — {label} complete — {total_new} companies updated"
+    else:
+        subject = f"PSPLA Checker — {label} complete — {total_new} new companies added"
+
+    found_label = "Companies processed" if is_recheck else "URLs/pages found"
+    new_label = "Companies updated" if is_recheck else "New companies added"
 
     # Build plain text body
     lines = [
-        f"Search type:     {label}",
-        f"Triggered by:    {triggered_by}",
-        f"Duration:        {duration_str}",
-        f"URLs/pages found: {total_found}",
-        f"New companies:   {total_new}",
+        f"Search type:      {label}",
+    ]
+    if checks_label:
+        lines.append(f"Checks run:       {checks_label}")
+    lines += [
+        f"Triggered by:     {triggered_by}",
+        f"Duration:         {duration_str}",
+        f"{found_label}:  {total_found}",
+        f"{new_label}:  {total_new}",
         "",
     ]
 
-    if new_companies:
+    if not is_recheck and new_companies:
         lines.append(f"New companies added ({len(new_companies)}):")
         lines.append("-" * 50)
         for c in new_companies:
@@ -4969,14 +4988,16 @@ def send_search_email(search_type, started_iso, total_found, total_new, triggere
                 lines.append(f"    Website: {c['website']}")
             if c.get("email"):
                 lines.append(f"    Email:   {c['email']}")
-    else:
+    elif not is_recheck:
         lines.append("No new companies were added in this run.")
 
     body_text = "\n".join(lines)
 
     # Build HTML body
+    checks_row = f"<tr><td style='padding:2px 12px 2px 0;color:#666'>Checks run</td><td>{checks_label}</td></tr>" if checks_label else ""
+
     rows_html = ""
-    if new_companies:
+    if not is_recheck and new_companies:
         for c in new_companies:
             status = "LICENSED" if c.get("licensed") else ("NOT LICENSED" if c.get("licensed") is False else "UNKNOWN")
             color = "#27ae60" if c.get("licensed") else "#e74c3c" if c.get("licensed") is False else "#888"
@@ -4998,19 +5019,23 @@ def send_search_email(search_type, started_iso, total_found, total_new, triggere
             "<th style='padding:4px 8px;text-align:left'>Email</th>"
             "</tr>" + rows_html + "</table>"
         )
+    elif is_recheck:
+        table_html = ""
     else:
         table_html = "<p style='color:#888'>No new companies were added in this run.</p>"
 
+    new_section = "" if is_recheck else f"<h3 style='color:#2c3e50'>{new_label} ({len(new_companies) if new_companies else 0})</h3>{table_html}"
+
     html = f"""<html><body style='font-family:sans-serif;color:#333'>
-<h2 style='color:#2c3e50'>PSPLA {label} Complete</h2>
+<h2 style='color:#2c3e50'>PSPLA Checker — {label}</h2>
 <table style='margin-bottom:16px'>
+{checks_row}
 <tr><td style='padding:2px 12px 2px 0;color:#666'>Triggered by</td><td>{triggered_by}</td></tr>
 <tr><td style='padding:2px 12px 2px 0;color:#666'>Duration</td><td>{duration_str}</td></tr>
-<tr><td style='padding:2px 12px 2px 0;color:#666'>URLs/pages found</td><td>{total_found}</td></tr>
-<tr><td style='padding:2px 12px 2px 0;color:#666'>New companies added</td><td><b>{total_new}</b></td></tr>
+<tr><td style='padding:2px 12px 2px 0;color:#666'>{found_label}</td><td>{total_found}</td></tr>
+<tr><td style='padding:2px 12px 2px 0;color:#666'>{new_label}</td><td><b>{total_new}</b></td></tr>
 </table>
-<h3 style='color:#2c3e50'>New Companies ({len(new_companies) if new_companies else 0})</h3>
-{table_html}
+{new_section}
 </body></html>"""
 
     try:
