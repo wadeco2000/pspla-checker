@@ -2803,24 +2803,38 @@ HTML_TEMPLATE = """
         }
 
         function doOpenNzsaForm() {
-            // Save reporter details to localStorage
             var ls = localStorage;
             ls.setItem('nzsa-fname',  document.getElementById('nzsa-fname').value);
             ls.setItem('nzsa-lname',  document.getElementById('nzsa-lname').value);
             ls.setItem('nzsa-email',  document.getElementById('nzsa-email').value);
             ls.setItem('nzsa-mobile', document.getElementById('nzsa-mobile').value);
-            // Build pre-fill URL
             var loc = [_nzsaFormData.address, _nzsaFormData.region].filter(Boolean).join(', ');
-            var params = new URLSearchParams({
-                'input_2.3': document.getElementById('nzsa-fname').value,
-                'input_2.6': document.getElementById('nzsa-lname').value,
-                'input_3':   document.getElementById('nzsa-email').value,
-                'input_4':   document.getElementById('nzsa-mobile').value,
-                'input_6':   _nzsaFormData.name,
-                'input_7':   loc
+            var payload = {
+                fname:      document.getElementById('nzsa-fname').value,
+                lname:      document.getElementById('nzsa-lname').value,
+                email:      document.getElementById('nzsa-email').value,
+                mobile:     document.getElementById('nzsa-mobile').value,
+                party_name: _nzsaFormData.name,
+                location:   loc,
+                evidence:   document.getElementById('nzsa-evidence').value
+            };
+            var openBtn = document.querySelector('#nzsa-report-modal button[onclick="doOpenNzsaForm()"]');
+            if (openBtn) { openBtn.textContent = 'Opening browser...'; openBtn.disabled = true; }
+            fetch('/open-nzsa-report', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            }).then(function(r) { return r.json(); }).then(function(d) {
+                if (d.ok) {
+                    closeNzsaModal();
+                } else {
+                    alert('Could not open browser: ' + (d.error || 'unknown error'));
+                    if (openBtn) { openBtn.innerHTML = '<i class=\'fa-solid fa-arrow-up-right-from-square\'></i>&nbsp;Open Report Form'; openBtn.disabled = false; }
+                }
+            }).catch(function(e) {
+                alert('Error: ' + e);
+                if (openBtn) { openBtn.innerHTML = '<i class=\'fa-solid fa-arrow-up-right-from-square\'></i>&nbsp;Open Report Form'; openBtn.disabled = false; }
             });
-            var url = 'https://security.org.nz/public-info/report-unlicensed-operators/?' + params.toString();
-            window.open(url, '_blank');
         }
 
         function closeNzsaModal() {
@@ -2994,7 +3008,7 @@ HTML_TEMPLATE = """
             </button>
             <button onclick="closeNzsaModal()" style="padding:8px 16px; background:#95a5a6; color:white; border:none; border-radius:5px; font-size:13px; cursor:pointer;">Cancel</button>
         </div>
-        <p style="font-size:11px; color:#aaa; margin:10px 0 0;">The form opens in a new tab with fields pre-filled. You must click Submit on the NZSA site yourself.</p>
+        <p style="font-size:11px; color:#aaa; margin:10px 0 0;">A browser window will open with the form fully filled in. Review the details then click Submit on the NZSA site.</p>
     </div>
 </div>
 
@@ -6372,6 +6386,85 @@ def _scheduled_facebook():
 def _scheduled_directories():
     if os.path.exists(SCHEDULE_FLAG):
         _launch("run_directories.py", ["--scheduled"], triggered_by="scheduled")
+
+
+
+@app.route("/open-nzsa-report", methods=["POST"])
+def open_nzsa_report():
+    import tempfile, subprocess, sys, json as _json, os as _os
+    try:
+        import playwright  # noqa: F401
+    except ImportError:
+        return jsonify({"ok": False, "error":
+            "Playwright not installed. Run: pip install playwright && "
+            "python -m playwright install chromium"})
+
+    data = request.get_json(force=True)
+
+    # Write the form data to a temp JSON file
+    tmp_data = tempfile.NamedTemporaryFile(mode="w", suffix=".json",
+                                           delete=False, encoding="utf-8")
+    _json.dump(data, tmp_data)
+    tmp_data.flush()
+    tmp_data.close()
+
+    # Write the Playwright fill script to a temp .py file
+    script_src = r"""
+import sys, json, os
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    sys.exit("Playwright not installed")
+
+data_path = sys.argv[1]
+data = json.load(open(data_path, encoding="utf-8"))
+
+def fill(page, sel, val):
+    if val:
+        try:
+            page.wait_for_selector(sel, timeout=5000)
+            page.fill(sel, val)
+        except Exception as e:
+            print(f"  Could not fill {sel}: {e}")
+
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=False)
+    page = browser.new_page()
+    print("Opening NZSA form...")
+    page.goto("https://security.org.nz/public-info/report-unlicensed-operators/")
+    page.wait_for_load_state("networkidle", timeout=30000)
+    fill(page, "#input_13_2_3", data.get("fname", ""))
+    fill(page, "#input_13_2_6", data.get("lname", ""))
+    fill(page, "#input_13_3",   data.get("email", ""))
+    fill(page, "#input_13_4",   data.get("mobile", ""))
+    fill(page, "#input_13_6",   data.get("party_name", ""))
+    fill(page, "#input_13_7",   data.get("location", ""))
+    fill(page, "#input_13_8",   data.get("evidence", ""))
+    print("Form filled. Review the form and click Submit when ready.")
+    try:
+        page.wait_for_event("close", timeout=600000)
+    except Exception:
+        pass
+
+try:
+    os.unlink(data_path)
+except Exception:
+    pass
+"""
+    tmp_script = tempfile.NamedTemporaryFile(mode="w", suffix=".py",
+                                              delete=False, encoding="utf-8")
+    tmp_script.write(script_src)
+    tmp_script.flush()
+    tmp_script.close()
+
+    # Launch detached so it doesn't block the Flask response
+    CREATE_NO_WINDOW = 0x08000000
+    subprocess.Popen(
+        [sys.executable, tmp_script.name, tmp_data.name],
+        creationflags=CREATE_NO_WINDOW,
+        close_fds=True
+    )
+    return jsonify({"ok": True})
 
 
 if __name__ == "__main__":
