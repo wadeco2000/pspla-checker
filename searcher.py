@@ -2913,7 +2913,16 @@ Return ONLY JSON: {{"name": "best match or null", "address": null}}"""
                         raw_pick = raw_pick.split("```")[1]
                         if raw_pick.startswith("json"):
                             raw_pick = raw_pick[4:]
-                    result = json.loads(raw_pick.strip())
+                    picked = json.loads(raw_pick.strip())
+                    picked_name = picked.get("name") if isinstance(picked, dict) else None
+                    if picked_name and picked_name.lower() != "null":
+                        # Validate by actually searching CO for this name to get full details
+                        print(f"  [Companies Office] AI picked: {picked_name!r} — verifying")
+                        full_hit, _ = _try_co_search(picked_name, match_with_term=True)
+                        if full_hit and _co_verify_match(full_hit, picked_name):
+                            result = full_hit
+                        else:
+                            print(f"  [Companies Office] AI pick failed validation — no match")
 
         # If the matched company is removed/deregistered, search more broadly for an active successor.
         # e.g. "Tarnix Security Limited" (Removed) → broader search "Tarnix" → finds "Tarnix Limited" (Registered)
