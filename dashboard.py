@@ -221,8 +221,8 @@ HTML_TEMPLATE = """
                     letter-spacing:0.8px; font-weight:600; }
         .navbar-right { display:flex; align-items:center; gap:10px; padding-left:14px;
                         border-left:1px solid #3d5166; margin-left:4px; }
-        .credits-bar { display:flex; gap:12px; font-size:11px; }
-        .credits-bar span { color:#7f95b0; white-space:nowrap; }
+        .credits-bar { display:flex; flex-direction:column; gap:2px; font-size:11px; }
+        .credits-bar span { color:#7f95b0; white-space:nowrap; line-height:1.3; }
         .credits-bar b { color:#bdc3c7; }
         .running-pill { display:flex; align-items:center; gap:7px; background:rgba(39,174,96,0.12);
                         border:1px solid rgba(39,174,96,0.3); border-radius:20px; padding:3px 10px 3px 7px; }
