@@ -3609,6 +3609,7 @@ RECORD_TEMPLATE = {
     "pspla_permit_type": None,
     "co_status": None,
     "co_incorporated": None,
+    "co_website": None,
     "date_added": None,
     "fb_followers": None,
     "fb_phone": None,
@@ -4234,11 +4235,6 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
     if detected:
         print(f"  [Services detected] {', '.join(detected)}")
 
-    # Backfill website from CO NZBN data if not found via search
-    if not website_url and co_result.get("website"):
-        website_url = co_result["website"]
-        print(f"  [Website] Backfilled from Companies Office: {website_url}")
-
     record = {
         "company_name": company_name,
         "website": website_url,
@@ -4261,6 +4257,7 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         "nzbn": co_result.get("nzbn"),
         "co_status": co_result.get("status"),
         "co_incorporated": co_result.get("incorporated"),
+        "co_website": co_result.get("website"),
         "pspla_license_classes": pspla_result.get("pspla_license_classes"),
         "pspla_license_start": pspla_result.get("pspla_license_start"),
         "pspla_permit_type": pspla_result.get("pspla_permit_type"),

@@ -204,12 +204,13 @@ def recheck_companies_office(company, triggered_by="bulk-recheck"):
     result = check_companies_office(company_name)
     time.sleep(1)
     updates = {
-        "companies_office_name":    result.get("name"),
+        "companies_office_name":    result.get("registered_name") or result.get("name"),
         "companies_office_address": result.get("address"),
         "companies_office_number":  result.get("company_number"),
         "nzbn":                     result.get("nzbn"),
         "co_status":                result.get("status"),
         "co_incorporated":          result.get("incorporated"),
+        "co_website":               result.get("website"),
         "last_checked":             datetime.now(timezone.utc).isoformat(),
     }
     if result.get("directors"):

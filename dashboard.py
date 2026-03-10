@@ -1382,6 +1382,7 @@ HTML_TEMPLATE = """
                                     {% if c.companies_office_name %}<div style="grid-column:1/-1;"><span style="color:#888;">Name:</span> <strong>{{ c.companies_office_name }}</strong>{% if c.co_status %} <em style="color:#888;">({{ c.co_status }})</em>{% endif %}</div>{% endif %}
                                     {% if c.nzbn %}<div><span style="color:#888;">NZBN:</span> {{ c.nzbn }}</div>{% endif %}
                                     {% if c.co_incorporated %}<div><span style="color:#888;">Incorporated:</span> {{ c.co_incorporated }}</div>{% endif %}
+                                    {% if c.co_website %}<div style="grid-column:1/-1;"><span style="color:#888;">CO Website:</span> <a href="{{ c.co_website }}" target="_blank" style="color:#3498db;">{{ c.co_website }}</a></div>{% endif %}
                                     {% if c.director_name %}<div style="grid-column:1/-1;"><span style="color:#888;">Directors:</span> {{ c.director_name }}</div>{% endif %}
                                     {% if c.companies_office_address %}<div style="grid-column:1/-1;"><span style="color:#888;">Address:</span> {{ c.companies_office_address }}</div>{% endif %}
                                 </div>
@@ -2946,7 +2947,7 @@ def dedupe_db():
             "pspla_license_start", "pspla_permit_type", "license_type",
             "match_method", "match_reason",
             "companies_office_name", "companies_office_address", "companies_office_number",
-            "nzbn", "co_status", "co_incorporated", "individual_license", "director_name",
+            "nzbn", "co_status", "co_incorporated", "co_website", "individual_license", "director_name",
             "facebook_url", "fb_followers", "fb_phone", "fb_email", "fb_address",
             "fb_description", "fb_category", "fb_rating",
             "fb_alarm_systems", "fb_cctv_cameras", "fb_alarm_monitoring",
@@ -4304,25 +4305,12 @@ def recheck_companies_office_for_company():
             "nzbn":                     result.get("nzbn"),
             "co_status":                result.get("status"),
             "co_incorporated":          result.get("incorporated"),
+            "co_website":               result.get("website"),
         }
         directors = result.get("directors") or []
         if directors:
             patch["director_name"] = ", ".join(directors)
-        # Backfill website from CO NZBN if the record has none
-        if result.get("website"):
-            patch["_co_website"] = result["website"]  # checked below
-        patch = {k: v for k, v in patch.items() if v is not None and k != "_co_website"}
-        # Only backfill website if the record currently has none
-        if result.get("website"):
-            co_ws = result["website"]
-            existing_row = requests.get(
-                f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}&select=website",
-                headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
-                timeout=10
-            ).json()
-            if existing_row and not (existing_row[0].get("website") or "").strip():
-                patch["website"] = co_ws
-                print(f"[Companies Office] Backfilling website: {co_ws}")
+        patch = {k: v for k, v in patch.items() if v is not None}
         if patch:
             headers = {
                 "apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -4765,7 +4753,7 @@ Set a value to true ONLY if you are confident the association is for a different
             print(f"[LLM Sense] Clearing Companies Office: {reason}")
             patch.update({"companies_office_name": None, "companies_office_address": None,
                           "companies_office_number": None, "nzbn": None,
-                          "co_status": None, "co_incorporated": None,
+                          "co_status": None, "co_incorporated": None, "co_website": None,
                           "director_name": None, "individual_license": None})
             cleared.append(f"Companies Office: {reason}")
 
