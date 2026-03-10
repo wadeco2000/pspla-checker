@@ -2720,42 +2720,69 @@ def check_companies_office(company_name, pspla_address=None):
             import re as _re
 
             def _rule_variants(name):
-                """Generate cheap rule-based name variants to retry CO search."""
+                """Generate cheap rule-based name variants to retry CO search.
+                Returns list of (variant, match_with_term) tuples.
+                match_with_term=False means the variant is only a broader search query;
+                results must be matched against the original/normalized name, not the variant.
+                """
                 variants = []
                 # Replace slash/hyphen with space: "24/Seven" → "24 Seven", "A-1" → "A 1"
                 slashed = _re.sub(r'[/\-]', ' ', name).strip()
                 slashed = _re.sub(r'\s{2,}', ' ', slashed)
                 if slashed.lower() != name.lower():
-                    variants.append(slashed)
+                    variants.append((slashed, True))
                 # Insert space before digit runs: "Code9" → "Code 9"
                 spaced = _re.sub(r'([A-Za-z])(\d)', r'\1 \2', name)
                 spaced = _re.sub(r'(\d)([A-Za-z])', r'\1 \2', spaced)
                 if spaced.lower() != name.lower():
-                    variants.append(spaced)
+                    variants.append((spaced, True))
                 # CamelCase split: "AlarmWatch" → "Alarm Watch"
                 camel = _re.sub(r'([a-z])([A-Z])', r'\1 \2', name)
                 if camel.lower() != name.lower():
-                    variants.append(camel)
+                    variants.append((camel, True))
                 # Strip legal suffixes for a broader search
                 stripped = _re.sub(
                     r'\b(limited|ltd\.?|holdings|group|nz|new zealand)\b', '', name,
                     flags=_re.IGNORECASE).strip().strip(',').strip()
                 if stripped and stripped.lower() != name.lower():
-                    variants.append(stripped)
+                    variants.append((stripped, True))
+                # Strip common industry words — used as a broader CO search query ONLY.
+                # match_with_term=False: results must match the original name (or trading name),
+                # NOT the stripped term — otherwise "24 Seven" matches "24 Seven Ccc Limited".
+                _INDUSTRY = r'\b(electrical|security|services|solutions|systems|alarms|' \
+                            r'plumbing|construction|engineering|contracting|technologies|' \
+                            r'technology|communications|group|limited|ltd)\b'
+                core = _re.sub(_INDUSTRY, '', slashed if slashed.lower() != name.lower() else name,
+                               flags=_re.IGNORECASE).strip()
+                core = _re.sub(r'\s{2,}', ' ', core).strip()
+                existing = {v.lower() for v, _ in variants}
+                if core and core.lower() not in existing and core.lower() != name.lower() and len(core) >= 3:
+                    variants.append((core, False))  # query-only, don't match on stripped term
                 return variants
 
-            def _try_co_search(term):
-                """Search CO with an alternative term, return best matching result or None."""
+            def _try_co_search(term, match_with_term=True):
+                """Search CO with an alternative term, return best matching result or None.
+                If match_with_term=False, only match against the original/normalized name —
+                the term is used purely as a broader search query."""
                 try:
                     alt_resp = requests.get(url, params={**params, "q": term},
                                             headers=co_headers, timeout=15)
                     alt_lines = [l.strip() for l in
                                  BeautifulSoup(alt_resp.text, "html.parser")
                                  .get_text(separator="\n", strip=True).split("\n") if l.strip()]
-                    # Try exact match on the alternative term first
-                    hit = _find_match(alt_lines, term.upper())
-                    if hit:
-                        return hit, alt_lines
+                    # Always try normalized original name first (catches t/a trading name lines)
+                    # e.g. "24 SEVEN ELECTRICAL" matches trading name of LIGHTHOUSE SERVICES LIMITED
+                    normalized_upper = _re.sub(r'[/\-]', ' ', company_name).strip().upper()
+                    normalized_upper = _re.sub(r'\s{2,}', ' ', normalized_upper)
+                    if normalized_upper and normalized_upper != company_name_upper:
+                        hit = _find_match(alt_lines, normalized_upper)
+                        if hit:
+                            return hit, alt_lines
+                    # Match with the search term itself (only when term is a real name variant)
+                    if match_with_term:
+                        hit = _find_match(alt_lines, term.upper())
+                        if hit:
+                            return hit, alt_lines
                     # Also try original name in case CO uses the original
                     hit = _find_match(alt_lines, company_name_upper)
                     if hit:
@@ -2765,17 +2792,36 @@ def check_companies_office(company_name, pspla_address=None):
                     print(f"  [Companies Office] Alt search error for {term!r}: {_e}")
                     return None, []
 
+            def _co_addr_ok(found_addr, ref_addr):
+                """Return True if found_addr is geographically compatible with ref_addr.
+                Returns True if either is missing (can't validate). Rejects if no significant
+                location words from ref_addr appear anywhere in found_addr."""
+                if not found_addr or not ref_addr:
+                    return True
+                _generic = {"road", "street", "avenue", "drive", "place", "lane", "suite",
+                            "level", "floor", "unit", "post", "box", "zealand", "limited"}
+                ref_words = {w.lower() for w in _re.split(r'[\s,./\-]+', ref_addr)
+                             if len(w) >= 4 and w.lower() not in _generic}
+                if not ref_words:
+                    return True
+                found_lower = found_addr.lower()
+                return any(w in found_lower for w in ref_words)
+
             tried_terms = [search_term]
             alt_lines_last = []
 
             # 1. Rule-based variants
-            for variant in _rule_variants(company_name):
+            for variant, match_with_term in _rule_variants(company_name):
                 if variant in tried_terms:
                     continue
                 tried_terms.append(variant)
                 print(f"  [Companies Office] No match — trying variant: {variant!r}")
-                hit, alt_lines_last = _try_co_search(variant)
+                hit, alt_lines_last = _try_co_search(variant, match_with_term=match_with_term)
                 if hit:
+                    if pspla_address and not _co_addr_ok(hit.get("address"), pspla_address):
+                        print(f"  [Companies Office] Address mismatch — skipping {hit['name']!r}"
+                              f" ({hit.get('address')}) vs PSPLA {pspla_address!r}")
+                        continue
                     result = hit
                     lines = alt_lines_last  # update lines for director fetch below
                     print(f"  [Companies Office] Found via variant {variant!r}: {hit['name']}")
@@ -2807,6 +2853,10 @@ Do not include terms already tried: {tried_terms}"""
                             print(f"  [Companies Office] AI suggests: {ai_term!r}")
                             hit, alt_lines_last = _try_co_search(ai_term)
                             if hit:
+                                if pspla_address and not _co_addr_ok(hit.get("address"), pspla_address):
+                                    print(f"  [Companies Office] Address mismatch — skipping {hit['name']!r}"
+                                          f" ({hit.get('address')}) vs PSPLA {pspla_address!r}")
+                                    continue
                                 result = hit
                                 lines = alt_lines_last
                                 print(f"  [Companies Office] Found via AI term {ai_term!r}: {hit['name']}")

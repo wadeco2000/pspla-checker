@@ -4286,8 +4286,24 @@ def recheck_companies_office_for_company():
     _rl = _recheck_log_capture(); _rl.__enter__()
     try:
         from searcher import check_companies_office, write_audit
-        print(f"[Companies Office] Searching for: {company_name}")
-        result = check_companies_office(company_name)
+        # Fetch company region from DB to validate CO address against known location
+        _co_region = None
+        if company_id:
+            try:
+                _h = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+                _r = requests.get(
+                    f"{SUPABASE_URL}/rest/v1/Companies",
+                    headers=_h,
+                    params={"id": f"eq.{company_id}", "select": "region"}
+                )
+                _row = (_r.json() or [None])[0]
+                if _row:
+                    _co_region = _row.get("region")
+            except Exception:
+                pass
+        print(f"[Companies Office] Searching for: {company_name}" +
+              (f" (region: {_co_region})" if _co_region else ""))
+        result = check_companies_office(company_name, pspla_address=_co_region)
         if result.get("name"):
             display = result.get("registered_name") or result.get("name")
             trading = result.get("trading_name")
