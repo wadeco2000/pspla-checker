@@ -2269,7 +2269,7 @@ def index():
     search_paused = search_alive and os.path.exists(PAUSE_FLAG)
 
     try:
-        _gh = subprocess.run(["git", "log", "-1", "--format=%h %cd", "--date=format:%d %b %Y"],
+        _gh = subprocess.run(["git", "log", "-1", "--format=%h %cd", "--date=format:%d %b %Y %H:%M"],
                              capture_output=True, text=True, cwd=BASE_DIR)
         git_version = _gh.stdout.strip() if _gh.returncode == 0 else "unknown"
     except Exception:
