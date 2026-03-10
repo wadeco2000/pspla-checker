@@ -336,6 +336,8 @@ HTML_TEMPLATE = """
         html.dark .detail-row div[style*="background:#e"],
         html.dark .detail-row div[style*="background:#f"] { background:#1e2d40 !important; border-color:#3d5166 !important; }
         html.dark .detail-row div[style*="border-left:4px solid #2980b9"] { border-left-color:#2980b9 !important; }
+        html.dark .detail-row div[style*="background:#f0fbf4"] { background:#0f2a1a !important; border-color:#2d6b42 !important; }
+        html.dark .detail-row div[style*="border-top:1px solid #a3d9b1"] { border-color:#2d6b42 !important; }
         html.dark .detail-row [style*="border-top:1px solid"],
         html.dark .detail-row [style*="border-bottom:1px solid"] { border-color:#3d5166 !important; }
         html.dark .detail-row input[type="text"] { background:#1e2d40 !important; border-color:#3d5166 !important; color:#d0d0d0 !important; }
@@ -1461,6 +1463,35 @@ HTML_TEMPLATE = """
 
                         </div>
 
+                        <!-- ELECTRICIAN LICENCE ROW (only if individual PSPLA licence found) -->
+                        {% if c.individual_license %}
+                        <div style="margin-bottom:12px;">
+                            <div style="background:#f0fbf4; border:1px solid #a3d9b1; border-radius:8px; padding:12px; max-width:50%;">
+                                <div style="font-size:12px; font-weight:bold; color:#1a6b35; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+                                    <i class="fa-solid fa-bolt" style="color:#27ae60;"></i> Electrician Licence (MBIE)
+                                </div>
+                                <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; font-size:12px;">
+                                    {% if c.ew_name %}
+                                        <div style="grid-column:1/-1;"><span style="color:#888;">Name:</span> <strong>{{ c.ew_name }}</strong></div>
+                                    {% elif not c.ew_reg_number %}
+                                        <div style="grid-column:1/-1; color:#888; font-style:italic;">Not yet checked — click Re-check</div>
+                                    {% endif %}
+                                    {% if c.ew_reg_number %}<div><span style="color:#888;">Reg #:</span> {{ c.ew_reg_number }}</div>{% endif %}
+                                    {% if c.ew_licensed is not none %}<div><span style="color:#888;">Licensed:</span> <span style="color:{{ '#27ae60' if c.ew_licensed else '#e74c3c' }}; font-weight:bold;">{{ 'Yes' if c.ew_licensed else 'No' }}</span></div>{% endif %}
+                                    {% if c.ew_city %}<div><span style="color:#888;">City:</span> {{ c.ew_city }}</div>{% endif %}
+                                    {% if c.ew_region %}<div><span style="color:#888;">Region:</span> {{ c.ew_region }}</div>{% endif %}
+                                </div>
+                                <div style="margin-top:8px; padding-top:8px; border-top:1px solid #a3d9b1; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                                    <span id="ew-recheck-result-{{ c.id }}" style="font-size:11px; color:#555;"></span>
+                                    <button onclick="recheckElectrician({{ c.id }}, '{{ (c.individual_license or '') | e }}')" id="ew-btn-{{ c.id }}"
+                                            style="padding:2px 10px; font-size:11px; background:#555; color:white; border:none; border-radius:3px; cursor:pointer; white-space:nowrap;">
+                                        Re-check
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
                         <!-- SECOND ROW: Facebook + NZSA + Google + LinkedIn -->
                         <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:12px;">
 
@@ -1990,6 +2021,43 @@ HTML_TEMPLATE = """
                     btnSaved(btn);
                 } else {
                     result.innerHTML = '<em style="color:#aaa">not found / not a member</em>';
+                    btnSaved(btn, '#95a5a6', 'Not found');
+                }
+                _recheckTermStop();
+            })
+            .catch(function() {
+                result.innerHTML = '<em style="color:#e74c3c">Request failed</em>';
+                btn.textContent = 'Re-check'; btn.disabled = false;
+                _recheckTermStop();
+            });
+        }
+
+        function recheckElectrician(id, name) {
+            var btn = document.getElementById('ew-btn-' + id);
+            var result = document.getElementById('ew-recheck-result-' + id);
+            if (!name) return;
+            btn.disabled = true;
+            btn.textContent = 'Checking...';
+            _recheckTermStart('Electrician — ' + name);
+            fetch('/recheck-electrician', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id, name: name})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.error) {
+                    result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
+                    btn.textContent = 'Re-check'; btn.disabled = false;
+                } else if (d.found) {
+                    var txt = '<strong style="color:#27ae60;">' + d.ew_name + '</strong>';
+                    txt += ' — ' + d.ew_reg_number;
+                    txt += ' | Licensed: <strong style="color:' + (d.ew_licensed ? '#27ae60' : '#e74c3c') + '">' + (d.ew_licensed ? 'Yes' : 'No') + '</strong>';
+                    if (d.ew_city || d.ew_region) txt += ' | ' + [d.ew_city, d.ew_region].filter(Boolean).join(', ');
+                    result.innerHTML = txt;
+                    btnSaved(btn);
+                } else {
+                    result.innerHTML = '<em style="color:#aaa">No electrician licence found</em>';
                     btnSaved(btn, '#95a5a6', 'Not found');
                 }
                 _recheckTermStop();
@@ -5029,6 +5097,49 @@ def recheck_nzsa_for_company():
         from searcher import write_audit
         write_audit("updated", company_id, company_name,
                     changes=f"NZSA recheck: member={result['member']}, name={result['member_name']}",
+                    triggered_by="manual (dashboard)",
+                    snapshot_before=snapshot)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        _rl.__exit__(None, None, None)
+
+
+@app.route("/recheck-electrician", methods=["POST"])
+def recheck_electrician_for_company():
+    """Re-check MBIE Electrical Workers register for an individual and save the result."""
+    from flask import jsonify
+    company_id = request.json.get("id")
+    name = request.json.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "No name provided"}), 400
+    _rl = _recheck_log_capture(); _rl.__enter__()
+    snapshot = _fetch_company_snapshot(company_id)
+    try:
+        from searcher import check_electrician_licence
+        print(f"[EW] Checking electrician licence for: {name}")
+        result = check_electrician_licence(name)
+        if result.get("found"):
+            print(f"[EW] Found: {result.get('ew_name')} | {result.get('ew_reg_number')} | Licensed: {result.get('ew_licensed')}")
+        else:
+            print(f"[EW] No electrician licence found")
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
+                   "Content-Type": "application/json", "Prefer": "return=minimal"}
+        requests.patch(
+            f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
+            headers=headers,
+            json={
+                "ew_licensed":    result.get("ew_licensed"),
+                "ew_name":        result.get("ew_name"),
+                "ew_reg_number":  result.get("ew_reg_number"),
+                "ew_city":        result.get("ew_city"),
+                "ew_region":      result.get("ew_region"),
+            },
+        )
+        from searcher import write_audit
+        write_audit("updated", company_id, name,
+                    changes=f"EW recheck: found={result.get('found')}, name={result.get('ew_name')}, reg={result.get('ew_reg_number')}",
                     triggered_by="manual (dashboard)",
                     snapshot_before=snapshot)
         return jsonify(result)

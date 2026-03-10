@@ -3415,6 +3415,72 @@ def check_pspla_individual(name):
 
 
 # ---------------------------------------------------------------------------
+# MBIE Electrical Workers register
+# ---------------------------------------------------------------------------
+
+def check_electrician_licence(name):
+    """Search MBIE Electrical Workers Public Register for a person by name.
+    Returns dict with: found, ew_name, ew_reg_number, ew_city, ew_region, ew_licensed
+    """
+    if not name or not name.strip():
+        return {"found": False}
+    try:
+        from bs4 import BeautifulSoup as _BS
+        parts = name.strip().split()
+        if len(parts) < 2:
+            return {"found": False}
+        fname = parts[0]
+        lname = parts[-1]
+        resp = requests.get(
+            "https://kete.mbie.govt.nz/EW/EWPRSearch/AEWPRSearch/",
+            params={
+                "fname": fname, "lname": lname,
+                "mname": "", "pname": "", "city": "",
+                "ltype": "", "rclass": "", "rnumber": "", "pid": "",
+                "btnSearch": "Search"
+            },
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15
+        )
+        if resp.status_code != 200:
+            return {"found": False}
+        soup = _BS(resp.text, "html.parser")
+        table = soup.find("table", {"id": "data"})
+        if not table:
+            return {"found": False}
+        rows = table.find("tbody").find_all("tr")
+        if not rows:
+            return {"found": False}
+        name_norm = name.strip().lower()
+        best = None
+        for row in rows:
+            cells = row.find_all("td")
+            if len(cells) < 5:
+                continue
+            row_name = cells[0].text.strip()
+            reg_num  = cells[1].text.strip()
+            city     = cells[2].text.strip()
+            region   = cells[3].text.strip()
+            licensed = cells[4].text.strip().lower() == "yes"
+            entry = {
+                "found": True,
+                "ew_name": row_name,
+                "ew_reg_number": reg_num,
+                "ew_city": city,
+                "ew_region": region,
+                "ew_licensed": licensed,
+            }
+            if row_name.lower() == name_norm:
+                return entry   # exact match — done
+            if best is None:
+                best = entry   # keep first result as fallback
+        return best or {"found": False}
+    except Exception as e:
+        print(f"  [EW] Error checking electrician licence for {name}: {e}")
+        return {"found": False}
+
+
+# ---------------------------------------------------------------------------
 # NZSA member directory
 # ---------------------------------------------------------------------------
 _nzsa_cache = {"members": None, "fetched_at": 0}
@@ -3718,6 +3784,11 @@ RECORD_TEMPLATE = {
     "companies_office_number": None,
     "nzbn": None,
     "individual_license": None,
+    "ew_licensed": None,
+    "ew_name": None,
+    "ew_reg_number": None,
+    "ew_city": None,
+    "ew_region": None,
     "director_name": None,
     "facebook_url": None,
     "linkedin_url": None,
@@ -4390,6 +4461,16 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
                     triggered_by="llm_verify_associations")
         google_profile = {}
 
+    # Electrician licence check (MBIE register) — only when individual PSPLA licence found
+    ew_result = {"found": False}
+    if individual_license_found:
+        print(f"  [EW] Checking electrician licence for {individual_license_found}")
+        ew_result = check_electrician_licence(individual_license_found)
+        if ew_result.get("found"):
+            print(f"  [EW] Found: {ew_result.get('ew_name')} | {ew_result.get('ew_reg_number')} | Licensed: {ew_result.get('ew_licensed')}")
+        else:
+            print(f"  [EW] No electrician licence found")
+
     # Detect services mentioned on the company website (homepage + service sub-pages)
     service_text = gather_service_text(website_url, page_text) if website_url else page_text
     services = detect_services(service_text)
@@ -4427,6 +4508,11 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         "pspla_permit_type": pspla_result.get("pspla_permit_type"),
         "date_added": datetime.now(timezone.utc).isoformat(),
         "individual_license": individual_license_found,
+        "ew_licensed": ew_result.get("ew_licensed"),
+        "ew_name": ew_result.get("ew_name"),
+        "ew_reg_number": ew_result.get("ew_reg_number"),
+        "ew_city": ew_result.get("ew_city"),
+        "ew_region": ew_result.get("ew_region"),
         "director_name": ", ".join(directors),
         "facebook_url": info.get("facebook_url") or (
             info.get("_fb_url") if info.get("_fb_url") and "facebook.com" in (info.get("_fb_url") or "") else None
