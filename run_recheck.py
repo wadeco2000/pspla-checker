@@ -22,7 +22,7 @@ from searcher import (
     find_facebook_url, scrape_facebook_page, find_linkedin_url, scrape_linkedin_page,
     get_google_business_profile, detect_services,
     write_audit, write_status, clear_status, append_history, record_search_start, check_pause,
-    reset_session_log, get_session_log, send_search_email,
+    reset_session_log, get_session_log, send_search_email, _push_search_status,
     patch_company, enrich_existing_record,
     SUPABASE_URL, SUPABASE_KEY,
     RUNNING_FLAG, PAUSE_FLAG,
@@ -524,6 +524,19 @@ def run_recheck(triggered_by="manual"):
             # Write status for dashboard progress bar
             write_status("recheck", f"{idx}/{total}", company_name,
                          idx, 1, total, 1, total_processed, total_updated)
+
+            # Push to Supabase every 15 companies for public site live status
+            if idx == 1 or idx % 15 == 0:
+                try:
+                    _log = "\n".join(get_session_log()[-60:])
+                    _push_search_status(
+                        True,
+                        search_type="bulk-recheck",
+                        progress=f"{idx} / {total} companies — {check_label}",
+                        log_lines=_log,
+                    )
+                except Exception:
+                    pass
 
             for check in checks:
                 check_pause()
