@@ -3424,6 +3424,13 @@ def _ew_search_rows(fname, lname, include_all=False):
     Each row: {found, ew_name, ew_reg_number, ew_city, ew_region, ew_licensed, ew_profile_url}
     """
     from bs4 import BeautifulSoup as _BS
+    _EW_BASE = "https://kete.mbie.govt.nz/EW/EWPRSearch/AEWPRSearch/"
+    # Use a session so Azure ARRAffinity + F5 session cookies are carried through.
+    # Without these the load balancer may route requests to a different server
+    # that has no session context, returning empty results.
+    sess = requests.Session()
+    sess.headers.update({"User-Agent": "Mozilla/5.0"})
+    sess.get(_EW_BASE, timeout=15)   # picks up ARRAffinity, TS, f5 cookies
     params = {
         "fname": fname, "lname": lname,
         "mname": "", "pname": "", "city": "",
@@ -3432,12 +3439,7 @@ def _ew_search_rows(fname, lname, include_all=False):
     }
     if include_all:
         params["includeall"] = "true"
-    resp = requests.get(
-        "https://kete.mbie.govt.nz/EW/EWPRSearch/AEWPRSearch/",
-        params=params,
-        headers={"User-Agent": "Mozilla/5.0"},
-        timeout=15
-    )
+    resp = sess.get(_EW_BASE, params=params, timeout=15)
     if resp.status_code != 200:
         return []
     soup = _BS(resp.text, "html.parser")
