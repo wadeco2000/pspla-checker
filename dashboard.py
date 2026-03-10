@@ -557,6 +557,11 @@ HTML_TEMPLATE = """
           <i class="fa-solid fa-id-card dd-icon" style="color:#8e44ad;"></i>
           <span>PSPLA Search<span class="dd-sub">Security licence register lookup</span></span>
         </button>
+        <div class="dd-divider"></div>
+        <a href="/license-checker" class="dd-item" target="_blank">
+          <i class="fa-solid fa-scale-balanced dd-icon" style="color:#c0392b;"></i>
+          <span>Do I Need a Licence?<span class="dd-sub">AI-guided PSPLA licensing advisor</span></span>
+        </a>
       </div>
     </div>
 
@@ -6472,6 +6477,398 @@ def open_nzsa_report():
         except Exception:
             pass
         return jsonify({"ok": False, "error": str(_e)})
+
+
+# ---------------------------------------------------------------------------
+# Do I Need a Licence? — AI licensing advisor
+# ---------------------------------------------------------------------------
+
+_LICENSE_KB = """
+You are a New Zealand PSPLA licensing advisor. Your job is to help people work out whether they need a licence under the Private Security Personnel and Private Investigators Act 2010 (the Act).
+
+IMPORTANT RULES:
+- Ask one or two focused questions at a time to understand the person's situation before giving an answer.
+- When you have enough information, give a clear, plain-English answer with specific references to the Act.
+- Always end with: "This is general guidance only — contact the PSPLA Licensing Authority (justice.govt.nz/tribunals/licences-certificates/pspla) or a solicitor for definitive advice."
+- Be conversational and friendly, not legalistic.
+
+---
+KNOWLEDGE BASE: Private Security Personnel and Private Investigators Act 2010
+
+## Who must be licensed (s23)
+Any person who carries out security work for valuable consideration must hold either:
+- An individual licence / Certificate of Approval (COA), AND/OR
+- A company licence (if operating as a business entity)
+
+Both are often required simultaneously — the company holds a company licence AND each employee doing the work holds an individual COA.
+
+## Section 6 — Security Technician
+A security technician means a person who, for valuable consideration:
+(a) installs or repairs burglar alarms, or installs or repairs locking devices for safes or strongrooms, on premises not owned by that person; OR
+(b) installs or operates cameras for the purpose of detecting the commission of any offence, on premises not owned by that person.
+
+Key trigger: the camera must be installed "for the purpose of detecting the commission of any offence" — i.e., security/surveillance cameras for crime prevention. Cameras for purely operational purposes (e.g., monitoring a manufacturing line) may not trigger this.
+
+## Section 7 — Security Consultant
+A security consultant means a person who, for valuable consideration, enters another person's premises to:
+(a) sell or attempt to sell a security device; OR
+(b) advise on the desirability of installing a security device; OR
+(c) recommend the guarding of property.
+
+Key trigger: "enters another person's premises." Selling from your own showroom, online, or by phone where the customer never invites you to their premises does NOT require a Security Consultant licence.
+
+"Security device" includes alarms, CCTV cameras, access control systems, intercoms, and related equipment.
+
+## Section 9 — Property Guard
+A property guard means a person who, for valuable consideration:
+(a) guards real or personal property on premises not owned by that person; OR
+(b) in real time, monitors images from cameras or signals from alarms at premises not owned by that person (e.g., monitoring centre operators); OR
+(c) responds to an activated alarm or camera at premises not owned by that person (e.g., mobile patrol/keyholding).
+
+## Section 10 — Personal Guard
+A personal guard means a person who, for valuable consideration, protects a specific individual or protects persons while also maintaining order.
+
+## Section 11 — Crowd Controller
+A crowd controller means a person who, for valuable consideration, screens entry to a venue, maintains order, or removes people from a venue.
+
+## Section 22 — Exemptions
+The Act does NOT apply to:
+(a) NZ Police employees performing employment duties
+(b) Crown employees acting within employment scope
+(c) Parliamentary agency employees during official duties
+(d) Persons authorised to carry out work under any other enactment (e.g., registered electricians — see below)
+
+## Individual COA vs Company Licence
+- INDIVIDUAL COA: Required for each person who personally performs security work (installation, guarding, monitoring, consulting, etc.).
+- COMPANY LICENCE: Required for any business entity that provides security services.
+- A sole trader doing security work needs an individual COA (and often a company licence too if trading as a business).
+- A company employing security technicians needs a company licence; each technician needs their own COA.
+- A company director/manager who does NOT personally perform security work does not need a COA — only employees who actually do the work do.
+- Experience requirement: at least 12 months' relevant experience in the last 5 years.
+
+---
+SPECIFIC SCENARIOS
+
+## REGISTERED ELECTRICIANS — NZSA/Master Electricians Joint Position Statement (July 2025)
+
+A Registered Electrician IS EXEMPT from needing a Certificate of Approval (COA) as a Security Technician for the install or servicing of security systems including intruder alarms, access control, and camera systems.
+— This exemption comes from Section 22(d) of the Act (person authorised under another enactment — the Electrical Workers Registration Act).
+
+HOWEVER — a registered electrician who, for valuable consideration, enters another person's premises to SELL or ADVISE on the desirability of installing a security system IS acting as a Security Consultant and MUST hold a COA as Security Consultant.
+
+If an electrical company has an employee acting as a Security Consultant, the company must also hold a Company Security Licence under the Security Consultant category.
+
+NZSA recommendation: Even though electricians are exempt for Security Technician work, it is recommended that electrical companies doing significant security work also obtain Security Technician licensing for credibility and compliance.
+
+SUMMARY for electricians:
+- Installing/servicing alarms, CCTV, access control → EXEMPT (no COA needed, covered by electrician registration)
+- Going to customer's site to sell or advise on security systems → COA as Security Consultant REQUIRED
+- Company employing a Security Consultant salesperson → Company Security Licence (Security Consultant) REQUIRED
+
+## IT COMPANIES / TECHNOLOGY COMPANIES installing cameras or access control
+
+IT companies are NOT registered electricians and do NOT have the s22(d) exemption.
+- Installing cameras for security/crime detection purposes → Security Technician COA REQUIRED for the individual, Company Security Licence REQUIRED for the business
+- Installing access control systems → Security Technician COA REQUIRED
+- Installing cameras for non-security purposes (e.g., a production line camera that is NOT for crime detection) → May not be required, but this is a grey area — the purpose matters
+- Network cabling/IT setup only (no camera or alarm installation) → Does not require PSPLA licence
+- Installing a video doorbell or IP camera at a customer's home for crime detection → Yes, Security Technician licence required
+
+## SECURITY SALESPEOPLE who do not enter premises
+
+- Selling security systems from a showroom (customer comes to you) → No licence required
+- Selling online or by phone → No licence required
+- Sending a quote by email after a customer describes their needs → No licence required
+- Going to a customer's home or business to demonstrate/sell/advise → Security Consultant COA REQUIRED, Company Security Licence REQUIRED for the employer
+
+## ALARM MONITORING CENTRES
+
+- Operators monitoring alarms or cameras from a remote centre → Property Guard COA REQUIRED (they are monitoring premises not owned by them in real time)
+- The monitoring company → Company Security Licence (Property Guard) REQUIRED
+
+## MOBILE PATROL / KEYHOLDING
+
+- Responding to activated alarms at customer premises → Property Guard COA REQUIRED
+- Keyholding service → Property Guard COA REQUIRED
+
+## SECURITY GUARDS at retail or commercial sites
+
+- Guarding property at premises not your own → Property Guard COA REQUIRED
+- Employer → Company Security Licence REQUIRED
+
+## CROWD CONTROLLERS / BOUNCERS
+
+- Working at a venue screening entry, removing people → Crowd Controller COA REQUIRED
+- Employer → Company Security Licence REQUIRED
+
+## PRIVATE INVESTIGATORS
+
+- Investigating people's activities, whereabouts, finances for payment → Private Investigator COA REQUIRED
+
+## LOCKSMITH work on safes/strongrooms (not general residential locksmithing)
+
+- Installing/repairing locking devices for safes or strongrooms on premises not your own → Security Technician COA REQUIRED
+
+## PEOPLE WHO NEVER NEED A PSPLA LICENCE
+- Ordinary residential or commercial locksmith (not safes/strongrooms) — not covered
+- Building security officer employed directly by the building owner to guard their own building — guarding "own premises" is exempt
+- Volunteering (no valuable consideration)
+- IT work that doesn't involve security device installation
+- General CCTV for non-crime-detection purposes (e.g., a factory monitoring production quality)
+
+---
+USEFUL REFERENCES
+- The Act: legislation.govt.nz/act/public/2010/0115/latest/DLM1594432.html
+- PSPLA apply/renew: justice.govt.nz/tribunals/licences-certificates/pspla/apply-or-renew/
+- NZSA/Master Electricians position statement: security.org.nz/wp-content/uploads/2025/07/NZSA_positionstatement25_July.pdf
+- Section 6 (Security Technician): legislation.govt.nz/act/public/2010/0115/latest/DLM1594499.html
+- Section 22 (Exemptions): legislation.govt.nz/act/public/2010/0115/latest/DLM1594521.html
+"""
+
+_LICENSE_CHAT_HTML = r"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Do I Need a PSPLA Licence? — NZ Licensing Advisor</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f0f4f8;color:#2c3e50;min-height:100vh;display:flex;flex-direction:column}
+html.dark body{background:#0f1923;color:#d0d0d0}
+header{background:#c0392b;color:#fff;padding:14px 20px;display:flex;align-items:center;gap:12px;flex-shrink:0}
+header h1{font-size:18px;font-weight:700}
+header p{font-size:12px;opacity:.85;margin-top:2px}
+.back-btn{margin-left:auto;background:rgba(255,255,255,.2);border:none;color:#fff;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px;text-decoration:none;display:flex;align-items:center;gap:6px}
+.back-btn:hover{background:rgba(255,255,255,.35)}
+.chat-wrap{flex:1;display:flex;flex-direction:column;max-width:800px;width:100%;margin:0 auto;padding:16px;gap:0}
+#chat-messages{flex:1;overflow-y:auto;padding:8px 0;display:flex;flex-direction:column;gap:12px;min-height:0}
+.msg{display:flex;gap:10px;max-width:92%}
+.msg.user{align-self:flex-end;flex-direction:row-reverse}
+.msg-avatar{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;margin-top:2px}
+.msg.ai .msg-avatar{background:#c0392b;color:#fff}
+.msg.user .msg-avatar{background:#2980b9;color:#fff}
+.msg-bubble{padding:10px 14px;border-radius:12px;line-height:1.55;font-size:14px;white-space:pre-wrap;word-break:break-word}
+.msg.ai .msg-bubble{background:#fff;border:1px solid #dce3ea;border-radius:4px 12px 12px 12px}
+.msg.user .msg-bubble{background:#2980b9;color:#fff;border-radius:12px 4px 12px 12px}
+html.dark .msg.ai .msg-bubble{background:#1a2940;border-color:#2d4460;color:#d0d0d0}
+html.dark .msg.user .msg-bubble{background:#1a5276}
+.msg-bubble strong{font-weight:700}
+.msg-bubble a{color:#2980b9;word-break:break-all}
+html.dark .msg-bubble a{color:#5dade2}
+.msg.user .msg-bubble a{color:#aed6f1}
+.typing{display:flex;align-items:center;gap:5px;padding:10px 14px;background:#fff;border:1px solid #dce3ea;border-radius:4px 12px 12px 12px;width:60px}
+html.dark .typing{background:#1a2940;border-color:#2d4460}
+.typing span{width:7px;height:7px;background:#999;border-radius:50%;animation:bounce .9s infinite}
+.typing span:nth-child(2){animation-delay:.2s}
+.typing span:nth-child(3){animation-delay:.4s}
+@keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-6px)}}
+.input-row{display:flex;gap:8px;padding:12px 0 4px;flex-shrink:0}
+#user-input{flex:1;padding:10px 14px;border:1px solid #ccd3d9;border-radius:8px;font-size:14px;resize:none;height:44px;max-height:120px;font-family:inherit;background:#fff;color:#2c3e50}
+#user-input:focus{outline:none;border-color:#2980b9;box-shadow:0 0 0 2px rgba(41,128,185,.15)}
+html.dark #user-input{background:#1a2940;border-color:#2d4460;color:#d0d0d0}
+html.dark #user-input:focus{border-color:#5dade2}
+#send-btn{background:#c0392b;color:#fff;border:none;border-radius:8px;padding:0 18px;cursor:pointer;font-size:16px;flex-shrink:0}
+#send-btn:hover{background:#a93226}
+#send-btn:disabled{background:#aaa;cursor:not-allowed}
+.disclaimer{font-size:11px;color:#888;text-align:center;padding:6px 0 2px;flex-shrink:0}
+html.dark .disclaimer{color:#556}
+.quick-btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.quick-btn{background:#eaf2f8;border:1px solid #aed6f1;color:#1a5276;padding:5px 12px;border-radius:16px;font-size:12px;cursor:pointer;white-space:nowrap}
+.quick-btn:hover{background:#d6eaf8}
+html.dark .quick-btn{background:#1a2940;border-color:#2d4460;color:#5dade2}
+html.dark .quick-btn:hover{background:#1e3550}
+</style>
+<script>(function(){if(localStorage.getItem("pspla-dark")==="1")document.documentElement.classList.add("dark");})()</script>
+</head>
+<body>
+<header>
+  <i class="fa-solid fa-scale-balanced" style="font-size:22px"></i>
+  <div>
+    <h1>Do I Need a PSPLA Licence?</h1>
+    <p>AI-guided New Zealand security licensing advisor</p>
+  </div>
+  <a href="/" class="back-btn"><i class="fa-solid fa-arrow-left"></i> Dashboard</a>
+</header>
+<div class="chat-wrap">
+  <div id="chat-messages"></div>
+  <div class="input-row">
+    <textarea id="user-input" placeholder="Type your answer or question..." rows="1"></textarea>
+    <button id="send-btn" onclick="sendMessage()"><i class="fa-solid fa-paper-plane"></i></button>
+  </div>
+  <p class="disclaimer"><i class="fa-solid fa-circle-info"></i> General guidance only — not legal advice. Always verify with the <a href="https://www.justice.govt.nz/tribunals/licences-certificates/pspla/" target="_blank">PSPLA Licensing Authority</a>.</p>
+</div>
+<script>
+var _history = [];
+var _thinking = false;
+
+function escHtml(t){
+  return t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+function formatMsg(t){
+  // Bold **text**, links, newlines
+  t = escHtml(t);
+  t = t.replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>");
+  t = t.replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank">$1</a>');
+  return t;
+}
+
+function addBubble(role, text, withQuickBtns){
+  var wrap = document.createElement("div");
+  wrap.className = "msg " + (role === "user" ? "user" : "ai");
+  var av = document.createElement("div");
+  av.className = "msg-avatar";
+  av.innerHTML = role === "user" ? '<i class="fa-solid fa-user"></i>' : '<i class="fa-solid fa-scale-balanced"></i>';
+  var bub = document.createElement("div");
+  bub.className = "msg-bubble";
+  bub.innerHTML = formatMsg(text);
+  if(role === "user"){
+    wrap.appendChild(bub);
+    wrap.appendChild(av);
+  } else {
+    wrap.appendChild(av);
+    var inner = document.createElement("div");
+    inner.appendChild(bub);
+    if(withQuickBtns){
+      var qr = document.createElement("div");
+      qr.className = "quick-btns";
+      var starters = [
+        "I install alarm systems",
+        "I install CCTV cameras",
+        "I sell security systems",
+        "I monitor alarms remotely",
+        "I am a registered electrician",
+        "I work in IT and install cameras",
+        "I do security guarding",
+        "I run a patrol/keyholding service"
+      ];
+      starters.forEach(function(s){
+        var b = document.createElement("button");
+        b.className = "quick-btn";
+        b.textContent = s;
+        b.onclick = function(){ send(s); };
+        qr.appendChild(b);
+      });
+      inner.appendChild(qr);
+    }
+    wrap.appendChild(inner);
+  }
+  var msgs = document.getElementById("chat-messages");
+  msgs.appendChild(wrap);
+  msgs.scrollTop = msgs.scrollHeight;
+  return bub;
+}
+
+function showTyping(){
+  var wrap = document.createElement("div");
+  wrap.className = "msg ai";
+  wrap.id = "typing-indicator";
+  var av = document.createElement("div");
+  av.className = "msg-avatar";
+  av.innerHTML = '<i class="fa-solid fa-scale-balanced"></i>';
+  var t = document.createElement("div");
+  t.className = "typing";
+  t.innerHTML = "<span></span><span></span><span></span>";
+  wrap.appendChild(av);
+  wrap.appendChild(t);
+  var msgs = document.getElementById("chat-messages");
+  msgs.appendChild(wrap);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function removeTyping(){
+  var t = document.getElementById("typing-indicator");
+  if(t) t.remove();
+}
+
+function send(text){
+  if(_thinking || !text.trim()) return;
+  addBubble("user", text);
+  _history.push({role:"user", content: text});
+  document.getElementById("user-input").value = "";
+  _thinking = true;
+  document.getElementById("send-btn").disabled = true;
+  showTyping();
+  fetch("/license-checker/chat", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({messages: _history})
+  }).then(function(r){ return r.json(); }).then(function(d){
+    removeTyping();
+    var reply = d.reply || "Sorry, something went wrong. Please try again.";
+    addBubble("ai", reply, false);
+    _history.push({role:"assistant", content: reply});
+    _thinking = false;
+    document.getElementById("send-btn").disabled = false;
+  }).catch(function(e){
+    removeTyping();
+    addBubble("ai", "Sorry, there was an error connecting to the AI. Please try again.", false);
+    _thinking = false;
+    document.getElementById("send-btn").disabled = false;
+  });
+}
+
+function sendMessage(){
+  send(document.getElementById("user-input").value);
+}
+
+document.getElementById("user-input").addEventListener("keydown", function(e){
+  if(e.key === "Enter" && !e.shiftKey){
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+// Auto-resize textarea
+document.getElementById("user-input").addEventListener("input", function(){
+  this.style.height = "44px";
+  this.style.height = Math.min(this.scrollHeight, 120) + "px";
+});
+
+// Opening message
+window.onload = function(){
+  addBubble("ai",
+    "Kia ora! I can help you work out whether you or your business needs a PSPLA licence under the Private Security Personnel and Private Investigators Act 2010.\n\nTo get started — what type of work do you do, or are you planning to do?",
+    true
+  );
+};
+</script>
+</body>
+</html>"""
+
+
+@app.route("/license-checker")
+def license_checker():
+    return Response(_LICENSE_CHAT_HTML, mimetype="text/html")
+
+
+@app.route("/license-checker/chat", methods=["POST"])
+def license_checker_chat():
+    from flask import jsonify
+    import anthropic as _ant
+    try:
+        data = request.get_json(force=True) or {}
+        messages = data.get("messages", [])
+        if not messages:
+            return jsonify({"reply": "Please describe what type of work you do."})
+
+        # Cap history to last 20 exchanges to avoid token bloat
+        trimmed = messages[-20:]
+
+        client = _ant.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1024,
+            system=_LICENSE_KB,
+            messages=trimmed,
+        )
+        reply = resp.content[0].text if resp.content else "Sorry, I couldn't generate a response."
+        return jsonify({"reply": reply})
+    except Exception as _e:
+        import traceback as _tb
+        print("license-checker/chat error:", _tb.format_exc())
+        return jsonify({"reply": "Sorry, there was an error: " + str(_e)})
 
 
 if __name__ == "__main__":
