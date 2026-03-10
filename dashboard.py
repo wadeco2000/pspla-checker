@@ -2221,8 +2221,6 @@ HTML_TEMPLATE = """
             });
         }
 
-        document.getElementById('recheck-approve-btn').onclick = function(){ confirmRecheck(true); };
-        document.getElementById('recheck-reject-btn').onclick  = function(){ confirmRecheck(false); };
 
         function deleteCompany(id, name) {
             if (!confirm('Delete "' + name + '"?\\nThis cannot be undone.')) return;
@@ -2359,12 +2357,12 @@ HTML_TEMPLATE = """
         <div id="recheck-result" style="background:#f8f9fa; border-radius:8px; padding:16px; margin-bottom:20px; font-size:14px; line-height:1.7;"></div>
         <div id="recheck-lesson" style="font-size:12px; color:#888; margin-bottom:20px; font-style:italic;"></div>
         <div style="display:flex; gap:10px;">
-            <button id="recheck-approve-btn"
+            <button onclick="confirmRecheck(true)"
                 style="flex:1; padding:11px; background:#27ae60; color:white; border:none;
                        border-radius:6px; font-size:14px; font-weight:bold; cursor:pointer;">
                 <i class="fa-solid fa-check"></i> Yes, use this match
             </button>
-            <button id="recheck-reject-btn"
+            <button onclick="confirmRecheck(false)"
                 style="flex:1; padding:11px; background:#e74c3c; color:white; border:none;
                        border-radius:6px; font-size:14px; font-weight:bold; cursor:pointer;">
                 <i class="fa-solid fa-xmark"></i> No, not a match
