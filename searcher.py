@@ -2807,6 +2807,31 @@ def check_companies_office(company_name, pspla_address=None):
                 found_lower = found_addr.lower()
                 return any(w in found_lower for w in ref_words)
 
+            def _co_verify_match(hit, via_term):
+                """Verify a fuzzy CO match is actually the same company.
+                First checks address (fast, free). Then asks Haiku if still uncertain.
+                Returns True if the match should be accepted."""
+                found_name = hit.get("name") or hit.get("registered_name") or ""
+                found_addr = hit.get("address") or ""
+                # Address check (free)
+                if pspla_address and not _co_addr_ok(found_addr, pspla_address):
+                    print(f"  [Companies Office] Address mismatch — skipping {found_name!r}"
+                          f" ({found_addr}) vs region {pspla_address!r}")
+                    return False
+                # Name word overlap check: at least one significant word from original
+                # must appear in found name (guards against totally unrelated companies)
+                _stopw = {"limited", "ltd", "nz", "new", "zealand", "the", "and"}
+                orig_words = {w.lower() for w in _re.split(r'[\s/\-]+', company_name)
+                              if len(w) >= 3 and w.lower() not in _stopw}
+                found_lower = found_name.lower()
+                trading_lower = (hit.get("trading_name") or "").lower()
+                overlap = any(w in found_lower or w in trading_lower for w in orig_words)
+                if not overlap:
+                    print(f"  [Companies Office] No name overlap — skipping {found_name!r}"
+                          f" (searched: {company_name!r})")
+                    return False
+                return True
+
             tried_terms = [search_term]
             alt_lines_last = []
 
@@ -2818,9 +2843,7 @@ def check_companies_office(company_name, pspla_address=None):
                 print(f"  [Companies Office] No match — trying variant: {variant!r}")
                 hit, alt_lines_last = _try_co_search(variant, match_with_term=match_with_term)
                 if hit:
-                    if pspla_address and not _co_addr_ok(hit.get("address"), pspla_address):
-                        print(f"  [Companies Office] Address mismatch — skipping {hit['name']!r}"
-                              f" ({hit.get('address')}) vs PSPLA {pspla_address!r}")
+                    if not _co_verify_match(hit, variant):
                         continue
                     result = hit
                     lines = alt_lines_last  # update lines for director fetch below
@@ -2853,9 +2876,7 @@ Do not include terms already tried: {tried_terms}"""
                             print(f"  [Companies Office] AI suggests: {ai_term!r}")
                             hit, alt_lines_last = _try_co_search(ai_term)
                             if hit:
-                                if pspla_address and not _co_addr_ok(hit.get("address"), pspla_address):
-                                    print(f"  [Companies Office] Address mismatch — skipping {hit['name']!r}"
-                                          f" ({hit.get('address')}) vs PSPLA {pspla_address!r}")
+                                if not _co_verify_match(hit, ai_term):
                                     continue
                                 result = hit
                                 lines = alt_lines_last
