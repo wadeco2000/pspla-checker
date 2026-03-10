@@ -371,13 +371,25 @@ def get_google_business_profile(company_name, region=""):
         return raw
 
     region_suffix = (f" {region}" if region else "") + " New Zealand"
-    # Try quoted first (more precise), fall back to unquoted if no panel/local results.
-    # Short or generic names (e.g. "Code 9") rarely trigger a knowledge panel when
-    # quoted because the query is too restrictive for Google's local index.
+
+    # Some companies are registered as "Foo Limited" but trade as "Foo" — Google
+    # indexes the trading name, so a search for "Foo Limited" won't trigger the
+    # local panel. Build an extra query with legal suffixes stripped.
+    import re as _re2
+    _LEGAL_SUFFIXES = _re2.compile(
+        r'\b(limited|ltd\.?|holdings|group|nz|new zealand|incorporated|inc\.?|pty)\b',
+        _re2.IGNORECASE,
+    )
+    short_name = _LEGAL_SUFFIXES.sub('', company_name).strip().strip(',').strip()
+
     queries_to_try = [
         f'"{company_name}"{region_suffix}',
         f'{company_name}{region_suffix}',
     ]
+    # If stripping the suffix produces a meaningfully different name, add it as
+    # a third attempt (no extra SerpAPI cost unless the first two already succeeded)
+    if short_name and short_name.lower() != company_name.lower():
+        queries_to_try.append(f'{short_name}{region_suffix}')
 
     data = {}
     for query in queries_to_try:
@@ -406,23 +418,91 @@ def get_google_business_profile(company_name, region=""):
         if data.get("knowledge_graph") or data.get("local_results"):
             print(f"  [Google profile] Found panel/local results with query: {query!r}")
             break
+
+    # ── AI-suggested name variants (if still no panel) ────────────────────────
+    if not data.get("knowledge_graph") and not data.get("local_results"):
+        try:
+            ai_prompt = (
+                f'A Google Business Profile search for NZ company "{company_name}"'
+                f'{(" in " + region) if region else ""} found no knowledge panel or local results.\n'
+                f'Suggest up to 3 alternative trading names or abbreviations this business '
+                f'might be listed under on Google Maps (e.g. without legal suffix, shortened, '
+                f'or common trading name).\n'
+                f'Return ONLY a JSON array of strings. Do not repeat: {queries_to_try}'
+            )
+            ai_msg = client.messages.create(
+                model="claude-haiku-4-5-20251001", max_tokens=120,
+                messages=[{"role": "user", "content": ai_prompt}]
+            )
+            raw_ai = ai_msg.content[0].text.strip()
+            if "```" in raw_ai:
+                raw_ai = raw_ai.split("```")[1]
+                if raw_ai.startswith("json"):
+                    raw_ai = raw_ai[4:]
+            ai_terms = json.loads(raw_ai.strip())
+            if isinstance(ai_terms, list):
+                for ai_term in ai_terms[:3]:
+                    if not isinstance(ai_term, str):
+                        continue
+                    print(f"  [Google profile] AI suggests: {ai_term!r}")
+                    try:
+                        ai_resp = requests.get(
+                            "https://serpapi.com/search",
+                            params={"api_key": SERPAPI_KEY, "engine": "google",
+                                    "q": f'{ai_term}{region_suffix}',
+                                    "num": 5, "gl": "nz", "hl": "en"},
+                            timeout=15,
+                        )
+                        ai_data = ai_resp.json()
+                        if ai_data.get("knowledge_graph") or ai_data.get("local_results"):
+                            print(f"  [Google profile] Found panel via AI term: {ai_term!r}")
+                            data = ai_data
+                            break
+                    except Exception:
+                        pass
+        except Exception as _ai_e:
+            print(f"  [Google profile] AI fallback error: {_ai_e}")
+
     # If neither query produced a panel, data holds the last response (still useful
     # for organic snippet email scanning)
 
     # ── Knowledge Graph ───────────────────────────────────────────────────────
     kg = data.get("knowledge_graph", {})
     if kg:
-        if kg.get("rating") is not None:
-            result["rating"] = str(kg["rating"])
-        if kg.get("reviews") is not None:
-            rev = kg["reviews"]
-            if isinstance(rev, dict):
-                rev = rev.get("value") or rev.get("count") or rev.get("total") or ""
-            # strip anything that isn't a digit (e.g. URL strings)
-            rev_str = str(rev)
-            digits = ''.join(c for c in rev_str if c.isdigit())
-            if digits:
-                result["reviews"] = digits
+        kg_title = kg.get("title", "")
+        kg_keys = [k for k in kg.keys() if not k.startswith("@")]
+        print(f"  [Google profile] KG title={kg_title!r} keys={kg_keys}")
+
+        # Rating — try multiple field names SerpAPI uses
+        for _rating_key in ("rating",):
+            if kg.get(_rating_key) is not None:
+                result["rating"] = str(kg[_rating_key])
+                break
+
+        # Reviews — SerpAPI may use several field names.
+        # "review_count" is the integer; "reviews" is often a URL — try integer keys first.
+        # Sanity cap: reject any digit string > 6 chars (no real business has 1M+ reviews
+        # — it means we stripped digits out of a URL).
+        for _rev_key in ("review_count", "reviews_count", "total_reviews", "reviews"):
+            if kg.get(_rev_key) is not None:
+                rev = kg[_rev_key]
+                if isinstance(rev, dict):
+                    rev = rev.get("value") or rev.get("count") or rev.get("total") or ""
+                digits = ''.join(c for c in str(rev) if c.isdigit())
+                if digits and len(digits) <= 6:  # sanity cap — reject URL-derived garbage
+                    result["reviews"] = digits
+                    break
+        # Also check reviews_from_the_web list (each entry has .source and .votes)
+        if not result["reviews"]:
+            rfw = kg.get("reviews_from_the_web", [])
+            if isinstance(rfw, list) and rfw:
+                for src in rfw:
+                    votes = src.get("votes") or src.get("count") or src.get("reviews") or ""
+                    digits = ''.join(c for c in str(votes) if c.isdigit())
+                    if digits:
+                        result["reviews"] = digits
+                        break
+
         phone = kg.get("phone") or kg.get("main_phone")
         if phone:
             result["phone"] = str(phone)
@@ -439,23 +519,30 @@ def get_google_business_profile(company_name, region=""):
     if isinstance(local_results, dict):
         local_results = local_results.get("places", [])
 
+    if local_results:
+        print(f"  [Google profile] Local results: {[p.get('title','?') for p in local_results[:3]]}")
+
     name_words = [w for w in company_name.lower().split() if len(w) >= 4
                   and w not in {"limited", "security", "services", "solutions"}]
 
     for place in local_results[:3]:
         place_title = (place.get("title") or "").lower()
         if name_words and not any(w in place_title for w in name_words):
+            print(f"  [Google profile] Local result {place.get('title')!r} skipped (name mismatch, want {name_words})")
             continue  # wrong business
 
         if not result["rating"] and place.get("rating") is not None:
             result["rating"] = str(place["rating"])
-        if not result["reviews"] and place.get("reviews") is not None:
-            rev = place["reviews"]
-            if isinstance(rev, dict):
-                rev = rev.get("value") or rev.get("count") or rev.get("total") or ""
-            digits = ''.join(c for c in str(rev) if c.isdigit())
-            if digits:
-                result["reviews"] = digits
+        if not result["reviews"]:
+            for _rev_key in ("reviews", "reviews_original", "review_count"):
+                if place.get(_rev_key) is not None:
+                    rev = place[_rev_key]
+                    if isinstance(rev, dict):
+                        rev = rev.get("value") or rev.get("count") or rev.get("total") or ""
+                    digits = ''.join(c for c in str(rev) if c.isdigit())
+                    if digits:
+                        result["reviews"] = digits
+                        break
         if not result["phone"] and place.get("phone"):
             result["phone"] = str(place["phone"])
         if not result["address"] and place.get("address"):
@@ -764,7 +851,44 @@ def find_facebook_url(company_name, page_text=""):
                 _FB_SNIPPET_CACHE[winner_url] = winner_snippet
                 return winner_url
 
-        # Nothing with NZ signal — return None rather than a wrong-country page
+        # Nothing with NZ signal — try AI-suggested name variants before giving up
+        try:
+            ai_prompt = (
+                f'A Facebook page search for NZ security company "{company_name}" found no results.\n'
+                f'Suggest up to 3 alternative trading names or abbreviations this company '
+                f'might use on Facebook (e.g. shortened name, without legal suffix, common alias).\n'
+                + (f'Website context: {page_text[:400]}\n' if page_text else '')
+                + f'Return ONLY a JSON array of strings. Do not repeat: {search_terms}'
+            )
+            ai_msg = client.messages.create(
+                model="claude-haiku-4-5-20251001", max_tokens=120,
+                messages=[{"role": "user", "content": ai_prompt}]
+            )
+            raw_ai = ai_msg.content[0].text.strip()
+            if "```" in raw_ai:
+                raw_ai = raw_ai.split("```")[1]
+                if raw_ai.startswith("json"):
+                    raw_ai = raw_ai[4:]
+            ai_terms = json.loads(raw_ai.strip())
+            if isinstance(ai_terms, list):
+                for ai_term in ai_terms[:3]:
+                    if not isinstance(ai_term, str) or ai_term in search_terms:
+                        continue
+                    print(f"  [Facebook] AI suggests: {ai_term!r}")
+                    r_ai = google_search(f'site:facebook.com "{ai_term}"', num_results=20)
+                    if r_ai and r_ai is not SERPAPI_EXHAUSTED:
+                        ai_cands = _extract_fb_candidates(r_ai)
+                        nz_ai = [(u, s, t) for u, s, t in ai_cands if _nz_bonus(u, s, t) > 0]
+                        if nz_ai:
+                            best = sorted(nz_ai,
+                                          key=lambda x: -(_word_score(x[0], x[1], name_words)
+                                                          + _nz_bonus(x[0], x[1], x[2])))
+                            winner_url, winner_snippet = best[0][0], best[0][1]
+                            _FB_SNIPPET_CACHE[winner_url] = winner_snippet
+                            return winner_url
+        except Exception as _ai_e:
+            print(f"  [Facebook] AI fallback error: {_ai_e}")
+
         return None
 
     except Exception:
@@ -1361,6 +1485,46 @@ def find_linkedin_url(company_name, page_text=""):
                 candidates.append((c, _score(r), r))
         if candidates:
             break  # Stop as soon as we get at least one linkedin hit
+
+    if not candidates:
+        # AI-suggested name variants before giving up
+        try:
+            ai_prompt = (
+                f'A LinkedIn search for NZ company "{company_name}" found no results.\n'
+                f'Suggest up to 3 alternative names or abbreviations this company might '
+                f'use on LinkedIn (e.g. without legal suffix, shortened, trading name).\n'
+                + (f'Website context: {page_text[:400]}\n' if page_text else '')
+                + f'Return ONLY a JSON array of strings.'
+            )
+            ai_msg = client.messages.create(
+                model="claude-haiku-4-5-20251001", max_tokens=120,
+                messages=[{"role": "user", "content": ai_prompt}]
+            )
+            raw_ai = ai_msg.content[0].text.strip()
+            if "```" in raw_ai:
+                raw_ai = raw_ai.split("```")[1]
+                if raw_ai.startswith("json"):
+                    raw_ai = raw_ai[4:]
+            ai_terms = json.loads(raw_ai.strip())
+            if isinstance(ai_terms, list):
+                for ai_term in ai_terms[:3]:
+                    if not isinstance(ai_term, str):
+                        continue
+                    print(f"  [LinkedIn] AI suggests: {ai_term!r}")
+                    r_ai = google_search(
+                        f'site:linkedin.com/company "{ai_term}" New Zealand', num_results=5)
+                    if r_ai and r_ai is not SERPAPI_EXHAUSTED:
+                        for r in r_ai:
+                            link = r.get("link", "")
+                            if not _LI_RE.search(link):
+                                continue
+                            c = _extract_candidate(link)
+                            if c:
+                                candidates.append((c, _score(r), r))
+                    if candidates:
+                        break
+        except Exception as _ai_e:
+            print(f"  [LinkedIn] AI fallback error: {_ai_e}")
 
     if not candidates:
         return None
@@ -2396,7 +2560,8 @@ def check_pspla(company_name, website_region=None, page_text=None, co_result=Non
 
 
 def _co_fetch_directors(company_number, co_headers):
-    """Fetch director names from a Companies Office company detail page."""
+    """Fetch director names and website URL from a Companies Office company detail page.
+    Returns (directors_list, website_or_None)."""
     import re as _re
     try:
         detail_url = f"https://app.companiesoffice.govt.nz/companies/app/ui/pages/companies/{company_number}"
@@ -2405,31 +2570,35 @@ def _co_fetch_directors(company_number, co_headers):
         text = soup.get_text(separator="\n", strip=True)
         lines = [l.strip() for l in text.split("\n") if l.strip()]
         directors = []
+        website = None
         i = 0
         while i < len(lines):
-            # Trigger: "Showing N of N directors"
+            # Directors section
             if _re.search(r"Showing \d+ of \d+ director", lines[i], _re.IGNORECASE):
-                # Names follow immediately — collect until we hit an address/section boundary
                 for j in range(i + 1, min(i + 30, len(lines))):
                     line = lines[j]
-                    # Stop at known section headers or address lines
                     if any(kw in line for kw in ["Shareholding", "Documents", "PPSR",
                                                   "Company record link", "Trading Name",
                                                   "Phone Number", "Email Address"]):
                         break
-                    # Director name: all letters+spaces, 5-60 chars, no digits
                     clean = line.replace(" ", "").replace("-", "").replace("'", "")
                     if (5 < len(line) < 60
                             and not any(c.isdigit() for c in line)
                             and clean.isalpha()):
-                        name = " ".join(line.split())  # collapse multiple spaces
-                        name = name.title()
+                        name = " ".join(line.split()).title()
                         if name not in directors:
                             directors.append(name)
+            # Website from NZBN section — label is "Website(s)" with URL on same or next line
+            if "website" in lines[i].lower() and not website:
+                for j in range(i, min(i + 3, len(lines))):
+                    m = _re.search(r'https?://[^\s]+', lines[j])
+                    if m:
+                        website = m.group(0).rstrip('.,)')
+                        break
             i += 1
-        return directors
+        return directors, website
     except Exception:
-        return []
+        return [], None
 
 
 def check_companies_office(company_name, pspla_address=None):
@@ -2463,13 +2632,15 @@ def check_companies_office(company_name, pspla_address=None):
         import re as _re
 
         def _parse_co_result(lines, i, line):
-            """Parse company number, NZBN, address and status from lines following a company name."""
+            """Parse company number, NZBN, address, status and trading name from lines
+            following a company name entry in CO search results."""
             address_words = ["road", "street", "avenue", "drive", "place", "lane", "way", "rd ", "st ", "ave "]
             address = None
             company_number = None
             nzbn = None
             status = "registered"  # default
-            for j in range(i + 1, min(i + 10, len(lines))):
+            trading_name = None
+            for j in range(i + 1, min(i + 15, len(lines))):
                 lj = lines[j]
                 m = _re.match(r"\((\d{6,8})\)", lj)
                 if m and not company_number:
@@ -2477,7 +2648,6 @@ def check_companies_office(company_name, pspla_address=None):
                 nzbn_m = _re.search(r"NZBN:\s*(\d+)", lj)
                 if nzbn_m and not nzbn:
                     nzbn = nzbn_m.group(1)
-                # Status appears in the same line as the company number or a standalone line
                 lj_lower = lj.lower()
                 if "removed" in lj_lower:
                     status = "removed"
@@ -2485,38 +2655,183 @@ def check_companies_office(company_name, pspla_address=None):
                     status = "deregistered"
                 if any(w in lj_lower for w in address_words) and len(lj) > 10 and not address:
                     address = lj
+                # Trading name: "Trading as" label followed by the trading name on the next line
+                if lj_lower.strip() in ("trading as", "trading as:") or lj_lower.startswith("trading as"):
+                    # Trading name may be on same line after the label, or the next non-empty line
+                    inline = _re.sub(r'^trading as[:\s]*', '', lj, flags=_re.IGNORECASE).strip()
+                    if inline:
+                        trading_name = inline.title()
+                    elif j + 1 < len(lines):
+                        trading_name = lines[j + 1].strip().title()
                 if address and company_number:
                     break
-            # Incorporation date appears as "DD Mon YYYY" after "Incorporation Date:" label
+            # Incorporation date
             incorporated = None
-            for j in range(i + 1, min(i + 15, len(lines))):
+            for j in range(i + 1, min(i + 20, len(lines))):
                 if "Incorporation Date" in lines[j]:
-                    # Date is on the next line
                     if j + 1 < len(lines):
                         candidate = lines[j + 1].strip()
                         if _re.match(r"\d{1,2} \w+ \d{4}", candidate):
                             incorporated = candidate
                     break
-            return {"name": line.title(), "address": address, "company_number": company_number,
+            return {"name": line.title(), "trading_name": trading_name,
+                    "address": address, "company_number": company_number,
                     "nzbn": nzbn, "status": status, "incorporated": incorporated}
 
         def _find_match(lines, name_upper):
+            """Find a CO result matching name_upper against registered name OR trading name."""
             for i, line in enumerate(lines):
-                if name_upper in line:
+                if name_upper in line.upper():
                     return _parse_co_result(lines, i, line)
+            # Also check trading-as lines — company may be registered under a different name
+            for i, line in enumerate(lines):
+                lj_lower = line.lower().strip()
+                if lj_lower in ("trading as", "trading as:") or lj_lower.startswith("trading as"):
+                    # Get the trading name (inline or next line)
+                    inline = _re.sub(r'^trading as[:\s]*', '', line, flags=_re.IGNORECASE).strip()
+                    trading_name_line = inline if inline else (lines[i + 1].strip() if i + 1 < len(lines) else "")
+                    if name_upper in trading_name_line.upper():
+                        # Find the parent registered company (look back for ALL CAPS entry)
+                        for k in range(i - 1, max(-1, i - 10), -1):
+                            if (lines[k].isupper() and len(lines[k]) >= 5
+                                    and any(w in lines[k] for w in ["LIMITED", "LTD", "TRUST", "INCORPORATED"])):
+                                result = _parse_co_result(lines, k, lines[k])
+                                # Override the trading name with the matched one
+                                if not result.get("trading_name"):
+                                    result["trading_name"] = trading_name_line.title()
+                                print(f"  [Companies Office] Matched via trading name: {trading_name_line!r} → {lines[k].title()}")
+                                return result
             return None
 
         def _find_all_co_results(lines):
             """Return all company entries found in the CO search result page."""
             results = []
             for i, line in enumerate(lines):
-                # CO company names appear in ALL CAPS with 5+ chars and contain "LIMITED" or "LTD"
                 if (line.isupper() and len(line) >= 5
                         and any(w in line for w in ["LIMITED", "LTD", "TRUST", "INCORPORATED"])):
                     results.append(_parse_co_result(lines, i, line))
             return results
 
         result = _find_match(lines, company_name_upper)
+
+        # ── Fallback search terms when initial search finds no exact match ───
+        # Rule-based variants first (free), then AI-suggested variants.
+        if result is None:
+            import re as _re
+
+            def _rule_variants(name):
+                """Generate cheap rule-based name variants to retry CO search."""
+                variants = []
+                # Insert space before digit runs: "Code9" → "Code 9"
+                spaced = _re.sub(r'([A-Za-z])(\d)', r'\1 \2', name)
+                spaced = _re.sub(r'(\d)([A-Za-z])', r'\1 \2', spaced)
+                if spaced != name:
+                    variants.append(spaced)
+                # CamelCase split: "AlarmWatch" → "Alarm Watch"
+                camel = _re.sub(r'([a-z])([A-Z])', r'\1 \2', name)
+                if camel != name:
+                    variants.append(camel)
+                # Strip legal suffixes for a broader search
+                stripped = _re.sub(
+                    r'\b(limited|ltd\.?|holdings|group|nz|new zealand)\b', '', name,
+                    flags=_re.IGNORECASE).strip().strip(',').strip()
+                if stripped and stripped.lower() != name.lower():
+                    variants.append(stripped)
+                return variants
+
+            def _try_co_search(term):
+                """Search CO with an alternative term, return best matching result or None."""
+                try:
+                    alt_resp = requests.get(url, params={**params, "q": term},
+                                            headers=co_headers, timeout=15)
+                    alt_lines = [l.strip() for l in
+                                 BeautifulSoup(alt_resp.text, "html.parser")
+                                 .get_text(separator="\n", strip=True).split("\n") if l.strip()]
+                    # Try exact match on the alternative term first
+                    hit = _find_match(alt_lines, term.upper())
+                    if hit:
+                        return hit, alt_lines
+                    # Also try original name in case CO uses the original
+                    hit = _find_match(alt_lines, company_name_upper)
+                    if hit:
+                        return hit, alt_lines
+                    return None, alt_lines
+                except Exception as _e:
+                    print(f"  [Companies Office] Alt search error for {term!r}: {_e}")
+                    return None, []
+
+            tried_terms = [search_term]
+            alt_lines_last = []
+
+            # 1. Rule-based variants
+            for variant in _rule_variants(company_name):
+                if variant in tried_terms:
+                    continue
+                tried_terms.append(variant)
+                print(f"  [Companies Office] No match — trying variant: {variant!r}")
+                hit, alt_lines_last = _try_co_search(variant)
+                if hit:
+                    result = hit
+                    lines = alt_lines_last  # update lines for director fetch below
+                    print(f"  [Companies Office] Found via variant {variant!r}: {hit['name']}")
+                    break
+
+            # 2. AI-suggested alternatives (only if still no match)
+            if result is None:
+                try:
+                    ai_prompt = f"""A search for NZ Companies Office records for "{company_name}" found no match.
+Suggest up to 4 alternative search terms to try (e.g. different spacing, abbreviations, trading names, without legal suffixes).
+Return ONLY a JSON array of strings, e.g. ["Code 9", "Code Nine Limited"]
+Do not include terms already tried: {tried_terms}"""
+                    ai_msg = client.messages.create(
+                        model="claude-haiku-4-5-20251001",
+                        max_tokens=150,
+                        messages=[{"role": "user", "content": ai_prompt}]
+                    )
+                    raw_ai = ai_msg.content[0].text.strip()
+                    if "```" in raw_ai:
+                        raw_ai = raw_ai.split("```")[1]
+                        if raw_ai.startswith("json"):
+                            raw_ai = raw_ai[4:]
+                    ai_terms = json.loads(raw_ai.strip())
+                    if isinstance(ai_terms, list):
+                        for ai_term in ai_terms[:4]:
+                            if not isinstance(ai_term, str) or ai_term in tried_terms:
+                                continue
+                            tried_terms.append(ai_term)
+                            print(f"  [Companies Office] AI suggests: {ai_term!r}")
+                            hit, alt_lines_last = _try_co_search(ai_term)
+                            if hit:
+                                result = hit
+                                lines = alt_lines_last
+                                print(f"  [Companies Office] Found via AI term {ai_term!r}: {hit['name']}")
+                                break
+                except Exception as _ai_e:
+                    print(f"  [Companies Office] AI fallback error: {_ai_e}")
+
+            # 3. If we have candidates but still no result, let AI pick from them
+            if result is None:
+                all_candidates = [l for l in lines if l.isupper() and len(l) > 5]
+                all_candidates += [l for l in alt_lines_last if l.isupper() and len(l) > 5]
+                all_candidates = list(dict.fromkeys(all_candidates))[:20]  # dedupe
+                if all_candidates and pspla_address:
+                    pick_prompt = f"""From these NZ Companies Office results, which best matches "{company_name}" with address near "{pspla_address}"?
+
+Companies found:
+{chr(10).join(all_candidates)}
+
+Return ONLY JSON: {{"name": "best match or null", "address": null}}"""
+                    pick_msg = client.messages.create(
+                        model="claude-sonnet-4-6",
+                        max_tokens=100,
+                        messages=[{"role": "user", "content": pick_prompt}]
+                    )
+                    raw_pick = pick_msg.content[0].text.strip()
+                    if "```" in raw_pick:
+                        raw_pick = raw_pick.split("```")[1]
+                        if raw_pick.startswith("json"):
+                            raw_pick = raw_pick[4:]
+                    result = json.loads(raw_pick.strip())
 
         # If the matched company is removed/deregistered, search more broadly for an active successor.
         # e.g. "Tarnix Security Limited" (Removed) → broader search "Tarnix" → finds "Tarnix Limited" (Registered)
@@ -2544,42 +2859,28 @@ def check_companies_office(company_name, pspla_address=None):
                 except Exception as broad_e:
                     print(f"  [Companies Office broad search error] {broad_e}")
 
-        # If no exact match at all, try Claude
-        if result is None:
-            candidates = [l for l in lines if l.isupper() and len(l) > 5][:20]
-            if candidates and pspla_address:
-                prompt = f"""From this list of NZ Companies Office results, which company best matches "{company_name}" with address near "{pspla_address}"?
-
-Companies found:
-{chr(10).join(candidates)}
-
-Return ONLY JSON: {{"name": "best match or null", "address": null}}"""
-                message = client.messages.create(
-                    model="claude-sonnet-4-6",
-                    max_tokens=100,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                raw = message.content[0].text.strip()
-                if "```" in raw:
-                    raw = raw.split("```")[1]
-                    if raw.startswith("json"):
-                        raw = raw[4:]
-                result = json.loads(raw.strip())
-
         if result is None:
             return {"name": None, "address": None, "company_number": None, "nzbn": None,
                     "status": None, "successor_name": None, "directors": []}
 
-        # Fetch directors — prefer successor if original is removed
+        # Fetch directors + website from detail page — prefer successor if original is removed
         active_result = successor_result if successor_result else result
         directors = []
+        co_website = None
         if active_result.get("company_number"):
-            directors = _co_fetch_directors(active_result["company_number"], co_headers)
+            directors, co_website = _co_fetch_directors(active_result["company_number"], co_headers)
             if directors:
                 print(f"  [Companies Office directors] {directors}")
+            if co_website:
+                print(f"  [Companies Office website] {co_website}")
+
+        # Use trading name as the display name if the registered name is very different
+        display_name = result.get("trading_name") or result.get("name")
 
         return {
-            "name": result.get("name"),
+            "name": display_name,
+            "registered_name": result.get("name"),
+            "trading_name": result.get("trading_name"),
             "address": result.get("address"),
             "company_number": result.get("company_number"),
             "nzbn": result.get("nzbn"),
@@ -2589,6 +2890,7 @@ Return ONLY JSON: {{"name": "best match or null", "address": null}}"""
             "successor_number": successor_result.get("company_number") if successor_result else None,
             "successor_address": successor_result.get("address") if successor_result else None,
             "directors": directors,
+            "website": co_website,
         }
 
     except Exception as e:
@@ -3932,6 +4234,11 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
     if detected:
         print(f"  [Services detected] {', '.join(detected)}")
 
+    # Backfill website from CO NZBN data if not found via search
+    if not website_url and co_result.get("website"):
+        website_url = co_result["website"]
+        print(f"  [Website] Backfilled from Companies Office: {website_url}")
+
     record = {
         "company_name": company_name,
         "website": website_url,
@@ -3948,7 +4255,7 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         "license_type": pspla_result.get("license_type"),
         "match_method": pspla_result.get("match_method"),
         "match_reason": " ".join(reason_parts),
-        "companies_office_name": co_result.get("name"),
+        "companies_office_name": co_result.get("registered_name") or co_result.get("name"),
         "companies_office_address": co_result.get("address"),
         "companies_office_number": co_result.get("company_number"),
         "nzbn": co_result.get("nzbn"),

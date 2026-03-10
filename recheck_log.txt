@@ -1,0 +1,9 @@
+[Companies Office] Searching for: 24/Seven Electrical
+  [Companies Office] AI suggests: '24 Seven Electrical'
+  [Companies Office] AI suggests: 'Twenty Four Seven Electrical'
+  [Companies Office] AI suggests: '24/7 Electrical'
+  [Companies Office] Found via AI term '24/7 Electrical': 24/7 Electrical Limited
+  [Companies Office directors] ['Duncan Nash']
+[Companies Office] Found: 24/7 Electrical Limited | Status: registered | NZBN: 9429050620562
+[Companies Office] Directors: Duncan Nash
+[Companies Office] Address: Duncan Nash, 3 Rata Street, Whakatane, 3120, New Zealand

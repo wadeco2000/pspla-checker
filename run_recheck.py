@@ -284,6 +284,171 @@ def recheck_pspla(company, triggered_by="bulk-recheck"):
     print(f"  [PSPLA] {company_name}: licensed={licensed} name={pspla_name}")
 
 
+def recheck_llm_sense(company, triggered_by="bulk-recheck"):
+    """Run AI sense-check on all associations for a company and clear obviously wrong ones."""
+    import anthropic as _anthropic
+
+    company_id   = company["id"]
+    company_name = company.get("company_name", "")
+    website      = company.get("website") or ""
+    c = company  # alias for readability
+
+    print(f"  [LLM Sense] Checking: {company_name}")
+
+    _free_domains = {"gmail.com","hotmail.com","yahoo.com","outlook.com",
+                     "xtra.co.nz","yahoo.co.nz","icloud.com","live.com","me.com","msn.com"}
+    _dir_domains  = {"facebook.com","linkedin.com","google.com","moneyhub.co.nz",
+                     "yellowpages.co.nz","trademe.co.nz"}
+
+    lines = []
+    if c.get("nzsa_member_name"):
+        lines.append(f"\nNZSA MEMBERSHIP:")
+        lines.append(f"  Member name: {c['nzsa_member_name']}")
+        if c.get("nzsa_accredited"):    lines.append(f"  Accredited: {c['nzsa_accredited']}")
+        if c.get("nzsa_grade"):         lines.append(f"  Grade: {c['nzsa_grade']}")
+        if c.get("nzsa_contact_name"):  lines.append(f"  Contact: {c['nzsa_contact_name']}")
+        if c.get("nzsa_email"):         lines.append(f"  Email: {c['nzsa_email']}")
+        if c.get("nzsa_overview"):      lines.append(f"  Overview: {c['nzsa_overview'][:300]}")
+    if c.get("pspla_name"):
+        lines.append(f"\nPSPLA LICENCE:")
+        lines.append(f"  Matched name: {c['pspla_name']}")
+        if c.get("pspla_license_status"):  lines.append(f"  Status: {c['pspla_license_status']}")
+        if c.get("pspla_license_classes"): lines.append(f"  Classes: {c['pspla_license_classes']}")
+        if c.get("match_reason"):          lines.append(f"  Match reason: {c['match_reason']}")
+    if c.get("facebook_url"):
+        lines.append(f"\nFACEBOOK:")
+        lines.append(f"  URL: {c['facebook_url']}")
+        if c.get("fb_description"): lines.append(f"  Description: {c['fb_description'][:300]}")
+        if c.get("fb_category"):    lines.append(f"  Category: {c['fb_category']}")
+        if c.get("fb_address"):     lines.append(f"  Address: {c['fb_address']}")
+    if c.get("linkedin_url"):
+        lines.append(f"\nLINKEDIN:")
+        lines.append(f"  URL: {c['linkedin_url']}")
+        if c.get("linkedin_description"): lines.append(f"  Description: {c['linkedin_description'][:200]}")
+        if c.get("linkedin_location"):    lines.append(f"  Location: {c['linkedin_location']}")
+    if c.get("companies_office_name"):
+        lines.append(f"\nCOMPANIES OFFICE:")
+        lines.append(f"  Registered name: {c['companies_office_name']}")
+        if c.get("companies_office_address"): lines.append(f"  Address: {c['companies_office_address']}")
+        if c.get("co_status"):                lines.append(f"  Status: {c['co_status']}")
+    if c.get("google_address"):
+        lines.append(f"\nGOOGLE BUSINESS:")
+        lines.append(f"  Address: {c['google_address']}")
+        if c.get("google_phone"): lines.append(f"  Phone: {c['google_phone']}")
+    email_val = c.get("email") or ""
+    if email_val:
+        email_dom = email_val.split("@")[-1].lower() if "@" in email_val else ""
+        website_dom = (website.lower().replace("https://","").replace("http://","")
+                       .replace("www.","").split("/")[0]) if website else ""
+        lines.append(f"\nEMAIL ON RECORD: {email_val}")
+        if email_dom and email_dom not in _free_domains and email_dom not in _dir_domains:
+            if website_dom and website_dom not in _dir_domains and email_dom != website_dom:
+                lines.append(f"  Note: email domain ({email_dom}) differs from stored website domain ({website_dom})")
+
+    if not lines:
+        print(f"  [LLM Sense] No associations to check — skipping.")
+        return
+
+    context = "\n".join(lines)
+    prompt = f"""You are auditing a New Zealand security company database record.
+
+COMPANY: {company_name}
+PRIMARY WEBSITE: {website or "(none recorded)"}
+REGION: {c.get("region") or "unknown"}
+
+The following associations were found automatically by a web search tool. Your job is to
+identify any that are CLEARLY wrong — i.e. they obviously belong to a different company
+and not to "{company_name}".
+{context}
+
+RULES:
+- Be CONSERVATIVE. Only flag something if you are SURE it is wrong. If uncertain, leave it.
+- Minor name variations are fine (Ltd/Limited, punctuation, word order, trading names).
+- Only flag if the association is OBVIOUSLY a completely different organisation.
+- NEVER clear something just because the name is slightly different.
+- For Email: NEVER flag gmail/hotmail/xtra/yahoo/outlook/icloud — personal providers.
+  ONLY flag if the email domain clearly belongs to a completely different unrelated business.
+
+Respond with ONLY valid JSON:
+{{
+  "clear_nzsa": false, "clear_nzsa_reason": "",
+  "clear_pspla": false, "clear_pspla_reason": "",
+  "clear_facebook": false, "clear_facebook_reason": "",
+  "clear_linkedin": false, "clear_linkedin_reason": "",
+  "clear_companies_office": false, "clear_companies_office_reason": "",
+  "clear_google": false, "clear_google_reason": "",
+  "clear_email": false, "clear_email_reason": ""
+}}
+
+Set a value to true ONLY if you are confident the association is for a different company."""
+
+    try:
+        ai_client = _anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        response = ai_client.messages.create(
+            model="claude-sonnet-4-6", max_tokens=600,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        raw = response.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"): raw = raw[4:]
+        result = json.loads(raw.strip())
+    except Exception as e:
+        print(f"  [LLM Sense] AI error: {e}")
+        return
+
+    patch = {}
+    cleared = []
+    if result.get("clear_nzsa"):
+        patch.update({"nzsa_member": "false", "nzsa_member_name": None,
+                      "nzsa_accredited": "false", "nzsa_grade": None,
+                      "nzsa_contact_name": None, "nzsa_phone": None,
+                      "nzsa_email": None, "nzsa_overview": None})
+        cleared.append(f"NZSA: {result.get('clear_nzsa_reason','')}")
+    if result.get("clear_pspla"):
+        patch.update({"pspla_licensed": None, "pspla_name": None,
+                      "pspla_license_number": None, "pspla_license_status": None,
+                      "pspla_license_expiry": None, "pspla_license_classes": None,
+                      "pspla_license_start": None, "pspla_permit_type": None,
+                      "match_method": None, "match_reason": None})
+        cleared.append(f"PSPLA: {result.get('clear_pspla_reason','')}")
+    if result.get("clear_facebook"):
+        patch.update({"facebook_url": None, "fb_followers": None, "fb_phone": None,
+                      "fb_email": None, "fb_address": None, "fb_description": None,
+                      "fb_category": None, "fb_rating": None,
+                      "fb_alarm_systems": None, "fb_cctv_cameras": None, "fb_alarm_monitoring": None})
+        cleared.append(f"Facebook: {result.get('clear_facebook_reason','')}")
+    if result.get("clear_linkedin"):
+        patch.update({"linkedin_url": None, "linkedin_followers": None,
+                      "linkedin_description": None, "linkedin_industry": None,
+                      "linkedin_location": None, "linkedin_website": None, "linkedin_size": None})
+        cleared.append(f"LinkedIn: {result.get('clear_linkedin_reason','')}")
+    if result.get("clear_companies_office"):
+        patch.update({"companies_office_name": None, "companies_office_address": None,
+                      "companies_office_number": None, "nzbn": None,
+                      "co_status": None, "co_incorporated": None,
+                      "director_name": None, "individual_license": None})
+        cleared.append(f"Companies Office: {result.get('clear_companies_office_reason','')}")
+    if result.get("clear_google"):
+        patch.update({"google_rating": None, "google_reviews": None,
+                      "google_phone": None, "google_address": None, "google_email": None})
+        cleared.append(f"Google: {result.get('clear_google_reason','')}")
+    if result.get("clear_email"):
+        patch["email"] = None
+        cleared.append(f"Email: {result.get('clear_email_reason','')}")
+
+    if patch:
+        patch_company(company_id, patch)
+        write_audit("updated", str(company_id), company_name,
+                    changes="LLM sense-check cleared: " + "; ".join(cleared),
+                    triggered_by=triggered_by)
+        print(f"  [LLM Sense] Cleared {len(cleared)}: {'; '.join(cleared)}")
+    else:
+        print(f"  [LLM Sense] All associations look correct.")
+
+    time.sleep(1)  # brief pause between Sonnet calls
+
+
 CHECK_FUNCTIONS = {
     "facebook":         recheck_facebook,
     "google":           recheck_google,
@@ -291,11 +456,13 @@ CHECK_FUNCTIONS = {
     "nzsa":             recheck_nzsa,
     "companies_office": recheck_companies_office,
     "pspla":            recheck_pspla,
+    "llm_sense":        recheck_llm_sense,
 }
 
 CHECK_LABELS = {
     "facebook": "Facebook", "google": "Google", "linkedin": "LinkedIn",
     "nzsa": "NZSA", "companies_office": "Companies Office", "pspla": "PSPLA",
+    "llm_sense": "AI Sense Check",
 }
 
 

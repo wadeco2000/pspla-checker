@@ -1069,6 +1069,9 @@ HTML_TEMPLATE = """
             <label style="color:#ddd; font-size:12px; display:flex; align-items:center; gap:5px; cursor:pointer;">
               <input type="checkbox" id="rc-pspla" value="pspla"> <i class="fa-solid fa-shield-halved"></i> PSPLA
             </label>
+            <label style="color:#c39bd3; font-size:12px; display:flex; align-items:center; gap:5px; cursor:pointer;" title="Claude Sonnet reviews all associations and clears any that are clearly wrong">
+              <input type="checkbox" id="rc-llm-sense" value="llm_sense"> <i class="fa-solid fa-brain"></i> AI Sense Check
+            </label>
           </div>
         </div>
 
@@ -1749,7 +1752,7 @@ HTML_TEMPLATE = """
 
         function startBulkRecheck() {
             var checks = [];
-            ['facebook','google','linkedin','nzsa','co','pspla'].forEach(function(id) {
+            ['facebook','google','linkedin','nzsa','co','pspla','llm-sense'].forEach(function(id) {
                 var cb = document.getElementById('rc-' + id);
                 if (cb && cb.checked) checks.push(cb.value);
             });
@@ -4282,15 +4285,20 @@ def recheck_companies_office_for_company():
         print(f"[Companies Office] Searching for: {company_name}")
         result = check_companies_office(company_name)
         if result.get("name"):
-            print(f"[Companies Office] Found: {result['name']} | Status: {result.get('status')} | NZBN: {result.get('nzbn')}")
+            display = result.get("registered_name") or result.get("name")
+            trading = result.get("trading_name")
+            print(f"[Companies Office] Found: {display}" + (f" t/a {trading}" if trading else "") +
+                  f" | Status: {result.get('status')} | NZBN: {result.get('nzbn')}")
             if result.get("directors"):
                 print(f"[Companies Office] Directors: {', '.join(result['directors'])}")
             if result.get("address"):
                 print(f"[Companies Office] Address: {result['address']}")
+            if result.get("website"):
+                print(f"[Companies Office] Website: {result['website']}")
         else:
             print(f"[Companies Office] Not found on Companies Register")
         patch = {
-            "companies_office_name":    result.get("name"),
+            "companies_office_name":    result.get("registered_name") or result.get("name"),
             "companies_office_address": result.get("address"),
             "companies_office_number":  result.get("company_number"),
             "nzbn":                     result.get("nzbn"),
@@ -4300,7 +4308,21 @@ def recheck_companies_office_for_company():
         directors = result.get("directors") or []
         if directors:
             patch["director_name"] = ", ".join(directors)
-        patch = {k: v for k, v in patch.items() if v is not None}
+        # Backfill website from CO NZBN if the record has none
+        if result.get("website"):
+            patch["_co_website"] = result["website"]  # checked below
+        patch = {k: v for k, v in patch.items() if v is not None and k != "_co_website"}
+        # Only backfill website if the record currently has none
+        if result.get("website"):
+            co_ws = result["website"]
+            existing_row = requests.get(
+                f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}&select=website",
+                headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+                timeout=10
+            ).json()
+            if existing_row and not (existing_row[0].get("website") or "").strip():
+                patch["website"] = co_ws
+                print(f"[Companies Office] Backfilling website: {co_ws}")
         if patch:
             headers = {
                 "apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",

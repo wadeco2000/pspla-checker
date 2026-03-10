@@ -1,0 +1,66 @@
+[
+  {
+    "pattern_name": "substring_overlap_false_positive",
+    "what_went_wrong": "The matching system incorrectly linked two entities based on shared keywords ('Wellington' and 'Security') without properly validating the company structure or legal entity type. The false positive entry contained additional words ('ALERT', '2008', 'LIMITED') that should have flagged it as a different legal entity rather than a variation of the website name.",
+    "rule_to_apply": "If a PSPLA record contains significantly more words than the query entity (3+ additional terms) AND includes incorporation year or alert keywords, require explicit legal structure matching (e.g., 'Ltd', 'Limited', 'Inc') rather than relying on partial keyword overlap alone.",
+    "keywords_to_watch": [
+      "Wellington",
+      "Security",
+      "ALERT",
+      "2008",
+      "LIMITED",
+      "substring_matching"
+    ],
+    "example_wrong_match": "Wellington Security -> SECURITY ALERT WELLINGTON 2008 LIMITED",
+    "example_correct_result": "Wellington Security Ltd",
+    "timestamp": "2026-03-09T04:23:55.133177+00:00"
+  },
+  {
+    "pattern_name": "partial_name_subset_mismatch",
+    "what_went_wrong": "The matching system incorrectly linked 'Hines Security' to 'Hines Electrical & Security (N.Z.) Limited' because they share the company name prefix 'Hines' and both contain 'Security'. The algorithm failed to account for the significant semantic difference: one is a standalone security company while the other is a multi-service electrical AND security firm with a full legal entity designation.",
+    "rule_to_apply": "If a website name is notably shorter or simpler than a candidate PSPLA match, and the candidate contains additional business service categories not mentioned in the website name, require a higher confidence threshold or manual review before matching, especially when the website name lacks geographic qualifiers or legal entity suffixes that appear in the candidate.",
+    "keywords_to_watch": [
+      "Hines",
+      "Security",
+      "Electrical",
+      "N.Z.",
+      "Limited",
+      "partial_name_match"
+    ],
+    "example_wrong_match": "Hines Security -> Hines Electrical & Security (N.Z.) Limited",
+    "example_correct_result": "Hines Electrical & Security (N.Z.) Limited",
+    "timestamp": "2026-03-09T09:12:17.289766+00:00"
+  },
+  {
+    "pattern_name": "substring_match_with_prefix_contamination",
+    "what_went_wrong": "The matching system found 'Livewire Electrical' as a substring within 'Addz Livewire Electrical Limited' and incorrectly treated this partial match as a valid company match. The system failed to account for the additional prefix 'Addz' that makes this a completely different legal entity.",
+    "rule_to_apply": "If a potential match is found via substring matching, reject it unless the substring represents the complete company name or is separated by clear legal entity delimiters (e.g., 'Limited', 'Ltd', '&', 'and'). Require that additional words before or after the substring are only standard company type indicators (Ltd, Limited, Inc, etc.), not trading prefixes or brand names.",
+    "keywords_to_watch": [
+      "Addz",
+      "prefix_before_match",
+      "substring_partial_match",
+      "additional_legal_name_components",
+      "trading_name_vs_legal_name",
+      "entity_identifier_contamination"
+    ],
+    "example_wrong_match": "Livewire Electrical -> Addz Livewire Electrical Limited",
+    "example_correct_result": "no match found",
+    "timestamp": "2026-03-10T05:08:03.621223+00:00"
+  },
+  {
+    "pattern_name": "partial_name_substring_match",
+    "what_went_wrong": "The matching system incorrectly identified 'Livewire Electrical' as a substring within 'Addz Livewire Electrical Limited' and treated this partial match as a valid company match. The system failed to account for the significant prefix 'Addz' which indicates these are two distinct legal entities with different ownership or operational structures.",
+    "rule_to_apply": "If a company name appears as a substring within a longer company name (rather than being an exact match or clearly matching the full legal entity name), do not return a positive match. Require either exact name matching or validated confirmation that the substring company is a registered trade name/operating name of the longer entity.",
+    "keywords_to_watch": [
+      "substring_matching",
+      "partial_overlap",
+      "name_prefix_variation",
+      "addz",
+      "legal_entity_name_vs_trading_name",
+      "substring_within_longer_name"
+    ],
+    "example_wrong_match": "Livewire Electrical -> Addz Livewire Electrical Limited",
+    "example_correct_result": "no match found",
+    "timestamp": "2026-03-10T05:36:50.312240+00:00"
+  }
+]

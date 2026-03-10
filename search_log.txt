@@ -1,0 +1,2567 @@
+============================================================
+  PSPLA Bulk Recheck
+  Checks: NZSA
+  Scope:  all companies
+============================================================
+
+  Fetching companies from database...
+  619 companies to process
+
+
+[1/619] 1TEK Technology Services
+  [NZSA] Checking: 1TEK Technology Services
+  [NZSA] Fetching member directory...
+  [NZSA] 252 members loaded.
+  [NZSA] 1TEK Technology Services: member=False
+
+[2/619] 24/7 Security Solutions
+  [NZSA] Checking: 24/7 Security Solutions
+  [NZSA] 24/7 Security Solutions: member=True
+
+[3/619] 24/Seven Electrical
+  [NZSA] Checking: 24/Seven Electrical
+  [NZSA] Domain mismatch: company=24sevenelectrical.co.nz, member=jacksongroup.co.nz — rejecting '24/7 Security Solutions Ltd'
+  [NZSA] 24/Seven Electrical: member=False
+
+[4/619] 2E Electrical
+  [NZSA] Checking: 2E Electrical
+  [NZSA] 2E Electrical: member=False
+
+[5/619] 2Secure Security
+  [NZSA] Checking: 2Secure Security
+  [NZSA] 2Secure Security: member=True
+
+[6/619] 2Secure Security Limited
+  [NZSA] Checking: 2Secure Security Limited
+  [NZSA] 2Secure Security Limited: member=True
+
+[7/619] 360 Automation
+  [NZSA] Checking: 360 Automation
+  [NZSA] 360 Automation: member=False
+
+[8/619] 4Tify Technologies
+  [NZSA] Checking: 4Tify Technologies
+  [NZSA] 4Tify Technologies: member=False
+
+[9/619] A Class Electrical Ltd
+  [NZSA] Checking: A Class Electrical Ltd
+  [NZSA] A Class Electrical Ltd: member=False
+
+[10/619] A Team 100 Ltd
+  [NZSA] Checking: A Team 100 Ltd
+  [NZSA] A Team 100 Ltd: member=False
+
+[11/619] A1 Car Alarms and Audio Ltd
+  [NZSA] Checking: A1 Car Alarms and Audio Ltd
+  [NZSA] A1 Car Alarms and Audio Ltd: member=True
+
+[12/619] A1 Locks & Alarms
+  [NZSA] Checking: A1 Locks & Alarms
+  [NZSA] A1 Locks & Alarms: member=False
+
+[13/619] A1A Locksmith, Alarm & Security Ltd t/a Code Red Security
+  [NZSA] Checking: A1A Locksmith, Alarm & Security Ltd t/a Code Red Security
+  [NZSA] A1A Locksmith, Alarm & Security Ltd t/a Code Red Security: member=True
+
+[14/619] A1A Locksmiths, Alarms and Security Ltd
+  [NZSA] Checking: A1A Locksmiths, Alarms and Security Ltd
+  [NZSA] A1A Locksmiths, Alarms and Security Ltd: member=True
+
+[15/619] AB.Electrical
+  [NZSA] Checking: AB.Electrical
+  [NZSA] AB.Electrical: member=False
+
+[16/619] Absolute Security & Electrical
+  [NZSA] Checking: Absolute Security & Electrical
+  [NZSA] Domain mismatch: company=abse.co.nz, member=absolutesecuritygroup.co.nz — rejecting 'Absolute Security Group Ltd (Provisional)'
+  [NZSA] Absolute Security & Electrical: member=False
+
+[17/619] Absolute Security Group
+  [NZSA] Checking: Absolute Security Group
+  [NZSA] Absolute Security Group: member=True
+
+[18/619] Access X
+  [NZSA] Checking: Access X
+  [NZSA] Access X: member=True
+
+[19/619] Accurate Locksmiths & Security
+  [NZSA] Checking: Accurate Locksmiths & Security
+  [NZSA] Accurate Locksmiths & Security: member=True
+
+[20/619] Action Electrical Solutions
+  [NZSA] Checking: Action Electrical Solutions
+  [NZSA] Domain mismatch: company=actionelectricalsolutions.co.nz, member=actionsecurity.co.nz — rejecting 'Action Security & Access Ltd'
+  [NZSA] Action Electrical Solutions: member=False
+
+[21/619] Action Security
+  [NZSA] Checking: Action Security
+  [NZSA] Action Security: member=True
+
+[22/619] Active Alarm Services
+  [NZSA] Checking: Active Alarm Services
+  [NZSA] Active Alarm Services: member=True
+
+[23/619] Active Alarms BOP Ltd
+  [NZSA] Checking: Active Alarms BOP Ltd
+  [NZSA] Active Alarms BOP Ltd: member=True
+
+[24/619] Active Electro Dunedin
+  [NZSA] Checking: Active Electro Dunedin
+  [NZSA] Active Electro Dunedin: member=True
+
+[25/619] ADS Security
+  [NZSA] Checking: ADS Security
+  [NZSA] ADS Security: member=True
+
+[26/619] ADT Security
+  [NZSA] Checking: ADT Security
+  [NZSA] ADT Security: member=True
+
+[27/619] Advanced Security
+  [NZSA] Checking: Advanced Security
+  [NZSA] Domain mismatch: company=advancedgroup.co.nz, member=asgl.co.nz — rejecting 'Advanced Security Group (NZ) Ltd'
+  [NZSA] Advanced Security: member=False
+
+[28/619] Advanced Security Group
+  [NZSA] Checking: Advanced Security Group
+  [NZSA] Advanced Security Group: member=True
+
+[29/619] AEC Security
+  [NZSA] Checking: AEC Security
+  [NZSA] AEC Security: member=False
+
+[30/619] AirSmart Services Limited
+  [NZSA] Checking: AirSmart Services Limited
+  [NZSA] AirSmart Services Limited: member=False
+
+[31/619] Alarm & Electrics Company Ltd
+  [NZSA] Checking: Alarm & Electrics Company Ltd
+  [NZSA] Alarm & Electrics Company Ltd: member=False
+
+[32/619] Alarm Centre Installation
+  [NZSA] Checking: Alarm Centre Installation
+  [NZSA] Domain mismatch: company=aci.net.nz, member=sutherlandsecurity.co.nz — rejecting 'Sutherland Security Centre Ltd'
+  [NZSA] Alarm Centre Installation: member=False
+
+[33/619] Alarm Force
+  [NZSA] Checking: Alarm Force
+  [NZSA] Alarm Force: member=False
+
+[34/619] Alarm New Zealand
+  [NZSA] Checking: Alarm New Zealand
+  [NZSA] Alarm New Zealand: member=True
+
+[35/619] Alarm Services Ltd
+  [NZSA] Checking: Alarm Services Ltd
+  [NZSA] Alarm Services Ltd: member=False
+
+[36/619] Alarm Solutions
+  [NZSA] Checking: Alarm Solutions
+  [NZSA] Alarm Solutions: member=False
+
+[37/619] Alarm System and Access Control Consultant and Installer
+  [NZSA] Checking: Alarm System and Access Control Consultant and Installer
+  [NZSA] Alarm System and Access Control Consultant and Installer: member=True
+
+[38/619] Alarm Techs
+  [NZSA] Checking: Alarm Techs
+  [NZSA] Alarm Techs: member=False
+
+[39/619] Alarm Techs Security & Electrical
+  [NZSA] Checking: Alarm Techs Security & Electrical
+  [NZSA] Alarm Techs Security & Electrical: member=False
+
+[40/619] Alarm Watch
+  [NZSA] Checking: Alarm Watch
+  [NZSA] Alarm Watch: member=True
+
+[41/619] Alarmtek
+  [NZSA] Checking: Alarmtek
+  [NZSA] Alarmtek: member=False
+
+[42/619] Albany City Alarms & CCTV Surveillance
+  [NZSA] Checking: Albany City Alarms & CCTV Surveillance
+  [NZSA] Albany City Alarms & CCTV Surveillance: member=True
+
+[43/619] Alectrics
+  [NZSA] Checking: Alectrics
+  [NZSA] Alectrics: member=False
+
+[44/619] Alert Monitoring
+  [NZSA] Checking: Alert Monitoring
+  [NZSA] Domain mismatch: company=alertmonitoring.co.nz, member=balertsecurity.co.nz — rejecting 'B Alert NZ Ltd'
+  [NZSA] Alert Monitoring: member=False
+
+[45/619] All Round Security
+  [NZSA] Checking: All Round Security
+  [NZSA] All Round Security: member=False
+
+[46/619] Allegion (New Zealand ) Ltd
+  [NZSA] Checking: Allegion (New Zealand ) Ltd
+  [NZSA] Allegion (New Zealand ) Ltd: member=True
+
+[47/619] Alliance Fire & Security
+  [NZSA] Checking: Alliance Fire & Security
+  [NZSA] Alliance Fire & Security: member=True
+
+[48/619] Allied Alarms
+  [NZSA] Checking: Allied Alarms
+  [NZSA] Domain mismatch: company=alliedalarms.co.nz, member=alliedsecurity.co.nz — rejecting 'Allied Investments Ltd t/as Allied Security'
+  [NZSA] Allied Alarms: member=False
+
+[49/619] Allied Security New Zealand
+  [NZSA] Checking: Allied Security New Zealand
+  [NZSA] Allied Security New Zealand: member=True
+
+[50/619] Alltec Services
+  [NZSA] Checking: Alltec Services
+  [NZSA] Alltec Services: member=False
+
+[51/619] Alltec Services Ltd
+  [NZSA] Checking: Alltec Services Ltd
+  [NZSA] Alltec Services Ltd: member=False
+
+[52/619] Almak
+  [NZSA] Checking: Almak
+  [NZSA] Almak: member=False
+
+[53/619] Alpha Protection Services
+  [NZSA] Checking: Alpha Protection Services
+  [NZSA] Alpha Protection Services: member=True
+
+[54/619] Alpha Security Services
+  [NZSA] Checking: Alpha Security Services
+  [NZSA] Domain mismatch: company=alphasecurityservices.co.nz, member=alphaprotection.co.nz — rejecting 'Alpha Protection Services Ltd'
+  [NZSA] Alpha Security Services: member=False
+
+[55/619] Always Electrical Ltd.
+  [NZSA] Checking: Always Electrical Ltd.
+  [NZSA] Always Electrical Ltd.: member=False
+
+[56/619] ANZ Tech Limited
+  [NZSA] Checking: ANZ Tech Limited
+  [NZSA] ANZ Tech Limited: member=True
+
+[57/619] Aotea Electric Marlborough
+  [NZSA] Checking: Aotea Electric Marlborough
+  [NZSA] Aotea Electric Marlborough: member=True
+
+[58/619] Aotea Security
+  [NZSA] Checking: Aotea Security
+  [NZSA] Aotea Security: member=True
+
+[59/619] AR Electronics
+  [NZSA] Checking: AR Electronics
+  [NZSA] Domain mismatch: company=nocowboys.co.nz, member=arelectronics.co.nz — rejecting 'AR Electronics Systems Ltd (Provisional)'
+  [NZSA] AR Electronics: member=False
+
+[60/619] ARA Group
+  [NZSA] Checking: ARA Group
+  [NZSA] ARA Group: member=True
+
+[61/619] Arc
+  [NZSA] Checking: Arc
+  [NZSA] Domain mismatch: company=arc.net.nz, member=arcsecuritysolutions.co.nz — rejecting 'ARC Security Solutions Ltd'
+  [NZSA] Arc: member=False
+
+[62/619] ARC Security
+  [NZSA] Checking: ARC Security
+  [NZSA] ARC Security: member=True
+
+[63/619] Armitage Group
+  [NZSA] Checking: Armitage Group
+  [NZSA] Armitage Group: member=True
+
+[64/619] Armour & Shield Security
+  [NZSA] Checking: Armour & Shield Security
+  [NZSA] Armour & Shield Security: member=False
+
+[65/619] Armourguard
+  [NZSA] Checking: Armourguard
+  [NZSA] Armourguard: member=True
+
+[66/619] Armstrong Smarter Security
+  [NZSA] Checking: Armstrong Smarter Security
+  [NZSA] Armstrong Smarter Security: member=False
+
+[67/619] Armstrong Smarter Security - Canterbury
+  [NZSA] Checking: Armstrong Smarter Security - Canterbury
+  [NZSA] Armstrong Smarter Security - Canterbury: member=False
+
+[68/619] Armstrong Smarter Security - Kapiti Coast.
+  [NZSA] Checking: Armstrong Smarter Security - Kapiti Coast.
+  [NZSA] Armstrong Smarter Security - Kapiti Coast.: member=True
+
+[69/619] Armstrong Smarter Security - Rodney
+  [NZSA] Checking: Armstrong Smarter Security - Rodney
+  [NZSA] Armstrong Smarter Security - Rodney: member=False
+
+[70/619] Armstrong Smarter Security - Waikato
+  [NZSA] Checking: Armstrong Smarter Security - Waikato
+  [NZSA] Armstrong Smarter Security - Waikato: member=True
+
+[71/619] Armstrong Smarter Security - Waikato | Hamilton
+  [NZSA] Checking: Armstrong Smarter Security - Waikato | Hamilton
+  [NZSA] Armstrong Smarter Security - Waikato | Hamilton: member=True
+
+[72/619] Armstrong Smarter Security Rotorua
+  [NZSA] Checking: Armstrong Smarter Security Rotorua
+  [NZSA] Armstrong Smarter Security Rotorua: member=False
+
+[73/619] Armstrong Smarter Security Tauranga
+  [NZSA] Checking: Armstrong Smarter Security Tauranga
+  [NZSA] Armstrong Smarter Security Tauranga: member=False
+
+[74/619] Arrow Alarms
+  [NZSA] Checking: Arrow Alarms
+  [NZSA] Arrow Alarms: member=False
+
+[75/619] Arrowhead Alarm Products
+  [NZSA] Checking: Arrowhead Alarm Products
+  [NZSA] Arrowhead Alarm Products: member=True
+
+[76/619] Arrowhead Alarm Products Ltd
+  [NZSA] Checking: Arrowhead Alarm Products Ltd
+  [NZSA] Arrowhead Alarm Products Ltd: member=True
+
+[77/619] Asset Communications
+  [NZSA] Checking: Asset Communications
+  [NZSA] Domain mismatch: company=assetcommunications.co.nz, member=teltrac.co.nz — rejecting 'Teltrac Communications Ltd'
+  [NZSA] Asset Communications: member=False
+
+[78/619] ATL Electrical
+  [NZSA] Checking: ATL Electrical
+  [NZSA] ATL Electrical: member=False
+
+[79/619] Atlas Gentech (NZ) Ltd t/as Wesco Anixter
+  [NZSA] Checking: Atlas Gentech (NZ) Ltd t/as Wesco Anixter
+  [NZSA] Atlas Gentech (NZ) Ltd t/as Wesco Anixter: member=True
+
+[80/619] Attin Services
+  [NZSA] Checking: Attin Services
+  [NZSA] Attin Services: member=False
+
+[81/619] Auckland CCTV
+  [NZSA] Checking: Auckland CCTV
+  [NZSA] Domain mismatch: company=aucklandcctv.co.nz, member=auckland.ac.nz — rejecting 'University of Auckland'
+  [NZSA] Auckland CCTV: member=False
+
+[82/619] Auckland Geeks
+  [NZSA] Checking: Auckland Geeks
+  [NZSA] Domain mismatch: company=aucklandgeeks.co.nz, member=auckland.ac.nz — rejecting 'University of Auckland'
+  [NZSA] Auckland Geeks: member=False
+
+[83/619] Auckland Safe & Lock Servicing Ltd
+  [NZSA] Checking: Auckland Safe & Lock Servicing Ltd
+  [NZSA] Auckland Safe & Lock Servicing Ltd: member=True
+
+[84/619] Auckland Security Cameras
+  [NZSA] Checking: Auckland Security Cameras
+  [NZSA] Domain mismatch: company=aucklandsecuritycameras, member=auckland.ac.nz — rejecting 'University of Auckland'
+  [NZSA] Auckland Security Cameras: member=False
+
+[85/619] Audio Active
+  [NZSA] Checking: Audio Active
+  [NZSA] Domain mismatch: company=audioactive.co.nz, member=activeelectro.co.nz — rejecting 'Active Electro Dunedin Ltd'
+  [NZSA] Audio Active: member=False
+
+[86/619] Audio-Visual Precision
+  [NZSA] Checking: Audio-Visual Precision
+  [NZSA] Audio-Visual Precision: member=False
+
+[87/619] Avery Auto Electrical LTD
+  [NZSA] Checking: Avery Auto Electrical LTD
+  [NZSA] Avery Auto Electrical LTD: member=False
+
+[88/619] Avigilon
+  [NZSA] Checking: Avigilon
+  [NZSA] Avigilon: member=False
+
+[89/619] Ayres Electrical
+  [NZSA] Checking: Ayres Electrical
+  [NZSA] Ayres Electrical: member=False
+
+[90/619] B Alert NZ Ltd
+  [NZSA] Checking: B Alert NZ Ltd
+  [NZSA] B Alert NZ Ltd: member=True
+
+[91/619] B:Online
+  [NZSA] Checking: B:Online
+  [NZSA] B:Online: member=True
+
+[92/619] B&M Security
+  [NZSA] Checking: B&M Security
+  [NZSA] Domain mismatch: company=bandmsecurity.co.nz, member=commlite.co.nz — rejecting 'P.M. Commlite Ltd'
+  [NZSA] B&M Security: member=False
+
+[93/619] BA Heat Pumps
+  [NZSA] Checking: BA Heat Pumps
+  [NZSA] BA Heat Pumps: member=False
+
+[94/619] Balloch Security
+  [NZSA] Checking: Balloch Security
+  [NZSA] Balloch Security: member=True
+
+[95/619] Banga Electric
+  [NZSA] Checking: Banga Electric
+  [NZSA] Banga Electric: member=False
+
+[96/619] Bank of New Zealand
+  [NZSA] Checking: Bank of New Zealand
+  [NZSA] Bank of New Zealand: member=True
+
+[97/619] Bastion Systems
+  [NZSA] Checking: Bastion Systems
+  [NZSA] Bastion Systems: member=False
+
+[98/619] Bay Installation & Service Ltd
+  [NZSA] Checking: Bay Installation & Service Ltd
+  [NZSA] Bay Installation & Service Ltd: member=True
+
+[99/619] Bay Security Solutions
+  [NZSA] Checking: Bay Security Solutions
+  [NZSA] Bay Security Solutions: member=False
+
+[100/619] Bay Security Systems
+  [NZSA] Checking: Bay Security Systems
+  [NZSA] Bay Security Systems: member=False
+
+[101/619] Bay Smart Fix
+  [NZSA] Checking: Bay Smart Fix
+  [NZSA] Bay Smart Fix: member=False
+
+[102/619] BC Security
+  [NZSA] Checking: BC Security
+  [NZSA] BC Security: member=True
+
+[103/619] BDF Electrical
+  [NZSA] Checking: BDF Electrical
+  [NZSA] BDF Electrical: member=False
+
+[104/619] BDR Security
+  [NZSA] Checking: BDR Security
+  [NZSA] BDR Security: member=True
+
+[105/619] Be Alarmed
+  [NZSA] Checking: Be Alarmed
+  [NZSA] Be Alarmed: member=False
+
+[106/619] Beca Applied Technologies
+  [NZSA] Checking: Beca Applied Technologies
+  [NZSA] Beca Applied Technologies: member=True
+
+[107/619] Begg Security Group
+  [NZSA] Checking: Begg Security Group
+  [NZSA] Begg Security Group: member=True
+
+[108/619] Ben Collins Electrical
+  [NZSA] Checking: Ben Collins Electrical
+  [NZSA] Domain mismatch: company=bencollinselectrical.co.nz, member=westpac.co.nz — rejecting 'Ben Searle'
+  [NZSA] Ben Collins Electrical: member=False
+
+[109/619] Ben Searle
+  [NZSA] Checking: Ben Searle
+  [NZSA] Ben Searle: member=True
+
+[110/619] Benson & Co Security
+  [NZSA] Checking: Benson & Co Security
+  [NZSA] Benson & Co Security: member=False
+
+[111/619] Bhavesh Mori
+  [NZSA] Checking: Bhavesh Mori
+  [NZSA] Bhavesh Mori: member=True
+
+[112/619] Birger Kirsten
+  [NZSA] Checking: Birger Kirsten
+  [NZSA] Birger Kirsten: member=True
+
+[113/619] Biscom
+  [NZSA] Checking: Biscom
+  [NZSA] Biscom: member=False
+
+[114/619] BK Security
+  [NZSA] Checking: BK Security
+  [NZSA] BK Security: member=True
+
+[115/619] BKM Electrical Services
+  [NZSA] Checking: BKM Electrical Services
+  [NZSA] BKM Electrical Services: member=False
+
+[116/619] Blenheim Electric House
+  [NZSA] Checking: Blenheim Electric House
+  [NZSA] Domain mismatch: company=blenheimelectrichouse.co.nz, member=aspire2.ac.nz — rejecting 'Tree House'
+  [NZSA] Blenheim Electric House: member=False
+
+[117/619] BlueLine Security
+  [NZSA] Checking: BlueLine Security
+  [NZSA] BlueLine Security: member=False
+
+[118/619] BME
+  [NZSA] Checking: BME
+  [NZSA] BME: member=False
+
+[119/619] Boat Alarm - Mooring Watch
+  [NZSA] Checking: Boat Alarm - Mooring Watch
+  [NZSA] Boat Alarm - Mooring Watch: member=True
+
+[120/619] Brendan's Audio Visual Services
+  [NZSA] Checking: Brendan's Audio Visual Services
+  [NZSA] Brendan's Audio Visual Services: member=False
+
+[121/619] Brett Payne Auto Electrical Ltd
+  [NZSA] Checking: Brett Payne Auto Electrical Ltd
+  [NZSA] Brett Payne Auto Electrical Ltd: member=False
+
+[122/619] Building Central Ltd
+  [NZSA] Checking: Building Central Ltd
+  [NZSA] Building Central Ltd: member=True
+
+[123/619] Building Site CCTV
+  [NZSA] Checking: Building Site CCTV
+  [NZSA] Building Site CCTV: member=False
+
+[124/619] C R Kennedy New Zealand Ltd
+  [NZSA] Checking: C R Kennedy New Zealand Ltd
+  [NZSA] C R Kennedy New Zealand Ltd: member=True
+
+[125/619] C&Y NZ LTD
+  [NZSA] Checking: C&Y NZ LTD
+  [NZSA] C&Y NZ LTD: member=True
+
+[126/619] Cablerite
+  [NZSA] Checking: Cablerite
+  [NZSA] Cablerite: member=False
+
+[127/619] Caldwell Levesque
+  [NZSA] Checking: Caldwell Levesque
+  [NZSA] Caldwell Levesque: member=True
+
+[128/619] Callahan & Martella Security
+  [NZSA] Checking: Callahan & Martella Security
+  [NZSA] Callahan & Martella Security: member=False
+
+[129/619] Camtec CCTV Solutions
+  [NZSA] Checking: Camtec CCTV Solutions
+  [NZSA] Camtec CCTV Solutions: member=False
+
+[130/619] Capita Electrical
+  [NZSA] Checking: Capita Electrical
+  [NZSA] Capita Electrical: member=False
+
+[131/619] Carl Grayson
+  [NZSA] Checking: Carl Grayson
+  [NZSA] Carl Grayson: member=True
+
+[132/619] Carter & Company Electrical Contracting Ltd
+  [NZSA] Checking: Carter & Company Electrical Contracting Ltd
+  [NZSA] Carter & Company Electrical Contracting Ltd: member=False
+
+[133/619] CCTV Solutions NZ
+  [NZSA] Checking: CCTV Solutions NZ
+  [NZSA] CCTV Solutions NZ: member=True
+
+[134/619] Censor Alarms & Electrical Ltd
+  [NZSA] Checking: Censor Alarms & Electrical Ltd
+  [NZSA] Censor Alarms & Electrical Ltd: member=False
+
+[135/619] Central Communications
+  [NZSA] Checking: Central Communications
+  [NZSA] Domain mismatch: company=centralcomms.nz, member=teltrac.co.nz — rejecting 'Teltrac Communications Ltd'
+  [NZSA] Central Communications: member=False
+
+[136/619] Central Security Solutions
+  [NZSA] Checking: Central Security Solutions
+  [NZSA] Central Security Solutions: member=True
+
+[137/619] Challenger Safes Pacific Ltd
+  [NZSA] Checking: Challenger Safes Pacific Ltd
+  [NZSA] Challenger Safes Pacific Ltd: member=True
+
+[138/619] Chaytor Electrical & Security
+  [NZSA] Checking: Chaytor Electrical & Security
+  [NZSA] Chaytor Electrical & Security: member=False
+
+[139/619] Chevtrain Ltd
+  [NZSA] Checking: Chevtrain Ltd
+  [NZSA] Chevtrain Ltd: member=True
+
+[140/619] Christchurch Automation and Security
+  [NZSA] Checking: Christchurch Automation and Security
+  [NZSA] Domain mismatch: company=chchautomation.co.nz, member=wds.kiwi — rejecting 'Waiheke Documents and Security Ltd'
+  [NZSA] Christchurch Automation and Security: member=False
+
+[141/619] Christopher Wood
+  [NZSA] Checking: Christopher Wood
+  [NZSA] Christopher Wood: member=True
+
+[142/619] Chubb Fire & Security
+  [NZSA] Checking: Chubb Fire & Security
+  [NZSA] Domain mismatch: company=chubbfs.com, member=rhinofiresecurity.co.nz — rejecting 'Rhino Fire & Security Ltd'
+  [NZSA] Chubb Fire & Security: member=False
+
+[143/619] Clear Digital
+  [NZSA] Checking: Clear Digital
+  [NZSA] Domain mismatch: company=m.facebook.com, member=digitalgenius.nz — rejecting 'Digital Genius Ltd (Provisional)'
+  [NZSA] Clear Digital: member=False
+
+[144/619] CLEARWATCH NZ
+  [NZSA] Checking: CLEARWATCH NZ
+  [NZSA] CLEARWATCH NZ: member=False
+
+[145/619] Coast Security
+  [NZSA] Checking: Coast Security
+  [NZSA] Coast Security: member=True
+
+[146/619] Coastal Connections
+  [NZSA] Checking: Coastal Connections
+  [NZSA] Coastal Connections: member=False
+
+[147/619] Cobalt Systems
+  [NZSA] Checking: Cobalt Systems
+  [NZSA] Domain mismatch: company=cobalt.systems, member=cobalteds.co.nz — rejecting 'CS South Island Ltd t/as Cobalt Systems'
+  [NZSA] Cobalt Systems: member=False
+
+[148/619] Code 9 Limited
+  [NZSA] Checking: Code 9 Limited
+  [NZSA] Code 9 Limited: member=False
+
+[149/619] Code9
+  [NZSA] Checking: Code9
+  [NZSA] Code9: member=False
+
+[150/619] Codec Security
+  [NZSA] Checking: Codec Security
+  [NZSA] Codec Security: member=False
+
+[151/619] Cole Security
+  [NZSA] Checking: Cole Security
+  [NZSA] Cole Security: member=False
+
+[152/619] Commlite
+  [NZSA] Checking: Commlite
+  [NZSA] Commlite: member=True
+
+[153/619] Compare Security
+  [NZSA] Checking: Compare Security
+  [NZSA] Compare Security: member=False
+
+[154/619] Complete Security and Installation
+  [NZSA] Checking: Complete Security and Installation
+  [NZSA] Domain mismatch: company=completesecurity.co.nz, member=wds.kiwi — rejecting 'Waiheke Documents and Security Ltd'
+  [NZSA] Complete Security and Installation: member=False
+
+[155/619] Computech Alarms & Security
+  [NZSA] Checking: Computech Alarms & Security
+  [NZSA] Computech Alarms & Security: member=True
+
+[156/619] Computer Dezire
+  [NZSA] Checking: Computer Dezire
+  [NZSA] Computer Dezire: member=False
+
+[157/619] Computer Dynamics NZ
+  [NZSA] Checking: Computer Dynamics NZ
+  [NZSA] Computer Dynamics NZ: member=True
+
+[158/619] Comtel NZ Ltd
+  [NZSA] Checking: Comtel NZ Ltd
+  [NZSA] Comtel NZ Ltd: member=False
+
+[159/619] Conet Solutions
+  [NZSA] Checking: Conet Solutions
+  [NZSA] Conet Solutions: member=False
+
+[160/619] Connect Surveillance and Security
+  [NZSA] Checking: Connect Surveillance and Security
+  [NZSA] Domain mismatch: company=connect.dickerdata.co.nz, member=wds.kiwi — rejecting 'Waiheke Documents and Security Ltd'
+  [NZSA] Connect Surveillance and Security: member=False
+
+[161/619] Control Systems
+  [NZSA] Checking: Control Systems
+  [NZSA] Control Systems: member=True
+
+[162/619] Convergint
+  [NZSA] Checking: Convergint
+  [NZSA] Convergint: member=True
+
+[163/619] Cooks AVS
+  [NZSA] Checking: Cooks AVS
+  [NZSA] Cooks AVS: member=False
+
+[164/619] Couchman Alarms
+  [NZSA] Checking: Couchman Alarms
+  [NZSA] Couchman Alarms: member=True
+
+[165/619] Cougar Security
+  [NZSA] Checking: Cougar Security
+  [NZSA] Cougar Security: member=True
+
+[166/619] Craig Gilbert
+  [NZSA] Checking: Craig Gilbert
+  [NZSA] Craig Gilbert: member=True
+
+[167/619] Craig Taylor
+  [NZSA] Checking: Craig Taylor
+  [NZSA] Craig Taylor: member=True
+
+[168/619] CRONtech Services Limited
+  [NZSA] Checking: CRONtech Services Limited
+  [NZSA] CRONtech Services Limited: member=False
+
+[169/619] Crosbies Security
+  [NZSA] Checking: Crosbies Security
+  [NZSA] Crosbies Security: member=True
+
+[170/619] Crown Worldwide (NZ) Ltd
+  [NZSA] Checking: Crown Worldwide (NZ) Ltd
+  [NZSA] Crown Worldwide (NZ) Ltd: member=True
+
+[171/619] CSL Security & Investigations
+  [NZSA] Checking: CSL Security & Investigations
+  [NZSA] Domain mismatch: company=cslsecurity.co.nz, member=wellingtoninvestigations.co.nz — rejecting 'Wellington Investigations 2013 Ltd'
+  [NZSA] CSL Security & Investigations: member=False
+
+[172/619] CSL Security Ltd
+  [NZSA] Checking: CSL Security Ltd
+  [NZSA] CSL Security Ltd: member=True
+
+[173/619] Custom Digital
+  [NZSA] Checking: Custom Digital
+  [NZSA] Domain mismatch: company=customdigital.co.nz, member=digitalgenius.nz — rejecting 'Digital Genius Ltd (Provisional)'
+  [NZSA] Custom Digital: member=False
+
+[174/619] Custom Technology Systems
+  [NZSA] Checking: Custom Technology Systems
+  [NZSA] Custom Technology Systems: member=True
+
+[175/619] Dahua Technology New Zealand Limited
+  [NZSA] Checking: Dahua Technology New Zealand Limited
+  [NZSA] Domain mismatch: company=ms-my.facebook.com, member=dahuatech.com — rejecting 'Dahua Technology New Zealand Ltd (Provisional)'
+  [NZSA] Dahua Technology New Zealand Limited: member=False
+
+[176/619] Dam Security Solutions Ltd
+  [NZSA] Checking: Dam Security Solutions Ltd
+  [NZSA] Dam Security Solutions Ltd: member=True
+
+[177/619] DankoSec
+  [NZSA] Checking: DankoSec
+  [NZSA] DankoSec: member=True
+
+[178/619] DankoSec Security Systems
+  [NZSA] Checking: DankoSec Security Systems
+  [NZSA] DankoSec Security Systems: member=True
+
+[179/619] Data Masters
+  [NZSA] Checking: Data Masters
+  [NZSA] Data Masters: member=True
+
+[180/619] Datacom Systems Ltd
+  [NZSA] Checking: Datacom Systems Ltd
+  [NZSA] Datacom Systems Ltd: member=True
+
+[181/619] Datacomms Plus Ltd
+  [NZSA] Checking: Datacomms Plus Ltd
+  [NZSA] Datacomms Plus Ltd: member=False
+
+[182/619] Datatalk NZ Ltd
+  [NZSA] Checking: Datatalk NZ Ltd
+  [NZSA] Datatalk NZ Ltd: member=True
+
+[183/619] David Horsburgh
+  [NZSA] Checking: David Horsburgh
+  [NZSA] David Horsburgh: member=True
+
+[184/619] David Proud
+  [NZSA] Checking: David Proud
+  [NZSA] David Proud: member=True
+
+[185/619] DC Security
+  [NZSA] Checking: DC Security
+  [NZSA] DC Security: member=True
+
+[186/619] de Wet Contractors Ltd
+  [NZSA] Checking: de Wet Contractors Ltd
+  [NZSA] de Wet Contractors Ltd: member=False
+
+[187/619] Dean Chandler
+  [NZSA] Checking: Dean Chandler
+  [NZSA] Dean Chandler: member=True
+
+[188/619] DGL Electrical LTD
+  [NZSA] Checking: DGL Electrical LTD
+  [NZSA] DGL Electrical LTD: member=False
+
+[189/619] Digital Solutions Ltd
+  [NZSA] Checking: Digital Solutions Ltd
+  [NZSA] Digital Solutions Ltd: member=True
+
+[190/619] Dion Neill
+  [NZSA] Checking: Dion Neill
+  [NZSA] Dion Neill: member=True
+
+[191/619] Direct Control
+  [NZSA] Checking: Direct Control
+  [NZSA] Direct Control: member=True
+
+[192/619] Dynamic Networking Security
+  [NZSA] Checking: Dynamic Networking Security
+  [NZSA] Dynamic Networking Security: member=False
+
+[193/619] E Sec and Data Solutions
+  [NZSA] Checking: E Sec and Data Solutions
+  [NZSA] E Sec and Data Solutions: member=True
+
+[194/619] Eagle Ace NZ
+  [NZSA] Checking: Eagle Ace NZ
+  [NZSA] Eagle Ace NZ: member=False
+
+[195/619] Eagle Alarms
+  [NZSA] Checking: Eagle Alarms
+  [NZSA] Eagle Alarms: member=False
+
+[196/619] Eagle Security NZ
+  [NZSA] Checking: Eagle Security NZ
+  [NZSA] Eagle Security NZ: member=False
+
+[197/619] East Coast Soundz Auto Electrix Tinting
+  [NZSA] Checking: East Coast Soundz Auto Electrix Tinting
+  [NZSA] East Coast Soundz Auto Electrix Tinting: member=True
+
+[198/619] Eastek Ltd
+  [NZSA] Checking: Eastek Ltd
+  [NZSA] Eastek Ltd: member=True
+
+[199/619] Eastek Technologies
+  [NZSA] Checking: Eastek Technologies
+  [NZSA] Eastek Technologies: member=True
+
+[200/619] Eastern Bays Mobile Locksmiths
+  [NZSA] Checking: Eastern Bays Mobile Locksmiths
+  [NZSA] Eastern Bays Mobile Locksmiths: member=True
+
+[201/619] EastSide Security
+  [NZSA] Checking: EastSide Security
+  [NZSA] EastSide Security: member=False
+
+[202/619] Easy Security
+  [NZSA] Checking: Easy Security
+  [NZSA] Easy Security: member=False
+
+[203/619] EAV Limited
+  [NZSA] Checking: EAV Limited
+  [NZSA] EAV Limited: member=False
+
+[204/619] EB Engineering Solutions
+  [NZSA] Checking: EB Engineering Solutions
+  [NZSA] EB Engineering Solutions: member=False
+
+[205/619] Eclipse Electrical
+  [NZSA] Checking: Eclipse Electrical
+  [NZSA] Eclipse Electrical: member=False
+
+[206/619] Eco Power Electrical Solutions
+  [NZSA] Checking: Eco Power Electrical Solutions
+  [NZSA] Eco Power Electrical Solutions: member=False
+
+[207/619] Ecosse Business Systems
+  [NZSA] Checking: Ecosse Business Systems
+  [NZSA] Ecosse Business Systems: member=True
+
+[208/619] Eftpos Now
+  [NZSA] Checking: Eftpos Now
+  [NZSA] Eftpos Now: member=False
+
+[209/619] Electric Avenue
+  [NZSA] Checking: Electric Avenue
+  [NZSA] Electric Avenue: member=False
+
+[210/619] Electric Solutions
+  [NZSA] Checking: Electric Solutions
+  [NZSA] Electric Solutions: member=False
+
+[211/619] Electrical Direct - Online Electrical Wholesaler
+  [NZSA] Checking: Electrical Direct - Online Electrical Wholesaler
+  [NZSA] Domain mismatch: company=fi-fi.facebook.com, member=directcontrol.nz — rejecting 'Direct Control Ltd'
+  [NZSA] Electrical Direct - Online Electrical Wholesaler: member=False
+
+[212/619] Electrical Security Solutions
+  [NZSA] Checking: Electrical Security Solutions
+  [NZSA] Electrical Security Solutions: member=False
+
+[213/619] Electrical Solutionz BOP
+  [NZSA] Checking: Electrical Solutionz BOP
+  [NZSA] Electrical Solutionz BOP: member=False
+
+[214/619] Elite Electrical
+  [NZSA] Checking: Elite Electrical
+  [NZSA] Elite Electrical: member=False
+
+[215/619] ENGLEFIELD
+  [NZSA] Checking: ENGLEFIELD
+  [NZSA] ENGLEFIELD: member=False
+
+[216/619] Enterprise Security Solutions Limited
+  [NZSA] Checking: Enterprise Security Solutions Limited
+  [NZSA] Enterprise Security Solutions Limited: member=False
+
+[217/619] Eriam Tech
+  [NZSA] Checking: Eriam Tech
+  [NZSA] Eriam Tech: member=True
+
+[218/619] Eve Street Electrical
+  [NZSA] Checking: Eve Street Electrical
+  [NZSA] Eve Street Electrical: member=False
+
+[219/619] Evotek
+  [NZSA] Checking: Evotek
+  [NZSA] Evotek: member=True
+
+[220/619] Eye Spy Security
+  [NZSA] Checking: Eye Spy Security
+  [NZSA] Eye Spy Security: member=False
+
+[221/619] Eyezon Security Systems
+  [NZSA] Checking: Eyezon Security Systems
+  [NZSA] Eyezon Security Systems: member=False
+
+[222/619] Ezi Computing South
+  [NZSA] Checking: Ezi Computing South
+  [NZSA] Domain mismatch: company=ezicomputing.co.nz, member=cobalteds.co.nz — rejecting 'CS South Island Ltd t/as Cobalt Systems'
+  [NZSA] Ezi Computing South: member=False
+
+[223/619] Farid Tech Solutions
+  [NZSA] Checking: Farid Tech Solutions
+  [NZSA] Farid Tech Solutions: member=True
+
+[224/619] FAST NZ- Otago
+  [NZSA] Checking: FAST NZ- Otago
+  [NZSA] FAST NZ- Otago: member=True
+
+[225/619] FBI Security Systems
+  [NZSA] Checking: FBI Security Systems
+  [NZSA] FBI Security Systems: member=False
+
+[226/619] FernByte
+  [NZSA] Checking: FernByte
+  [NZSA] FernByte: member=False
+
+[227/619] Firewatch South Canterbury
+  [NZSA] Checking: Firewatch South Canterbury
+  [NZSA] Firewatch South Canterbury: member=True
+
+[228/619] First Contact Ltd (Specialised Guard Services Ltd)
+  [NZSA] Checking: First Contact Ltd (Specialised Guard Services Ltd)
+  [NZSA] First Contact Ltd (Specialised Guard Services Ltd): member=True
+
+[229/619] FIRST Security
+  [NZSA] Checking: FIRST Security
+  [NZSA] FIRST Security: member=True
+
+[230/619] Fleet Track NZ
+  [NZSA] Checking: Fleet Track NZ
+  [NZSA] Fleet Track NZ: member=False
+
+[231/619] FMH Electrix Ltd
+  [NZSA] Checking: FMH Electrix Ltd
+  [NZSA] FMH Electrix Ltd: member=True
+
+[232/619] G4S
+  [NZSA] Checking: G4S
+  [NZSA] G4S: member=True
+
+[233/619] Gallagher Group Ltd
+  [NZSA] Checking: Gallagher Group Ltd
+  [NZSA] Gallagher Group Ltd: member=True
+
+[234/619] Garrison Alarms
+  [NZSA] Checking: Garrison Alarms
+  [NZSA] Garrison Alarms: member=True
+
+[235/619] Gateway CCTV
+  [NZSA] Checking: Gateway CCTV
+  [NZSA] Gateway CCTV: member=False
+
+[236/619] Gavin Clark
+  [NZSA] Checking: Gavin Clark
+  [NZSA] Gavin Clark: member=True
+
+[237/619] GE Security Systems
+  [NZSA] Checking: GE Security Systems
+  [NZSA] GE Security Systems: member=True
+
+[238/619] Geeks on Wheels
+  [NZSA] Checking: Geeks on Wheels
+  [NZSA] Domain mismatch: company=geeksonwheels.co.nz, member=onguard.co.nz — rejecting 'On Guard Security Solutions Ltd'
+  [NZSA] Geeks on Wheels: member=False
+
+[239/619] GET It Solution
+  [NZSA] Checking: GET It Solution
+  [NZSA] GET It Solution: member=False
+
+[240/619] Gilcom
+  [NZSA] Checking: Gilcom
+  [NZSA] Gilcom: member=False
+
+[241/619] Ginnen Alarms Limited
+  [NZSA] Checking: Ginnen Alarms Limited
+  [NZSA] Ginnen Alarms Limited: member=False
+
+[242/619] Gisborne Alarms
+  [NZSA] Checking: Gisborne Alarms
+  [NZSA] Gisborne Alarms: member=False
+
+[243/619] Gisborne Alarms Limited
+  [NZSA] Checking: Gisborne Alarms Limited
+  [NZSA] Gisborne Alarms Limited: member=False
+
+[244/619] GLI Computers
+  [NZSA] Checking: GLI Computers
+  [NZSA] GLI Computers: member=False
+
+[245/619] Global Risk Consulting Ltd
+  [NZSA] Checking: Global Risk Consulting Ltd
+  [NZSA] Global Risk Consulting Ltd: member=True
+
+[246/619] Global Security
+  [NZSA] Checking: Global Security
+  [NZSA] Global Security: member=True
+
+[247/619] Go Wireless NZ
+  [NZSA] Checking: Go Wireless NZ
+  [NZSA] Go Wireless NZ: member=False
+
+[248/619] GoFox Electrical
+  [NZSA] Checking: GoFox Electrical
+  [NZSA] GoFox Electrical: member=False
+
+[249/619] Graham Lynch Security
+  [NZSA] Checking: Graham Lynch Security
+  [NZSA] Graham Lynch Security: member=False
+
+[250/619] Grammar Electrical
+  [NZSA] Checking: Grammar Electrical
+  [NZSA] Grammar Electrical: member=False
+
+[251/619] GRC Audio
+  [NZSA] Checking: GRC Audio
+  [NZSA] GRC Audio: member=False
+
+[252/619] Greene Security
+  [NZSA] Checking: Greene Security
+  [NZSA] Greene Security: member=False
+
+[253/619] Guardian Security
+  [NZSA] Checking: Guardian Security
+  [NZSA] Guardian Security: member=False
+
+[254/619] Guardian Surveillance
+  [NZSA] Checking: Guardian Surveillance
+  [NZSA] Guardian Surveillance: member=False
+
+[255/619] Guild & Spence Electrical
+  [NZSA] Checking: Guild & Spence Electrical
+  [NZSA] Guild & Spence Electrical: member=True
+
+[256/619] Guild & Spence Technologies
+  [NZSA] Checking: Guild & Spence Technologies
+  [NZSA] Guild & Spence Technologies: member=True
+
+[257/619] Guild and Spence Electrical
+  [NZSA] Checking: Guild and Spence Electrical
+  [NZSA] Guild and Spence Electrical: member=True
+
+[258/619] Hale Electrical Services
+  [NZSA] Checking: Hale Electrical Services
+  [NZSA] Hale Electrical Services: member=False
+
+[259/619] Hampden Ltd
+  [NZSA] Checking: Hampden Ltd
+  [NZSA] Hampden Ltd: member=True
+
+[260/619] Hanmer Solutions
+  [NZSA] Checking: Hanmer Solutions
+  [NZSA] Hanmer Solutions: member=True
+
+[261/619] Harmony Tech
+  [NZSA] Checking: Harmony Tech
+  [NZSA] Domain mismatch: company=harmonytech.nz, member=techgroup.co.nz — rejecting 'Tech Group of Companies Ltd'
+  [NZSA] Harmony Tech: member=False
+
+[262/619] Havelock Hills Security
+  [NZSA] Checking: Havelock Hills Security
+  [NZSA] Havelock Hills Security: member=False
+
+[263/619] Helen Smith
+  [NZSA] Checking: Helen Smith
+  [NZSA] Helen Smith: member=True
+
+[264/619] Hi Star
+  [NZSA] Checking: Hi Star
+  [NZSA] Hi Star: member=False
+
+[265/619] Highway 1
+  [NZSA] Checking: Highway 1
+  [NZSA] Highway 1: member=False
+
+[266/619] HIKVISION New Zealand Ltd
+  [NZSA] Checking: HIKVISION New Zealand Ltd
+  [NZSA] HIKVISION New Zealand Ltd: member=True
+
+[267/619] Hines Security
+  [NZSA] Checking: Hines Security
+  [NZSA] Hines Security: member=False
+
+[268/619] Home Security Systems
+  [NZSA] Checking: Home Security Systems
+  [NZSA] Home Security Systems: member=False
+
+[269/619] HSM
+  [NZSA] Checking: HSM
+  [NZSA] HSM: member=True
+
+[270/619] HTS Group Ltd
+  [NZSA] Checking: HTS Group Ltd
+  [NZSA] HTS Group Ltd: member=True
+
+[271/619] ICARAS Consultants
+  [NZSA] Checking: ICARAS Consultants
+  [NZSA] ICARAS Consultants: member=True
+
+[272/619] ICE Security
+  [NZSA] Checking: ICE Security
+  [NZSA] ICE Security: member=True
+
+[273/619] ID Solutions 1993 Ltd
+  [NZSA] Checking: ID Solutions 1993 Ltd
+  [NZSA] ID Solutions 1993 Ltd: member=True
+
+[274/619] IFixed Waihi
+  [NZSA] Checking: IFixed Waihi
+  [NZSA] IFixed Waihi: member=False
+
+[275/619] Illuminate
+  [NZSA] Checking: Illuminate
+  [NZSA] Illuminate: member=False
+
+[276/619] Imatec Solutions
+  [NZSA] Checking: Imatec Solutions
+  [NZSA] Imatec Solutions: member=False
+
+[277/619] Impact Alarms
+  [NZSA] Checking: Impact Alarms
+  [NZSA] Impact Alarms: member=False
+
+[278/619] Independent Security
+  [NZSA] Checking: Independent Security
+  [NZSA] Independent Security: member=False
+
+[279/619] Informatiks
+  [NZSA] Checking: Informatiks
+  [NZSA] Informatiks: member=False
+
+[280/619] Infotech Technologies NZ Limited
+  [NZSA] Checking: Infotech Technologies NZ Limited
+  [NZSA] Infotech Technologies NZ Limited: member=False
+
+[281/619] Insight CCTV Northland
+  [NZSA] Checking: Insight CCTV Northland
+  [NZSA] Insight CCTV Northland: member=False
+
+[282/619] Insight EDS
+  [NZSA] Checking: Insight EDS
+  [NZSA] Insight EDS: member=False
+
+[283/619] Insite Security
+  [NZSA] Checking: Insite Security
+  [NZSA] Insite Security: member=False
+
+[284/619] Insounds
+  [NZSA] Checking: Insounds
+  [NZSA] Insounds: member=False
+
+[285/619] Install IT
+  [NZSA] Checking: Install IT
+  [NZSA] Install IT: member=False
+
+[286/619] Installer Services Taranaki
+  [NZSA] Checking: Installer Services Taranaki
+  [NZSA] Installer Services Taranaki: member=False
+
+[287/619] Integrated
+  [NZSA] Checking: Integrated
+  [NZSA] Integrated: member=True
+
+[288/619] Integrated Control Technology
+  [NZSA] Checking: Integrated Control Technology
+  [NZSA] Integrated Control Technology: member=True
+
+[289/619] Integrated Security Services
+  [NZSA] Checking: Integrated Security Services
+  [NZSA] Domain mismatch: company=integratedsecurity.co.nz, member=ict.co — rejecting 'Integrated Control Technology Ltd'
+  [NZSA] Integrated Security Services: member=False
+
+[290/619] Integrity Security
+  [NZSA] Checking: Integrity Security
+  [NZSA] Integrity Security: member=False
+
+[291/619] Integrity Security and Locks
+  [NZSA] Checking: Integrity Security and Locks
+  [NZSA] Integrity Security and Locks: member=True
+
+[292/619] Intelix Biometrix
+  [NZSA] Checking: Intelix Biometrix
+  [NZSA] Intelix Biometrix: member=False
+
+[293/619] Intercept Wellington
+  [NZSA] Checking: Intercept Wellington
+  [NZSA] Intercept Wellington: member=True
+
+[294/619] IP Camera Security
+  [NZSA] Checking: IP Camera Security
+  [NZSA] IP Camera Security: member=False
+
+[295/619] IQ Security
+  [NZSA] Checking: IQ Security
+  [NZSA] IQ Security: member=False
+
+[296/619] IQ Security Limited
+  [NZSA] Checking: IQ Security Limited
+  [NZSA] IQ Security Limited: member=False
+
+[297/619] ISS Facility Services Ltd
+  [NZSA] Checking: ISS Facility Services Ltd
+  [NZSA] ISS Facility Services Ltd: member=True
+
+[298/619] ITatHand
+  [NZSA] Checking: ITatHand
+  [NZSA] ITatHand: member=False
+
+[299/619] ITL Technologies
+  [NZSA] Checking: ITL Technologies
+  [NZSA] ITL Technologies: member=True
+
+[300/619] Jace Electrical
+  [NZSA] Checking: Jace Electrical
+  [NZSA] Jace Electrical: member=False
+
+[301/619] James Mobile Locksmith Ltd
+  [NZSA] Checking: James Mobile Locksmith Ltd
+  [NZSA] James Mobile Locksmith Ltd: member=True
+
+[302/619] JB Security
+  [NZSA] Checking: JB Security
+  [NZSA] JB Security: member=False
+
+[303/619] JC Installs
+  [NZSA] Checking: JC Installs
+  [NZSA] JC Installs: member=False
+
+[304/619] JD Security
+  [NZSA] Checking: JD Security
+  [NZSA] JD Security: member=False
+
+[305/619] Jeffrey Brown
+  [NZSA] Checking: Jeffrey Brown
+  [NZSA] Jeffrey Brown: member=True
+
+[306/619] Jelley Charles Grant
+  [NZSA] Checking: Jelley Charles Grant
+  [NZSA] Domain mismatch: company=servicefinder.co.nz, member=strategicdefence.co.nz — rejecting 'PJ Charles Ltd t/as Strategic Defence'
+  [NZSA] Jelley Charles Grant: member=False
+
+[307/619] JK Security
+  [NZSA] Checking: JK Security
+  [NZSA] JK Security: member=False
+
+[308/619] Johan Van Rensburg
+  [NZSA] Checking: Johan Van Rensburg
+  [NZSA] Johan Van Rensburg: member=True
+
+[309/619] John Leader Electrical
+  [NZSA] Checking: John Leader Electrical
+  [NZSA] Domain mismatch: company=de-de.facebook.com, member=homesecuritysystems.co.nz — rejecting 'John McGrevy'
+  [NZSA] John Leader Electrical: member=False
+
+[310/619] Jonathan Tulloch
+  [NZSA] Checking: Jonathan Tulloch
+  [NZSA] Jonathan Tulloch: member=True
+
+[311/619] JP Electrics
+  [NZSA] Checking: JP Electrics
+  [NZSA] JP Electrics: member=False
+
+[312/619] JRL Electrical
+  [NZSA] Checking: JRL Electrical
+  [NZSA] JRL Electrical: member=False
+
+[313/619] JSR Electrical
+  [NZSA] Checking: JSR Electrical
+  [NZSA] JSR Electrical: member=False
+
+[314/619] Julian Columbus
+  [NZSA] Checking: Julian Columbus
+  [NZSA] Julian Columbus: member=True
+
+[315/619] JV Systems
+  [NZSA] Checking: JV Systems
+  [NZSA] JV Systems: member=False
+
+[316/619] JV Technologies
+  [NZSA] Checking: JV Technologies
+  [NZSA] JV Technologies: member=False
+
+[317/619] K&M Electrical
+  [NZSA] Checking: K&M Electrical
+  [NZSA] Domain mismatch: company=kmelectrical.co.nz, member=commlite.co.nz — rejecting 'P.M. Commlite Ltd'
+  [NZSA] K&M Electrical: member=False
+
+[318/619] Kaitaia Hire Centre & Onsite Access
+  [NZSA] Checking: Kaitaia Hire Centre & Onsite Access
+  [NZSA] Kaitaia Hire Centre & Onsite Access: member=True
+
+[319/619] Keytronics NZ
+  [NZSA] Checking: Keytronics NZ
+  [NZSA] Keytronics NZ: member=False
+
+[320/619] Kiss I.T.
+  [NZSA] Checking: Kiss I.T.
+  [NZSA] Kiss I.T.: member=True
+
+[321/619] Kiwi Alarms
+  [NZSA] Checking: Kiwi Alarms
+  [NZSA] Kiwi Alarms: member=True
+
+[322/619] Kiwi Alarms Limited
+  [NZSA] Checking: Kiwi Alarms Limited
+  [NZSA] Kiwi Alarms Limited: member=True
+
+[323/619] Kiwi Safeguard
+  [NZSA] Checking: Kiwi Safeguard
+  [NZSA] Kiwi Safeguard: member=True
+
+[324/619] Kiwi Security
+  [NZSA] Checking: Kiwi Security
+  [NZSA] Domain mismatch: company=kiwisecurity.co.nz, member=kiwialarms.co.nz — rejecting 'Kiwi Alarms Ltd'
+  [NZSA] Kiwi Security: member=False
+
+[325/619] Kiwistream Solutions Limited
+  [NZSA] Checking: Kiwistream Solutions Limited
+  [NZSA] Kiwistream Solutions Limited: member=False
+
+[326/619] KT Electrical Limited
+  [NZSA] Checking: KT Electrical Limited
+  [NZSA] KT Electrical Limited: member=False
+
+[327/619] Lamberts Business Systems
+  [NZSA] Checking: Lamberts Business Systems
+  [NZSA] Domain mismatch: company=lamberts.co.nz, member=ecosseltd.co.nz — rejecting 'Ecosse Business Systems Ltd'
+  [NZSA] Lamberts Business Systems: member=False
+
+[328/619] Laser Electrical Blenheim
+  [NZSA] Checking: Laser Electrical Blenheim
+  [NZSA] Domain mismatch: company=blenheim.laserelectrical.co.nz, member=laserelectrical.co.nz — rejecting 'Monteith Electrical Ltd t/as Laser Electrical Blenheim'
+  [NZSA] Laser Electrical Blenheim: member=False
+
+[329/619] Laser Electrical Dargaville
+  [NZSA] Checking: Laser Electrical Dargaville
+  [NZSA] Laser Electrical Dargaville: member=True
+
+[330/619] Laser Electrical Dunedin
+  [NZSA] Checking: Laser Electrical Dunedin
+  [NZSA] Domain mismatch: company=dunedin.laserelectrical.co.nz, member=laserelectrical.co.nz — rejecting 'Monteith Electrical Ltd t/as Laser Electrical Blenheim'
+  [NZSA] Laser Electrical Dunedin: member=False
+
+[331/619] Laser Electrical Putaruru
+  [NZSA] Checking: Laser Electrical Putaruru
+  [NZSA] Domain mismatch: company=laserelectricalputaruru.co.nz, member=laserelectrical.co.nz — rejecting 'Monteith Electrical Ltd t/as Laser Electrical Blenheim'
+  [NZSA] Laser Electrical Putaruru: member=False
+
+[332/619] Laser Electrical Taupo
+  [NZSA] Checking: Laser Electrical Taupo
+  [NZSA] Domain mismatch: company=laserelectricaltaupo.co.nz, member=laserelectrical.co.nz — rejecting 'Monteith Electrical Ltd t/as Laser Electrical Blenheim'
+  [NZSA] Laser Electrical Taupo: member=False
+
+[333/619] Laser Electrical Tauranga
+  [NZSA] Checking: Laser Electrical Tauranga
+  [NZSA] Domain mismatch: company=laserelectricaltauranga.co.nz, member=laserelectrical.co.nz — rejecting 'Monteith Electrical Ltd t/as Laser Electrical Blenheim'
+  [NZSA] Laser Electrical Tauranga: member=False
+
+[334/619] Laser Electrical Whangarei
+  [NZSA] Checking: Laser Electrical Whangarei
+  [NZSA] Domain mismatch: company=laserelectricalwhangarei.co.nz, member=laserelectrical.co.nz — rejecting 'Monteith Electrical Ltd t/as Laser Electrical Blenheim'
+  [NZSA] Laser Electrical Whangarei: member=False
+
+[335/619] Laser Group
+  [NZSA] Checking: Laser Group
+  [NZSA] Domain mismatch: company=lasergroup.co.nz, member=laserelectrical.co.nz — rejecting 'Monteith Electrical Ltd t/as Laser Electrical Blenheim'
+  [NZSA] Laser Group: member=False
+
+[336/619] Laura Goodwin
+  [NZSA] Checking: Laura Goodwin
+  [NZSA] Laura Goodwin: member=True
+
+[337/619] LB Outfitters
+  [NZSA] Checking: LB Outfitters
+  [NZSA] LB Outfitters: member=False
+
+[338/619] Leading Sky Control
+  [NZSA] Checking: Leading Sky Control
+  [NZSA] Leading Sky Control: member=True
+
+[339/619] Level Electrical Timaru
+  [NZSA] Checking: Level Electrical Timaru
+  [NZSA] Level Electrical Timaru: member=False
+
+[340/619] Lightning Electrical Ltd
+  [NZSA] Checking: Lightning Electrical Ltd
+  [NZSA] Lightning Electrical Ltd: member=False
+
+[341/619] Linc Electrical
+  [NZSA] Checking: Linc Electrical
+  [NZSA] Linc Electrical: member=False
+
+[342/619] Link nz electrical limited
+  [NZSA] Checking: Link nz electrical limited
+  [NZSA] Link nz electrical limited: member=False
+
+[343/619] Linked Electrical
+  [NZSA] Checking: Linked Electrical
+  [NZSA] Linked Electrical: member=False
+
+[344/619] Livewire Electrical
+  [NZSA] Checking: Livewire Electrical
+  [NZSA] Livewire Electrical: member=False
+
+[345/619] Lock & Alarm Gisborne
+  [NZSA] Checking: Lock & Alarm Gisborne
+  [NZSA] Domain mismatch: company=gisbornecity.co.nz, member=rossgalt.co.nz — rejecting 'Ross Galt Lock & Alarm Ltd'
+  [NZSA] Lock & Alarm Gisborne: member=False
+
+[346/619] Lock & Alarm Gisborne Ltd
+  [NZSA] Checking: Lock & Alarm Gisborne Ltd
+  [NZSA] Lock & Alarm Gisborne Ltd: member=True
+
+[347/619] Locksmith & Security Solutions
+  [NZSA] Checking: Locksmith & Security Solutions
+  [NZSA] Locksmith & Security Solutions: member=True
+
+[348/619] Loop Electrical Limited
+  [NZSA] Checking: Loop Electrical Limited
+  [NZSA] Loop Electrical Limited: member=False
+
+[349/619] LSC NZ Ltd
+  [NZSA] Checking: LSC NZ Ltd
+  [NZSA] LSC NZ Ltd: member=True
+
+[350/619] Lusty & Blundell
+  [NZSA] Checking: Lusty & Blundell
+  [NZSA] Lusty & Blundell: member=False
+
+[351/619] MacEll Maintenance & Electrical
+  [NZSA] Checking: MacEll Maintenance & Electrical
+  [NZSA] MacEll Maintenance & Electrical: member=False
+
+[352/619] Mainland Electrical
+  [NZSA] Checking: Mainland Electrical
+  [NZSA] Mainland Electrical: member=False
+
+[353/619] Mainland Security Systems
+  [NZSA] Checking: Mainland Security Systems
+  [NZSA] Mainland Security Systems: member=False
+
+[354/619] Mainline Electrical
+  [NZSA] Checking: Mainline Electrical
+  [NZSA] Mainline Electrical: member=False
+
+[355/619] Manukau Electrical Warehouse
+  [NZSA] Checking: Manukau Electrical Warehouse
+  [NZSA] Manukau Electrical Warehouse: member=False
+
+[356/619] Marintec Ltd.
+  [NZSA] Checking: Marintec Ltd.
+  [NZSA] Marintec Ltd.: member=False
+
+[357/619] Mark McCall
+  [NZSA] Checking: Mark McCall
+  [NZSA] Mark McCall: member=True
+
+[358/619] Marlborough TV and Security Cameras
+  [NZSA] Checking: Marlborough TV and Security Cameras
+  [NZSA] Domain mismatch: company=marlboroughtvandsecuritycameras.co.nz, member=wds.kiwi — rejecting 'Waiheke Documents and Security Ltd'
+  [NZSA] Marlborough TV and Security Cameras: member=False
+
+[359/619] Marshall Innovations
+  [NZSA] Checking: Marshall Innovations
+  [NZSA] Marshall Innovations: member=False
+
+[360/619] Maru Smallridge
+  [NZSA] Checking: Maru Smallridge
+  [NZSA] Maru Smallridge: member=True
+
+[361/619] Master Tech Solutions
+  [NZSA] Checking: Master Tech Solutions
+  [NZSA] Master Tech Solutions: member=True
+
+[362/619] Matrix Security
+  [NZSA] Checking: Matrix Security
+  [NZSA] Matrix Security: member=True
+
+[363/619] MaxTarr
+  [NZSA] Checking: MaxTarr
+  [NZSA] MaxTarr: member=True
+
+[364/619] MC Communications
+  [NZSA] Checking: MC Communications
+  [NZSA] Domain mismatch: company=mccomms.co.nz, member=teltrac.co.nz — rejecting 'Teltrac Communications Ltd'
+  [NZSA] MC Communications: member=False
+
+[365/619] McGrath Smart Locks
+  [NZSA] Checking: McGrath Smart Locks
+  [NZSA] McGrath Smart Locks: member=False
+
+[366/619] MestyaTech
+  [NZSA] Checking: MestyaTech
+  [NZSA] MestyaTech: member=False
+
+[367/619] Michael Burton (@alarmsandcameras)
+  [NZSA] Checking: Michael Burton (@alarmsandcameras)
+  [NZSA] Michael Burton (@alarmsandcameras): member=True
+
+[368/619] Michael Johnston
+  [NZSA] Checking: Michael Johnston
+  [NZSA] Michael Johnston: member=True
+
+[369/619] Mike Birrane
+  [NZSA] Checking: Mike Birrane
+  [NZSA] Mike Birrane: member=True
+
+[370/619] Mike Murphy Auto Electrical
+  [NZSA] Checking: Mike Murphy Auto Electrical
+  [NZSA] Mike Murphy Auto Electrical: member=True
+
+[371/619] Mill Electrical
+  [NZSA] Checking: Mill Electrical
+  [NZSA] Mill Electrical: member=False
+
+[372/619] Millennium Group (NZ) Pty Ltd
+  [NZSA] Checking: Millennium Group (NZ) Pty Ltd
+  [NZSA] Millennium Group (NZ) Pty Ltd: member=True
+
+[373/619] Millennium Security
+  [NZSA] Checking: Millennium Security
+  [NZSA] Domain mismatch: company=millenniumsecurity.co.nz, member=millenniumsg.com — rejecting 'Millennium Group (NZ) Pty Ltd'
+  [NZSA] Millennium Security: member=False
+
+[374/619] Minuteman
+  [NZSA] Checking: Minuteman
+  [NZSA] Minuteman: member=False
+
+[375/619] Mitu Tech
+  [NZSA] Checking: Mitu Tech
+  [NZSA] Mitu Tech: member=True
+
+[376/619] Mobicomm Limited
+  [NZSA] Checking: Mobicomm Limited
+  [NZSA] Mobicomm Limited: member=False
+
+[377/619] Monitor NZ
+  [NZSA] Checking: Monitor NZ
+  [NZSA] Monitor NZ: member=True
+
+[378/619] MorComm Systems
+  [NZSA] Checking: MorComm Systems
+  [NZSA] MorComm Systems: member=False
+
+[379/619] Moses Electrical
+  [NZSA] Checking: Moses Electrical
+  [NZSA] Moses Electrical: member=False
+
+[380/619] Mount & Connect
+  [NZSA] Checking: Mount & Connect
+  [NZSA] Mount & Connect: member=False
+
+[381/619] Moving Mountains NZ Ltd
+  [NZSA] Checking: Moving Mountains NZ Ltd
+  [NZSA] Moving Mountains NZ Ltd: member=True
+
+[382/619] MS Security
+  [NZSA] Checking: MS Security
+  [NZSA] MS Security: member=True
+
+[383/619] Multi Technologies
+  [NZSA] Checking: Multi Technologies
+  [NZSA] Multi Technologies: member=False
+
+[384/619] Multi Technologies Limited
+  [NZSA] Checking: Multi Technologies Limited
+  [NZSA] Multi Technologies Limited: member=False
+
+[385/619] MultiMedia Communications
+  [NZSA] Checking: MultiMedia Communications
+  [NZSA] Domain mismatch: company=mmcltd.co.nz, member=teltrac.co.nz — rejecting 'Teltrac Communications Ltd'
+  [NZSA] MultiMedia Communications: member=False
+
+[386/619] Murray Brown Electrical
+  [NZSA] Checking: Murray Brown Electrical
+  [NZSA] Murray Brown Electrical: member=True
+
+[387/619] My Smart Home Solutions
+  [NZSA] Checking: My Smart Home Solutions
+  [NZSA] My Smart Home Solutions: member=False
+
+[388/619] MySpy New Zealand
+  [NZSA] Checking: MySpy New Zealand
+  [NZSA] MySpy New Zealand: member=False
+
+[389/619] Nathaniel Security Service
+  [NZSA] Checking: Nathaniel Security Service
+  [NZSA] Nathaniel Security Service: member=False
+
+[390/619] National Security
+  [NZSA] Checking: National Security
+  [NZSA] National Security: member=True
+
+[391/619] Nedax Systems (NZ) Ltd
+  [NZSA] Checking: Nedax Systems (NZ) Ltd
+  [NZSA] Nedax Systems (NZ) Ltd: member=True
+
+[392/619] Need Help
+  [NZSA] Checking: Need Help
+  [NZSA] Need Help: member=False
+
+[393/619] Nelson Alarms
+  [NZSA] Checking: Nelson Alarms
+  [NZSA] Domain mismatch: company=nelsonapp.co.nz, member=nelsonalarms.co.nz — rejecting 'Nelson Alarms Security Systems Ltd'
+  [NZSA] Nelson Alarms: member=False
+
+[394/619] Nelson Alarms - Security Systems
+  [NZSA] Checking: Nelson Alarms - Security Systems
+  [NZSA] Nelson Alarms - Security Systems: member=True
+
+[395/619] Nelson Alarms Security Systems
+  [NZSA] Checking: Nelson Alarms Security Systems
+  [NZSA] Nelson Alarms Security Systems: member=True
+
+[396/619] Nelson Bays Security
+  [NZSA] Checking: Nelson Bays Security
+  [NZSA] Domain mismatch: company=nbsecurity.co.nz, member=nelsonalarms.co.nz — rejecting 'Nelson Alarms Security Systems Ltd'
+  [NZSA] Nelson Bays Security: member=False
+
+[397/619] Nelson Electronics - 2011 LTD
+  [NZSA] Checking: Nelson Electronics - 2011 LTD
+  [NZSA] Domain mismatch: company=hr-hr.facebook.com, member=nelsonalarms.co.nz — rejecting 'Nelson Alarms Security Systems Ltd'
+  [NZSA] Nelson Electronics - 2011 LTD: member=False
+
+[398/619] Nelspecs Ltd
+  [NZSA] Checking: Nelspecs Ltd
+  [NZSA] Nelspecs Ltd: member=False
+
+[399/619] Nesbitt Alarm Services
+  [NZSA] Checking: Nesbitt Alarm Services
+  [NZSA] Nesbitt Alarm Services: member=False
+
+[400/619] Net Alarms
+  [NZSA] Checking: Net Alarms
+  [NZSA] Net Alarms: member=True
+
+[401/619] Net Alarms NZ
+  [NZSA] Checking: Net Alarms NZ
+  [NZSA] Net Alarms NZ: member=True
+
+[402/619] New Zealand Lone Worker Ltd
+  [NZSA] Checking: New Zealand Lone Worker Ltd
+  [NZSA] New Zealand Lone Worker Ltd: member=True
+
+[403/619] Next Era Enterprise
+  [NZSA] Checking: Next Era Enterprise
+  [NZSA] Next Era Enterprise: member=False
+
+[404/619] Nextro
+  [NZSA] Checking: Nextro
+  [NZSA] Nextro: member=True
+
+[405/619] Ngaire Kelaher
+  [NZSA] Checking: Ngaire Kelaher
+  [NZSA] Ngaire Kelaher: member=True
+
+[406/619] Nisha Sharma
+  [NZSA] Checking: Nisha Sharma
+  [NZSA] Nisha Sharma: member=False
+
+[407/619] NJ Electrical
+  [NZSA] Checking: NJ Electrical
+  [NZSA] NJ Electrical: member=False
+
+[408/619] North Star Electrical Ltd
+  [NZSA] Checking: North Star Electrical Ltd
+  [NZSA] North Star Electrical Ltd: member=False
+
+[409/619] Northern Districts Security
+  [NZSA] Checking: Northern Districts Security
+  [NZSA] Northern Districts Security: member=True
+
+[410/619] Northland CCTV
+  [NZSA] Checking: Northland CCTV
+  [NZSA] Northland CCTV: member=False
+
+[411/619] Northland Technology
+  [NZSA] Checking: Northland Technology
+  [NZSA] Northland Technology: member=False
+
+[412/619] NPE-Tech
+  [NZSA] Checking: NPE-Tech
+  [NZSA] NPE-Tech: member=True
+
+[413/619] Number Eight Security
+  [NZSA] Checking: Number Eight Security
+  [NZSA] Number Eight Security: member=False
+
+[414/619] Nurse Call Solutions NZ Ltd
+  [NZSA] Checking: Nurse Call Solutions NZ Ltd
+  [NZSA] Nurse Call Solutions NZ Ltd: member=True
+
+[415/619] Nutech Security
+  [NZSA] Checking: Nutech Security
+  [NZSA] Nutech Security: member=False
+
+[416/619] NXG Electrical
+  [NZSA] Checking: NXG Electrical
+  [NZSA] NXG Electrical: member=False
+
+[417/619] NZ Document Destruction Services Ltd
+  [NZSA] Checking: NZ Document Destruction Services Ltd
+  [NZSA] NZ Document Destruction Services Ltd: member=True
+
+[418/619] NZ Home Security Systems
+  [NZSA] Checking: NZ Home Security Systems
+  [NZSA] NZ Home Security Systems: member=False
+
+[419/619] Obertech Group
+  [NZSA] Checking: Obertech Group
+  [NZSA] Obertech Group: member=True
+
+[420/619] OCS Ltd
+  [NZSA] Checking: OCS Ltd
+  [NZSA] OCS Ltd: member=True
+
+[421/619] October Protection Christchurch Ltd
+  [NZSA] Checking: October Protection Christchurch Ltd
+  [NZSA] October Protection Christchurch Ltd: member=True
+
+[422/619] Off Grid Electrical
+  [NZSA] Checking: Off Grid Electrical
+  [NZSA] Off Grid Electrical: member=False
+
+[423/619] Oliver Simpson
+  [NZSA] Checking: Oliver Simpson
+  [NZSA] Oliver Simpson: member=True
+
+[424/619] Oncore
+  [NZSA] Checking: Oncore
+  [NZSA] Oncore: member=False
+
+[425/619] One Man Army Security
+  [NZSA] Checking: One Man Army Security
+  [NZSA] One Man Army Security: member=True
+
+[426/619] One Vision CCTV
+  [NZSA] Checking: One Vision CCTV
+  [NZSA] Domain mismatch: company=onevisioncctv.co.nz, member=visionsystems.co.nz — rejecting 'Vision Systems 2007 Ltd'
+  [NZSA] One Vision CCTV: member=False
+
+[427/619] OneCall
+  [NZSA] Checking: OneCall
+  [NZSA] OneCall: member=False
+
+[428/619] OnGuard Security
+  [NZSA] Checking: OnGuard Security
+  [NZSA] OnGuard Security: member=True
+
+[429/619] Online Communications
+  [NZSA] Checking: Online Communications
+  [NZSA] Domain mismatch: company=onlinecommunications.co.nz, member=teltrac.co.nz — rejecting 'Teltrac Communications Ltd'
+  [NZSA] Online Communications: member=False
+
+[430/619] Online Electrical Wholesaler
+  [NZSA] Checking: Online Electrical Wholesaler
+  [NZSA] Online Electrical Wholesaler: member=False
+
+[431/619] Optic Security Group
+  [NZSA] Checking: Optic Security Group
+  [NZSA] Optic Security Group: member=True
+
+[432/619] Optimum Security Systems Ltd
+  [NZSA] Checking: Optimum Security Systems Ltd
+  [NZSA] Optimum Security Systems Ltd: member=False
+
+[433/619] Optix Electrical
+  [NZSA] Checking: Optix Electrical
+  [NZSA] Optix Electrical: member=True
+
+[434/619] Otago Electrical and Communications
+  [NZSA] Checking: Otago Electrical and Communications
+  [NZSA] Otago Electrical and Communications: member=True
+
+[435/619] PAE (New Zealand) Ltd
+  [NZSA] Checking: PAE (New Zealand) Ltd
+  [NZSA] PAE (New Zealand) Ltd: member=True
+
+[436/619] Panasonic New Zealand Ltd
+  [NZSA] Checking: Panasonic New Zealand Ltd
+  [NZSA] Panasonic New Zealand Ltd: member=True
+
+[437/619] Paragon New Zealand.com Ltd
+  [NZSA] Checking: Paragon New Zealand.com Ltd
+  [NZSA] Paragon New Zealand.com Ltd: member=True
+
+[438/619] Paul Raven
+  [NZSA] Checking: Paul Raven
+  [NZSA] Paul Raven: member=True
+
+[439/619] Pedersen Read
+  [NZSA] Checking: Pedersen Read
+  [NZSA] Pedersen Read: member=True
+
+[440/619] PERL Electrical
+  [NZSA] Checking: PERL Electrical
+  [NZSA] PERL Electrical: member=False
+
+[441/619] PERL Electrical Waitakere & Upper Harbour
+  [NZSA] Checking: PERL Electrical Waitakere & Upper Harbour
+  [NZSA] PERL Electrical Waitakere & Upper Harbour: member=False
+
+[442/619] Peter Gill
+  [NZSA] Checking: Peter Gill
+  [NZSA] Peter Gill: member=True
+
+[443/619] Phasetech Electrical
+  [NZSA] Checking: Phasetech Electrical
+  [NZSA] Phasetech Electrical: member=False
+
+[444/619] Phillips Electrical
+  [NZSA] Checking: Phillips Electrical
+  [NZSA] Phillips Electrical: member=False
+
+[445/619] Phocal Communications
+  [NZSA] Checking: Phocal Communications
+  [NZSA] Domain mismatch: company=phocal.co.nz, member=teltrac.co.nz — rejecting 'Teltrac Communications Ltd'
+  [NZSA] Phocal Communications: member=False
+
+[446/619] Photosecure (2023) Ltd
+  [NZSA] Checking: Photosecure (2023) Ltd
+  [NZSA] Photosecure (2023) Ltd: member=True
+
+[447/619] Pipe Spec Ltd
+  [NZSA] Checking: Pipe Spec Ltd
+  [NZSA] Pipe Spec Ltd: member=False
+
+[448/619] Pipe Technologies Ltd
+  [NZSA] Checking: Pipe Technologies Ltd
+  [NZSA] Pipe Technologies Ltd: member=False
+
+[449/619] PJ Charles Ltd t/as Strategic Defence
+  [NZSA] Checking: PJ Charles Ltd t/as Strategic Defence
+  [NZSA] PJ Charles Ltd t/as Strategic Defence: member=True
+
+[450/619] Platform 4 Group Ltd
+  [NZSA] Checking: Platform 4 Group Ltd
+  [NZSA] Platform 4 Group Ltd: member=True
+
+[451/619] Pop Training Co. Ltd
+  [NZSA] Checking: Pop Training Co. Ltd
+  [NZSA] Pop Training Co. Ltd: member=True
+
+[452/619] Positive Electrical
+  [NZSA] Checking: Positive Electrical
+  [NZSA] Positive Electrical: member=False
+
+[453/619] Power.It - Managed It Support Christchurch
+  [NZSA] Checking: Power.It - Managed It Support Christchurch
+  [NZSA] Power.It - Managed It Support Christchurch: member=True
+
+[454/619] Power4u Electrical Limited
+  [NZSA] Checking: Power4u Electrical Limited
+  [NZSA] Power4u Electrical Limited: member=False
+
+[455/619] Power8 Electrical
+  [NZSA] Checking: Power8 Electrical
+  [NZSA] Power8 Electrical: member=False
+
+[456/619] Powerhouse Electrical
+  [NZSA] Checking: Powerhouse Electrical
+  [NZSA] Powerhouse Electrical: member=False
+
+[457/619] Prestige Protection Ltd
+  [NZSA] Checking: Prestige Protection Ltd
+  [NZSA] Prestige Protection Ltd: member=True
+
+[458/619] Prime Auto Sounds & Security
+  [NZSA] Checking: Prime Auto Sounds & Security
+  [NZSA] Prime Auto Sounds & Security: member=True
+
+[459/619] Prime Electrical
+  [NZSA] Checking: Prime Electrical
+  [NZSA] Prime Electrical: member=False
+
+[460/619] PRIME I T
+  [NZSA] Checking: PRIME I T
+  [NZSA] PRIME I T: member=True
+
+[461/619] Prism Lighting
+  [NZSA] Checking: Prism Lighting
+  [NZSA] Prism Lighting: member=False
+
+[462/619] Pro Electronics
+  [NZSA] Checking: Pro Electronics
+  [NZSA] Pro Electronics: member=True
+
+[463/619] Pro Lock & Alarm
+  [NZSA] Checking: Pro Lock & Alarm
+  [NZSA] Domain mismatch: company=prolockandalarm.co.nz, member=rossgalt.co.nz — rejecting 'Ross Galt Lock & Alarm Ltd'
+  [NZSA] Pro Lock & Alarm: member=False
+
+[464/619] Professional Design Services Ltd
+  [NZSA] Checking: Professional Design Services Ltd
+  [NZSA] Professional Design Services Ltd: member=True
+
+[465/619] Professional Property & CLeaning Services Ltd
+  [NZSA] Checking: Professional Property & CLeaning Services Ltd
+  [NZSA] Professional Property & CLeaning Services Ltd: member=True
+
+[466/619] Prosecure
+  [NZSA] Checking: Prosecure
+  [NZSA] Prosecure: member=False
+
+[467/619] Provision-ISR New Zealand
+  [NZSA] Checking: Provision-ISR New Zealand
+  [NZSA] Provision-ISR New Zealand: member=False
+
+[468/619] PRVN Electrical
+  [NZSA] Checking: PRVN Electrical
+  [NZSA] PRVN Electrical: member=False
+
+[469/619] Pulse Communications Contractors Ltd
+  [NZSA] Checking: Pulse Communications Contractors Ltd
+  [NZSA] Pulse Communications Contractors Ltd: member=True
+
+[470/619] QR Construction & Repairs
+  [NZSA] Checking: QR Construction & Repairs
+  [NZSA] QR Construction & Repairs: member=False
+
+[471/619] Quaser Electrical
+  [NZSA] Checking: Quaser Electrical
+  [NZSA] Quaser Electrical: member=False
+
+[472/619] Quinton Swanson
+  [NZSA] Checking: Quinton Swanson
+  [NZSA] Quinton Swanson: member=True
+
+[473/619] R T Installations
+  [NZSA] Checking: R T Installations
+  [NZSA] R T Installations: member=True
+
+[474/619] Rani Construction Ltd
+  [NZSA] Checking: Rani Construction Ltd
+  [NZSA] Rani Construction Ltd: member=False
+
+[475/619] Rapid Security Solutions
+  [NZSA] Checking: Rapid Security Solutions
+  [NZSA] Domain mismatch: company=rapidsecuritysolutions.co.nz, member=nationalguards.co.nz — rejecting 'National Guard Ltd t/as Rapid Response'
+  [NZSA] Rapid Security Solutions: member=False
+
+[476/619] Rasant Security
+  [NZSA] Checking: Rasant Security
+  [NZSA] Rasant Security: member=False
+
+[477/619] Reclaim Ltd
+  [NZSA] Checking: Reclaim Ltd
+  [NZSA] Reclaim Ltd: member=True
+
+[478/619] Recon Security
+  [NZSA] Checking: Recon Security
+  [NZSA] Recon Security: member=False
+
+[479/619] Red Badge Group
+  [NZSA] Checking: Red Badge Group
+  [NZSA] Red Badge Group: member=True
+
+[480/619] Red Wolf High Level Security
+  [NZSA] Checking: Red Wolf High Level Security
+  [NZSA] Red Wolf High Level Security: member=True
+
+[481/619] Redline Electrical
+  [NZSA] Checking: Redline Electrical
+  [NZSA] Redline Electrical: member=False
+
+[482/619] Redvision
+  [NZSA] Checking: Redvision
+  [NZSA] Redvision: member=False
+
+[483/619] Reliance Data
+  [NZSA] Checking: Reliance Data
+  [NZSA] Reliance Data: member=True
+
+[484/619] Rescom Security Systems
+  [NZSA] Checking: Rescom Security Systems
+  [NZSA] Rescom Security Systems: member=False
+
+[485/619] Reset Data & Security
+  [NZSA] Checking: Reset Data & Security
+  [NZSA] Reset Data & Security: member=True
+
+[486/619] Retail Systems H.B
+  [NZSA] Checking: Retail Systems H.B
+  [NZSA] Domain mismatch: company=retailsystemshb.co.nz, member=balertsecurity.co.nz — rejecting 'B Alert NZ Ltd'
+  [NZSA] Retail Systems H.B: member=False
+
+[487/619] Revo Tech
+  [NZSA] Checking: Revo Tech
+  [NZSA] Revo Tech: member=True
+
+[488/619] ReVolt power solutions Ltd.
+  [NZSA] Checking: ReVolt power solutions Ltd.
+  [NZSA] ReVolt power solutions Ltd.: member=False
+
+[489/619] Revolve Electrical
+  [NZSA] Checking: Revolve Electrical
+  [NZSA] Revolve Electrical: member=True
+
+[490/619] Rhino Fire & Security
+  [NZSA] Checking: Rhino Fire & Security
+  [NZSA] Rhino Fire & Security: member=True
+
+[491/619] Rigid Security
+  [NZSA] Checking: Rigid Security
+  [NZSA] Rigid Security: member=False
+
+[492/619] Rivercity Electronics
+  [NZSA] Checking: Rivercity Electronics
+  [NZSA] Domain mismatch: company=rivercityelectronics.co.nz, member=arelectronics.co.nz — rejecting 'AR Electronics Systems Ltd (Provisional)'
+  [NZSA] Rivercity Electronics: member=False
+
+[493/619] RJ Security
+  [NZSA] Checking: RJ Security
+  [NZSA] RJ Security: member=False
+
+[494/619] RK.Electrical
+  [NZSA] Checking: RK.Electrical
+  [NZSA] RK.Electrical: member=False
+
+[495/619] Rob Mason Electrical Group
+  [NZSA] Checking: Rob Mason Electrical Group
+  [NZSA] Rob Mason Electrical Group: member=False
+
+[496/619] Roger Irwin IT Support Services
+  [NZSA] Checking: Roger Irwin IT Support Services
+  [NZSA] Roger Irwin IT Support Services: member=False
+
+[497/619] Ross Galt
+  [NZSA] Checking: Ross Galt
+  [NZSA] Ross Galt: member=True
+
+[498/619] Ross Galt Lock & Alarm Ltd
+  [NZSA] Checking: Ross Galt Lock & Alarm Ltd
+  [NZSA] Ross Galt Lock & Alarm Ltd: member=True
+
+[499/619] RSS Communications
+  [NZSA] Checking: RSS Communications
+  [NZSA] RSS Communications: member=True
+
+[500/619] RSS Security
+  [NZSA] Checking: RSS Security
+  [NZSA] RSS Security: member=True
+
+[501/619] Rush Security | Auckland
+  [NZSA] Checking: Rush Security | Auckland
+  [NZSA] Rush Security | Auckland: member=True
+
+[502/619] S & E Connections
+  [NZSA] Checking: S & E Connections
+  [NZSA] S & E Connections: member=False
+
+[503/619] SaferCities
+  [NZSA] Checking: SaferCities
+  [NZSA] SaferCities: member=True
+
+[504/619] Sangra
+  [NZSA] Checking: Sangra
+  [NZSA] Sangra: member=False
+
+[505/619] Savvy Security
+  [NZSA] Checking: Savvy Security
+  [NZSA] Savvy Security: member=True
+
+[506/619] SCOPE Investigations Auckland
+  [NZSA] Checking: SCOPE Investigations Auckland
+  [NZSA] SCOPE Investigations Auckland: member=True
+
+[507/619] Scott Installation Ltd
+  [NZSA] Checking: Scott Installation Ltd
+  [NZSA] Scott Installation Ltd: member=True
+
+[508/619] Sectek Security
+  [NZSA] Checking: Sectek Security
+  [NZSA] Sectek Security: member=False
+
+[509/619] Securacore
+  [NZSA] Checking: Securacore
+  [NZSA] Securacore: member=True
+
+[510/619] Secure Time
+  [NZSA] Checking: Secure Time
+  [NZSA] Domain mismatch: company=securetime.nz, member=skyesecure.nz — rejecting 'Skye Secure Ltd'
+  [NZSA] Secure Time: member=False
+
+[511/619] Secure Works
+  [NZSA] Checking: Secure Works
+  [NZSA] Secure Works: member=True
+
+[512/619] Securi-Com
+  [NZSA] Checking: Securi-Com
+  [NZSA] Domain mismatch: company=securi-com.co.nz, member=paragonnz.com — rejecting 'Paragon New Zealand.com Ltd'
+  [NZSA] Securi-Com: member=False
+
+[513/619] Securi-Com Ltd
+  [NZSA] Checking: Securi-Com Ltd
+  [NZSA] Domain mismatch: company=pt-br.facebook.com, member=paragonnz.com — rejecting 'Paragon New Zealand.com Ltd'
+  [NZSA] Securi-Com Ltd: member=False
+
+[514/619] Security Alarm Services
+  [NZSA] Checking: Security Alarm Services
+  [NZSA] Security Alarm Services: member=False
+
+[515/619] Security Alert
+  [NZSA] Checking: Security Alert
+  [NZSA] Domain mismatch: company=securityalert.co.nz, member=balertsecurity.co.nz — rejecting 'B Alert NZ Ltd'
+  [NZSA] Security Alert: member=False
+
+[516/619] Security Camera Warehouse
+  [NZSA] Checking: Security Camera Warehouse
+  [NZSA] Security Camera Warehouse: member=False
+
+[517/619] Security Force NZ
+  [NZSA] Checking: Security Force NZ
+  [NZSA] Security Force NZ: member=False
+
+[518/619] Security Installation Services
+  [NZSA] Checking: Security Installation Services
+  [NZSA] Security Installation Services: member=True
+
+[519/619] Security Logics
+  [NZSA] Checking: Security Logics
+  [NZSA] Security Logics: member=False
+
+[520/619] Security Matters
+  [NZSA] Checking: Security Matters
+  [NZSA] Security Matters: member=False
+
+[521/619] Security Specialists
+  [NZSA] Checking: Security Specialists
+  [NZSA] Security Specialists: member=True
+
+[522/619] Security Specialists Ltd
+  [NZSA] Checking: Security Specialists Ltd
+  [NZSA] Security Specialists Ltd: member=True
+
+[523/619] Sefton Electrical & Security
+  [NZSA] Checking: Sefton Electrical & Security
+  [NZSA] Sefton Electrical & Security: member=True
+
+[524/619] Select Alarms
+  [NZSA] Checking: Select Alarms
+  [NZSA] Select Alarms: member=True
+
+[525/619] Select Electrical and Security
+  [NZSA] Checking: Select Electrical and Security
+  [NZSA] Select Electrical and Security: member=True
+
+[526/619] Sensation Developments Ltd, Millwater & Milldale
+  [NZSA] Checking: Sensation Developments Ltd, Millwater & Milldale
+  [NZSA] Sensation Developments Ltd, Millwater & Milldale: member=False
+
+[527/619] SES Electrical
+  [NZSA] Checking: SES Electrical
+  [NZSA] SES Electrical: member=False
+
+[528/619] Shadeland
+  [NZSA] Checking: Shadeland
+  [NZSA] Shadeland: member=False
+
+[529/619] Shadow Solutions
+  [NZSA] Checking: Shadow Solutions
+  [NZSA] Shadow Solutions: member=False
+
+[530/619] Shane's Installations
+  [NZSA] Checking: Shane's Installations
+  [NZSA] Shane's Installations: member=False
+
+[531/619] Silverlake Electrical
+  [NZSA] Checking: Silverlake Electrical
+  [NZSA] Silverlake Electrical: member=False
+
+[532/619] Skylink It Services
+  [NZSA] Checking: Skylink It Services
+  [NZSA] Skylink It Services: member=False
+
+[533/619] Skyview tv aerials limited
+  [NZSA] Checking: Skyview tv aerials limited
+  [NZSA] Skyview tv aerials limited: member=False
+
+[534/619] Smart Guys
+  [NZSA] Checking: Smart Guys
+  [NZSA] Smart Guys: member=False
+
+[535/619] Smart Installations
+  [NZSA] Checking: Smart Installations
+  [NZSA] Smart Installations: member=False
+
+[536/619] Smart Surveillance
+  [NZSA] Checking: Smart Surveillance
+  [NZSA] Smart Surveillance: member=False
+
+[537/619] Smart Systems
+  [NZSA] Checking: Smart Systems
+  [NZSA] Smart Systems: member=False
+
+[538/619] SmartGuys NZ
+  [NZSA] Checking: SmartGuys NZ
+  [NZSA] SmartGuys NZ: member=False
+
+[539/619] Smartlife
+  [NZSA] Checking: Smartlife
+  [NZSA] Smartlife: member=False
+
+[540/619] Smartlife Manawatu
+  [NZSA] Checking: Smartlife Manawatu
+  [NZSA] Smartlife Manawatu: member=False
+
+[541/619] Smartlife Nelson
+  [NZSA] Checking: Smartlife Nelson
+  [NZSA] Domain mismatch: company=sln.nz, member=nelsonalarms.co.nz — rejecting 'Nelson Alarms Security Systems Ltd'
+  [NZSA] Smartlife Nelson: member=False
+
+[542/619] Smartlife Tauranga
+  [NZSA] Checking: Smartlife Tauranga
+  [NZSA] Smartlife Tauranga: member=False
+
+[543/619] Solid Ground Limited
+  [NZSA] Checking: Solid Ground Limited
+  [NZSA] Solid Ground Limited: member=False
+
+[544/619] Sound Electrical
+  [NZSA] Checking: Sound Electrical
+  [NZSA] Sound Electrical: member=False
+
+[545/619] Sound Solutions Pukekohe
+  [NZSA] Checking: Sound Solutions Pukekohe
+  [NZSA] Sound Solutions Pukekohe: member=False
+
+[546/619] Sounds Security Data
+  [NZSA] Checking: Sounds Security Data
+  [NZSA] Sounds Security Data: member=True
+
+[547/619] South City Electrical & Security
+  [NZSA] Checking: South City Electrical & Security
+  [NZSA] Domain mismatch: company=southcityelectrical.co.nz, member=safercities.com — rejecting 'Safer City Group Ltd'
+  [NZSA] South City Electrical & Security: member=False
+
+[548/619] Southland Security Centre
+  [NZSA] Checking: Southland Security Centre
+  [NZSA] Domain mismatch: company=lock4u.co.nz, member=sutherlandsecurity.co.nz — rejecting 'Sutherland Security Centre Ltd'
+  [NZSA] Southland Security Centre: member=False
+
+[549/619] SouthTech
+  [NZSA] Checking: SouthTech
+  [NZSA] SouthTech: member=False
+
+[550/619] Soyal Security
+  [NZSA] Checking: Soyal Security
+  [NZSA] Soyal Security: member=False
+
+[551/619] Sparkydaz Electrical & security
+  [NZSA] Checking: Sparkydaz Electrical & security
+  [NZSA] Sparkydaz Electrical & security: member=False
+
+[552/619] Spoonworks
+  [NZSA] Checking: Spoonworks
+  [NZSA] Spoonworks: member=False
+
+[553/619] Statix Electrical
+  [NZSA] Checking: Statix Electrical
+  [NZSA] Statix Electrical: member=False
+
+[554/619] Stellar Security Ltd
+  [NZSA] Checking: Stellar Security Ltd
+  [NZSA] Stellar Security Ltd: member=False
+
+[555/619] Sterling Security
+  [NZSA] Checking: Sterling Security
+  [NZSA] Sterling Security: member=False
+
+[556/619] Sterling Security Ltd.
+  [NZSA] Checking: Sterling Security Ltd.
+  [NZSA] Sterling Security Ltd.: member=False
+
+[557/619] Stretch Electrical Ltd
+  [NZSA] Checking: Stretch Electrical Ltd
+  [NZSA] Stretch Electrical Ltd: member=False
+
+[558/619] Summit Security
+  [NZSA] Checking: Summit Security
+  [NZSA] Summit Security: member=False
+
+[559/619] Summit Security & Electrical Ltd
+  [NZSA] Checking: Summit Security & Electrical Ltd
+  [NZSA] Summit Security & Electrical Ltd: member=False
+
+[560/619] Supreme Electrical
+  [NZSA] Checking: Supreme Electrical
+  [NZSA] Supreme Electrical: member=False
+
+[561/619] Sure Security
+  [NZSA] Checking: Sure Security
+  [NZSA] Sure Security: member=False
+
+[562/619] Sutherland Security Centre
+  [NZSA] Checking: Sutherland Security Centre
+  [NZSA] Sutherland Security Centre: member=True
+
+[563/619] Tarnix Security
+  [NZSA] Checking: Tarnix Security
+  [NZSA] Tarnix Security: member=False
+
+[564/619] Tech On Road
+  [NZSA] Checking: Tech On Road
+  [NZSA] Domain mismatch: company=techonroad.co.nz, member=techgroup.co.nz — rejecting 'Tech Group of Companies Ltd'
+  [NZSA] Tech On Road: member=False
+
+[565/619] Tech Solutions Limited
+  [NZSA] Checking: Tech Solutions Limited
+  [NZSA] Tech Solutions Limited: member=True
+
+[566/619] TechLogic
+  [NZSA] Checking: TechLogic
+  [NZSA] TechLogic: member=False
+
+[567/619] Techsperts
+  [NZSA] Checking: Techsperts
+  [NZSA] Techsperts: member=False
+
+[568/619] TelePower
+  [NZSA] Checking: TelePower
+  [NZSA] TelePower: member=False
+
+[569/619] The Electronic Service Company
+  [NZSA] Checking: The Electronic Service Company
+  [NZSA] Domain mismatch: company=electronicservice.co.nz, member=thelearningplace.co.nz — rejecting 'The Learning Place Ltd'
+  [NZSA] The Electronic Service Company: member=False
+
+[570/619] The Lock & Alarm Centre
+  [NZSA] Checking: The Lock & Alarm Centre
+  [NZSA] Domain mismatch: company=lockandalarm.co.nz, member=rossgalt.co.nz — rejecting 'Ross Galt Lock & Alarm Ltd'
+  [NZSA] The Lock & Alarm Centre: member=False
+
+[571/619] The Monitoring Centre
+  [NZSA] Checking: The Monitoring Centre
+  [NZSA] Domain mismatch: company=monitoringcentre.co.nz, member=thelearningplace.co.nz — rejecting 'The Learning Place Ltd'
+  [NZSA] The Monitoring Centre: member=False
+
+[572/619] The Technology Store
+  [NZSA] Checking: The Technology Store
+  [NZSA] The Technology Store: member=True
+
+[573/619] Third Eye
+  [NZSA] Checking: Third Eye
+  [NZSA] Third Eye: member=False
+
+[574/619] Titanium Security
+  [NZSA] Checking: Titanium Security
+  [NZSA] Titanium Security: member=False
+
+[575/619] TKR Electrical
+  [NZSA] Checking: TKR Electrical
+  [NZSA] TKR Electrical: member=False
+
+[576/619] Top CCTV
+  [NZSA] Checking: Top CCTV
+  [NZSA] Top CCTV: member=False
+
+[577/619] TopGear Audio & Installation
+  [NZSA] Checking: TopGear Audio & Installation
+  [NZSA] TopGear Audio & Installation: member=True
+
+[578/619] Topmark Electrical
+  [NZSA] Checking: Topmark Electrical
+  [NZSA] Topmark Electrical: member=False
+
+[579/619] Torque IP
+  [NZSA] Checking: Torque IP
+  [NZSA] Torque IP: member=False
+
+[580/619] Touchstone Automotive Nz
+  [NZSA] Checking: Touchstone Automotive Nz
+  [NZSA] Touchstone Automotive Nz: member=False
+
+[581/619] Treadway
+  [NZSA] Checking: Treadway
+  [NZSA] Treadway: member=False
+
+[582/619] Trilect
+  [NZSA] Checking: Trilect
+  [NZSA] Trilect: member=False
+
+[583/619] Ultimate Tech Solutions
+  [NZSA] Checking: Ultimate Tech Solutions
+  [NZSA] Ultimate Tech Solutions: member=True
+
+[584/619] Ultra Group
+  [NZSA] Checking: Ultra Group
+  [NZSA] Ultra Group: member=False
+
+[585/619] Ultra Secure
+  [NZSA] Checking: Ultra Secure
+  [NZSA] Domain mismatch: company=ultrasecure.nz, member=skyesecure.nz — rejecting 'Skye Secure Ltd'
+  [NZSA] Ultra Secure: member=False
+
+[586/619] Unicom Security
+  [NZSA] Checking: Unicom Security
+  [NZSA] Unicom Security: member=False
+
+[587/619] Unifone RBI
+  [NZSA] Checking: Unifone RBI
+  [NZSA] Unifone RBI: member=False
+
+[588/619] United Security Services
+  [NZSA] Checking: United Security Services
+  [NZSA] United Security Services: member=False
+
+[589/619] Unreel Hire
+  [NZSA] Checking: Unreel Hire
+  [NZSA] Unreel Hire: member=False
+
+[590/619] Usha Electrical Limited
+  [NZSA] Checking: Usha Electrical Limited
+  [NZSA] Usha Electrical Limited: member=False
+
+[591/619] Vanguard Security Services
+  [NZSA] Checking: Vanguard Security Services
+  [NZSA] Vanguard Security Services: member=True
+
+[592/619] Vertex Security
+  [NZSA] Checking: Vertex Security
+  [NZSA] Vertex Security: member=True
+
+[593/619] Vertusa New Zealand - Technology
+  [NZSA] Checking: Vertusa New Zealand - Technology
+  [NZSA] Vertusa New Zealand - Technology: member=False
+
+[594/619] VIETRO LOCKS
+  [NZSA] Checking: VIETRO LOCKS
+  [NZSA] VIETRO LOCKS: member=False
+
+[595/619] Viewtech
+  [NZSA] Checking: Viewtech
+  [NZSA] Viewtech: member=False
+
+[596/619] Viewtech Surveillance Technology
+  [NZSA] Checking: Viewtech Surveillance Technology
+  [NZSA] Viewtech Surveillance Technology: member=False
+
+[597/619] Vigilante Security Systems
+  [NZSA] Checking: Vigilante Security Systems
+  [NZSA] Vigilante Security Systems: member=False
+
+[598/619] Vision Intelligence
+  [NZSA] Checking: Vision Intelligence
+  [NZSA] Vision Intelligence: member=True
+
+[599/619] Vision Systems
+  [NZSA] Checking: Vision Systems
+  [NZSA] Vision Systems: member=True
+
+[600/619] VP Electrical Ltd
+  [NZSA] Checking: VP Electrical Ltd
+  [NZSA] VP Electrical Ltd: member=False
+
+[601/619] VRC Computers
+  [NZSA] Checking: VRC Computers
+  [NZSA] VRC Computers: member=False
+
+[602/619] Wai-Secure
+  [NZSA] Checking: Wai-Secure
+  [NZSA] Wai-Secure: member=True
+
+[603/619] Watchdog Security
+  [NZSA] Checking: Watchdog Security
+  [NZSA] Watchdog Security: member=True
+
+[604/619] Watchdog Security and Electrical
+  [NZSA] Checking: Watchdog Security and Electrical
+  [NZSA] Watchdog Security and Electrical: member=True
+
+[605/619] Watchstop Napier
+  [NZSA] Checking: Watchstop Napier
+  [NZSA] Watchstop Napier: member=False
+
+[606/619] Watchu Security
+  [NZSA] Checking: Watchu Security
+  [NZSA] Watchu Security: member=True
+
+[607/619] Waterford Security
+  [NZSA] Checking: Waterford Security
+  [NZSA] Waterford Security: member=True
+
+[608/619] Waterman's
+  [NZSA] Checking: Waterman's
+  [NZSA] Waterman's: member=False
+
+[609/619] Wave AV
+  [NZSA] Checking: Wave AV
+  [NZSA] Wave AV: member=False
+
+[610/619] We Digit Us
+  [NZSA] Checking: We Digit Us
+  [NZSA] We Digit Us: member=False
+
+[611/619] Weka Electrical
+  [NZSA] Checking: Weka Electrical
+  [NZSA] Weka Electrical: member=False
+
+[612/619] Wellington Security and Electrical
+  [NZSA] Checking: Wellington Security and Electrical
+  [NZSA] Domain mismatch: company=wellingtonsecurity.co.nz, member=wds.kiwi — rejecting 'Waiheke Documents and Security Ltd'
+  [NZSA] Wellington Security and Electrical: member=False
+
+[613/619] Wellington Security and Electrical Ltd
+  [NZSA] Checking: Wellington Security and Electrical Ltd
+  [NZSA] Wellington Security and Electrical Ltd: member=True
+
+[614/619] WH Dynamics
+  [NZSA] Checking: WH Dynamics
+  [NZSA] WH Dynamics: member=True
+
+[615/619] Winn Electrical
+  [NZSA] Checking: Winn Electrical
+  [NZSA] Winn Electrical: member=False
+
+[616/619] WISP Electrical
+  [NZSA] Checking: WISP Electrical
+  [NZSA] WISP Electrical: member=False
+
+[617/619] Xtech Smart Living
+  [NZSA] Checking: Xtech Smart Living
+  [NZSA] Xtech Smart Living: member=False
+
+[618/619] Yada
+  [NZSA] Checking: Yada
+  [NZSA] Yada: member=False
+
+[619/619] Zanden
+  [NZSA] Checking: Zanden
+  [NZSA] Zanden: member=False
+  [Email sent] PSPLA Bulk-Recheck complete -- 619 new companies added
+
+============================================================
+  Bulk recheck complete!
+  Companies processed: 619
+  Records updated:     619
+============================================================

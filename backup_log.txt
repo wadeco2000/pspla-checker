@@ -1,0 +1,5 @@
+[2026-03-10 17:26:35] trigger=manual records=619 local=backups/pspla_backup_2026-03-10_17-26-34.csv dropbox=FAILED: Error in call to API function "files/upload": Your app (ID: 6240643) is not permitted to access this endpoint because it does not have the required scope 'files.content.write'. The owner of the app ca
+[2026-03-10 17:28:20] trigger=manual records=619 local=backups/pspla_backup_2026-03-10_17-28-18.csv dropbox=FAILED: {"error_summary": "missing_scope/.", "error": {".tag": "missing_scope", "required_scope": "files.content.write"}}
+[2026-03-10 17:33:25] trigger=manual records=619 local=backups/pspla_backup_2026-03-10_17-33-23.csv dropbox=/Apps/pspla-backup/pspla_backup_2026-03-10_17-33-23.csv
+[2026-03-10 17:38:53] trigger=manual records=619 local=backups/pspla_backup_2026-03-10_17-38-51.csv dropbox=/Apps/pspla-backup/pspla_backup_2026-03-10_17-38-51.csv
+[2026-03-10 21:01:06] trigger=manual records=617 local=backups/pspla_backup_2026-03-10_21-01-02.csv dropbox=/Apps/pspla-backup/pspla_backup_2026-03-10_21-01-02.csv

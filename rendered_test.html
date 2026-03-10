@@ -1,0 +1,749 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PSPLA Security Camera Checker</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
+          integrity="sha512-Avb2QiuDEEvB4bZJYdft2mNjVShBftLdPG8FJ0V7irTLQ8Uum05M9pHhS2Cjx1APTA6wF/hNKF7D5+q/ue5Q=="
+          crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f4f4f4; }
+        h1 { color: #2c3e50; margin-bottom: 5px; }
+        .subtitle { color: #666; margin-bottom: 25px; }
+        .stats { display: flex; gap: 15px; margin-bottom: 25px; flex-wrap: wrap; }
+        .stat-box { background: white; padding: 15px 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); min-width: 130px; text-align: center; }
+        .stat-box h2 { margin: 0; font-size: 2em; }
+        .stat-box p { margin: 5px 0 0; color: #666; font-size: 13px; }
+        .unlicensed h2 { color: #e74c3c; }
+        .licensed h2 { color: #27ae60; }
+        .expired h2 { color: #e67e22; }
+        .unknown h2 { color: #f39c12; }
+        .filters { margin-bottom: 15px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .filters select, .filters input { padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        .btn-dark { background: #2c3e50; color: white; }
+        .btn-dark:hover { background: #34495e; }
+        table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1); font-size: 13px; }
+        th { background: #2c3e50; color: white; padding: 10px 12px; text-align: left; white-space: nowrap; }
+        td { padding: 8px 12px; border-bottom: 1px solid #eee; vertical-align: top; }
+        tr:hover td { background: #f9f9f9; }
+        .badge { padding: 3px 8px; border-radius: 10px; font-size: 11px; font-weight: bold; white-space: nowrap; }
+        .badge-licensed { background: #d4efdf; color: #1e8449; }
+        .badge-unlicensed { background: #fadbd8; color: #c0392b; }
+        .badge-expired { background: #fdebd0; color: #d35400; }
+        .badge-unknown { background: #eaecee; color: #666; }
+        a { color: #2980b9; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .detail-block { font-size: 11px; color: #888; margin-top: 2px; }
+        .company-cell { font-weight: bold; }
+        .expand-btn { background: none; border: none; cursor: pointer; color: #2980b9; font-size: 12px; padding: 0; }
+        .detail-row { display: none; }
+        .detail-row.open { display: table-row; }
+        .detail-row td { background: #f8f9fa; padding: 12px; }
+        .detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+        .detail-item label { font-weight: bold; color: #555; font-size: 11px; display: block; margin-bottom: 2px; }
+        .detail-item span { font-size: 13px; }
+        .fb-tag { display:inline-block; background:#1877f2; color:white; border-radius:4px;
+                  padding:2px 6px; font-size:11px; font-weight:bold; margin-left:6px;
+                  vertical-align:middle; white-space:nowrap; text-decoration:none; }
+        .status-icon { margin-right:4px; }
+    </style>
+</head>
+<body>
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
+        <div>
+            <h1>PSPLA Security Camera Company Checker</h1>
+            <p class="subtitle">NZ companies found installing security cameras — checked against PSPLA licensing register.</p>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end; margin-top:10px;">
+            <div style="display:flex; gap:6px; align-items:center; flex-wrap:nowrap;">
+                
+                    <form method="POST" action="/start-search" onsubmit="return confirm('Start a full search? This will run in the background and may take a long time.')">
+                        <button class="btn" style="background:#27ae60; color:white;">&#9654; Full Search</button>
+                    </form>
+                    <form method="POST" action="/start-weekly-search" onsubmit="return confirm('Run a weekly light scan (last 7 days only)?')">
+                        <button class="btn" style="background:#16a085; color:white;">&#9654; Weekly Scan</button>
+                    </form>
+                    <form method="POST" action="/start-facebook-search" onsubmit="return confirm('Run Facebook-only search? This adds Facebook-sourced companies on top of existing data.')">
+                        <button class="btn" style="background:#1877f2; color:white;"><i class="fa-brands fa-facebook-f"></i> Facebook</button>
+                    </form>
+                
+                <form method="POST" action="/dedupe-db" onsubmit="return confirm('Merge duplicate company names? Keeps the best record and combines all regions into one entry.')">
+                    <button class="btn" style="background:#8e44ad; color:white;"><i class="fa-solid fa-filter"></i> Dedupe DB</button>
+                </form>
+                <button class="btn" style="background:#e74c3c; color:white;"
+                    onclick="document.getElementById('clear-db-modal').style.display='flex';">
+                    <i class="fa-solid fa-trash-can"></i> Clear DB
+                </button>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center; flex-wrap:nowrap;">
+                <form method="POST" action="/publish" onsubmit="return confirm('Publish current data to the live GitHub Pages site?')">
+                    <button class="btn btn-dark" style="background:#8e44ad;">&#x1F310; Publish Live</button>
+                </form>
+                <button class="btn btn-dark" onclick="document.getElementById('export-modal').style.display='flex';">&#x2B07; Export CSV</button>
+                <a href="/history" class="btn btn-dark" style="text-decoration:none;">&#x1F4DC; Version History</a>
+                <a href="/duplicates" class="btn btn-dark" style="text-decoration:none; background:#c0392b;">&#x26A0; Duplicates</a>
+            </div>
+        </div>
+    </div>
+
+    
+    
+    
+    
+    
+    
+    
+    <div id="progress-wrap" style="display:none; margin-top:14px; background:white; border-radius:8px;
+         box-shadow:0 2px 4px rgba(0,0,0,0.1); padding:14px 18px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <span id="progress-label" style="font-size:13px; font-weight:bold; color:#2c3e50;"></span>
+            <span id="progress-counts" style="font-size:12px; color:#888;"></span>
+        </div>
+        <div style="background:#ecf0f1; border-radius:4px; height:10px; overflow:hidden;">
+            <div id="progress-bar" style="height:100%; background:#27ae60; border-radius:4px;
+                 transition:width 0.4s ease; width:0%;"></div>
+        </div>
+        <div id="progress-term" style="font-size:12px; color:#888; margin-top:5px;"></div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+            <span style="font-size:11px; color:#aaa;"><i class="fa-solid fa-terminal"></i> Search log</span>
+            <div style="display:flex; gap:8px; align-items:center;">
+                <button onclick="openTerminal()"
+                    style="background:none; border:1px solid #555; color:#ccc; font-size:11px; cursor:pointer; padding:2px 8px; border-radius:4px;">
+                    Open Terminal
+                </button>
+                <button onclick="toggleLog()" id="log-toggle-btn"
+                    style="background:none; border:none; color:#2980b9; font-size:11px; cursor:pointer; padding:0;">
+                    Hide log
+                </button>
+            </div>
+        </div>
+        <div id="log-panel" style="margin-top:4px;">
+            <pre id="log-output"
+                style="background:#1e1e1e; color:#d4d4d4; font-size:11px; font-family:monospace;
+                       padding:10px 14px; border-radius:6px; max-height:260px; overflow-y:auto;
+                       margin:0; white-space:pre-wrap; word-break:break-all;">(no log yet)</pre>
+        </div>
+    </div>
+
+    <script>
+    // Log panel state — must be declared before poll() runs
+    var _logOpen = true;
+    var _lastLogLine = -1;
+
+    function toggleLog() {
+        _logOpen = !_logOpen;
+        document.getElementById('log-panel').style.display = _logOpen ? '' : 'none';
+        document.getElementById('log-toggle-btn').textContent = _logOpen ? 'Hide log' : 'Show log';
+    }
+
+    function openTerminal() {
+        fetch('/open-terminal', {method:'POST'}).catch(function() {});
+    }
+
+    // Standalone log updater — runs every 2s independently
+    setInterval(function() {
+        var el = document.getElementById('log-output');
+        if (!el || !_logOpen) return;
+        fetch('/search-log')
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                var lines = d.lines || [];
+                if (lines.length !== _lastLogLine) {
+                    _lastLogLine = lines.length;
+                    el.textContent = lines.length ? lines.join('\n') : '(no output yet)';
+                    el.scrollTop = el.scrollHeight;
+                }
+            })
+            .catch(function(e) {
+                var el2 = document.getElementById('log-output');
+                if (el2) el2.textContent = '[log fetch error: ' + e + ']';
+            });
+    }, 2000);
+
+    (function() {
+        var wrap = document.getElementById('progress-wrap');
+        var label = document.getElementById('progress-label');
+        var bar = document.getElementById('progress-bar');
+        var counts = document.getElementById('progress-counts');
+        var termEl = document.getElementById('progress-term');
+
+        function poll() {
+            fetch('/search-status')
+                .then(function(r) { return r.json(); })
+                .then(function(s) {
+                    if (!s.running) { wrap.style.display = 'none'; return; }
+                    wrap.style.display = 'block';
+                    var phase = s.phase === 'facebook' ? 'Facebook' : 'Google';
+                    var paused = s.paused ? ' — PAUSED' : '';
+                    if (s.region_idx != null && s.total_regions != null) {
+                        label.textContent = phase + ' search: region ' + s.region_idx + ' of ' + s.total_regions + ' — ' + (s.region || '') + paused;
+                        var pct = Math.round((s.region_idx - 1) / s.total_regions * 100);
+                        bar.style.width = pct + '%';
+                        termEl.textContent = 'Term ' + s.term_idx + ' of ' + s.total_terms + ': ' + (s.term || '');
+                    } else {
+                        label.textContent = phase + ' search starting...' + paused;
+                        bar.style.width = '0%';
+                        termEl.textContent = '';
+                    }
+                    bar.style.background = s.phase === 'facebook' ? '#1877f2' : '#27ae60';
+                    counts.textContent = (s.total_found || 0) + ' found, ' + (s.total_new || 0) + ' new';
+                })
+                .catch(function() {});
+        }
+        poll();
+        setInterval(poll, 3000);
+    })();
+
+    // Search history
+    (function() {
+        var TYPE_LABELS = {'full':'Full','google-weekly':'Weekly','facebook':'Facebook','google-partial':'Partial'};
+        var STATUS_COLORS = {'completed':'#27ae60','stopped':'#e67e22','error':'#e74c3c'};
+        function loadHistory() {
+            fetch('/search-history')
+                .then(function(r){return r.json();})
+                .then(function(rows) {
+                    var el = document.getElementById('history-table');
+                    if (!rows.length) { el.innerHTML='<span style="color:#aaa;">No searches recorded yet.</span>'; return; }
+                    var html = '<table style="width:100%;border-collapse:collapse;">'
+                        + '<tr style="color:#888;border-bottom:1px solid #eee;">'
+                        + '<th style="text-align:left;padding:3px 6px;font-weight:normal;">Date (NZT)</th>'
+                        + '<th style="text-align:left;padding:3px 6px;font-weight:normal;">Type</th>'
+                        + '<th style="text-align:left;padding:3px 6px;font-weight:normal;">By</th>'
+                        + '<th style="text-align:right;padding:3px 6px;font-weight:normal;">Mins</th>'
+                        + '<th style="text-align:right;padding:3px 6px;font-weight:normal;">Found</th>'
+                        + '<th style="text-align:right;padding:3px 6px;font-weight:normal;">New</th>'
+                        + '<th style="text-align:left;padding:3px 6px;font-weight:normal;">Status</th></tr>';
+                    rows.forEach(function(r) {
+                        var d = new Date(r.started.replace('+00:00','Z'));
+                        var dt = d.toLocaleDateString('en-NZ',{day:'2-digit',month:'short'})
+                               + ' ' + d.toLocaleTimeString('en-NZ',{hour:'2-digit',minute:'2-digit'});
+                        var col = STATUS_COLORS[r.status] || '#888';
+                        var lbl = TYPE_LABELS[r.type] || r.type;
+                        html += '<tr style="border-bottom:1px solid #f5f5f5;">'
+                            + '<td style="padding:3px 6px;color:#555;">' + dt + '</td>'
+                            + '<td style="padding:3px 6px;">' + lbl + '</td>'
+                            + '<td style="padding:3px 6px;color:#888;">' + (r.triggered_by||'') + '</td>'
+                            + '<td style="padding:3px 6px;text-align:right;color:#888;">' + (r.duration_minutes||'-') + '</td>'
+                            + '<td style="padding:3px 6px;text-align:right;">' + (r.total_found||0) + '</td>'
+                            + '<td style="padding:3px 6px;text-align:right;font-weight:bold;">' + (r.total_new||0) + '</td>'
+                            + '<td style="padding:3px 6px;color:' + col + ';font-weight:bold;">' + r.status + '</td></tr>';
+                    });
+                    html += '</table>';
+                    el.innerHTML = html;
+                }).catch(function(){});
+        }
+        loadHistory();
+        setInterval(loadHistory, 15000);
+    })();
+    </script>
+
+    
+
+    <div style="display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
+
+        <div style="flex:1; min-width:260px; background:white; border-radius:8px;
+                    box-shadow:0 2px 4px rgba(0,0,0,0.1); padding:14px 18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <strong style="color:#2c3e50; font-size:14px;">&#128197; Scheduled Searches</strong>
+                <form method="POST" action="/toggle-schedule" style="margin:0;">
+                    <button class="btn" style="padding:4px 10px; font-size:12px;
+                        background:#95a5a6; color:white;">
+                        Disabled
+                    </button>
+                </form>
+            </div>
+            <table style="width:100%; font-size:12px; border-collapse:collapse;">
+                <tr><td style="color:#666; padding:2px 0;"><i class="fa-solid fa-magnifying-glass" style="width:14px;"></i> Full search</td><td style="color:#2c3e50;">1st of month, 2am</td></tr>
+                <tr><td style="color:#666; padding:2px 0;"><i class="fa-solid fa-calendar-week" style="width:14px;"></i> Weekly scan</td><td style="color:#2c3e50;">8th, 15th, 22nd, 2am</td></tr>
+                <tr><td style="color:#666; padding:2px 0;"><i class="fa-brands fa-facebook-f" style="width:14px; color:#1877f2;"></i> Facebook scan</td><td style="color:#2c3e50;">Tue &amp; Fri, 3am</td></tr>
+            </table>
+        </div>
+
+        <div style="flex:2; min-width:360px; background:white; border-radius:8px;
+                    box-shadow:0 2px 4px rgba(0,0,0,0.1); padding:14px 18px;">
+            <strong style="color:#2c3e50; font-size:14px;">&#128196; Search History</strong>
+            <div id="history-table" style="margin-top:10px; font-size:12px;">
+                
+                <span style="color:#aaa;">No searches recorded yet.</span>
+                
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Search Terms + Partial Search row -->
+    <div style="display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
+
+        <!-- Search Terms Editor -->
+        <div style="flex:1; min-width:300px; background:white; border-radius:8px;
+                    box-shadow:0 2px 4px rgba(0,0,0,0.1); padding:14px 18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <strong style="color:#2c3e50; font-size:14px;"><i class="fa-solid fa-list-check"></i> Search Terms</strong>
+                <div style="display:flex; gap:4px;">
+                    <button onclick="showTermsTab('google')" id="tab-btn-google"
+                        style="padding:3px 10px; font-size:11px; border:1px solid #2c3e50; border-radius:4px;
+                               background:#2c3e50; color:white; cursor:pointer;">Google</button>
+                    <button onclick="showTermsTab('facebook')" id="tab-btn-facebook"
+                        style="padding:3px 10px; font-size:11px; border:1px solid #ddd; border-radius:4px;
+                               background:white; color:#555; cursor:pointer;"><i class="fa-brands fa-facebook-f" style="color:#1877f2;"></i> Facebook</button>
+                </div>
+            </div>
+            <div id="terms-google">
+                <div id="terms-list-google" style="max-height:160px; overflow-y:auto; font-size:12px; margin-bottom:8px;">
+                
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>security camera installer</span><button onclick="removeTerm('google',0)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>CCTV installer</span><button onclick="removeTerm('google',1)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>IP camera installation</span><button onclick="removeTerm('google',2)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>security camera installation company</span><button onclick="removeTerm('google',3)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>CCTV installation company</span><button onclick="removeTerm('google',4)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>security alarm installation</span><button onclick="removeTerm('google',5)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>alarm system installer</span><button onclick="removeTerm('google',6)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>IT security camera install</span><button onclick="removeTerm('google',7)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>network camera installation</span><button onclick="removeTerm('google',8)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>surveillance camera installation</span><button onclick="removeTerm('google',9)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>security system installer</span><button onclick="removeTerm('google',10)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>intruder alarm installer</span><button onclick="removeTerm('google',11)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>CCTV security alarm</span><button onclick="removeTerm('google',12)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>electrical security camera installation</span><button onclick="removeTerm('google',13)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>smart home security camera</span><button onclick="removeTerm('google',14)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div>
+                </div>
+                <div style="display:flex; gap:5px;">
+                    <input id="new-term-google" type="text" placeholder="Add Google term..."
+                        style="flex:1; padding:5px 8px; border:1px solid #ddd; border-radius:4px; font-size:12px;"
+                        onkeydown="if(event.key==='Enter') addTerm('google')">
+                    <button onclick="addTerm('google')"
+                        style="padding:5px 10px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px;">Add</button>
+                </div>
+            </div>
+            <div id="terms-facebook" style="display:none;">
+                <div id="terms-list-facebook" style="max-height:160px; overflow-y:auto; font-size:12px; margin-bottom:8px;">
+                
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>security camera installation</span><button onclick="removeTerm('facebook',0)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>CCTV installation</span><button onclick="removeTerm('facebook',1)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>security camera installer</span><button onclick="removeTerm('facebook',2)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>security alarm installation</span><button onclick="removeTerm('facebook',3)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>CCTV installer</span><button onclick="removeTerm('facebook',4)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div><div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid #f5f5f5;"><span>security camera company</span><button onclick="removeTerm('facebook',5)" style="background:none;border:none;color:#e74c3c;cursor:pointer;font-size:13px;padding:0 4px;" title="Remove">&times;</button></div>
+                </div>
+                <div style="display:flex; gap:5px;">
+                    <input id="new-term-facebook" type="text" placeholder="Add Facebook term..."
+                        style="flex:1; padding:5px 8px; border:1px solid #ddd; border-radius:4px; font-size:12px;"
+                        onkeydown="if(event.key==='Enter') addTerm('facebook')">
+                    <button onclick="addTerm('facebook')"
+                        style="padding:5px 10px; background:#1877f2; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px;">Add</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Partial Search Panel -->
+        <div style="flex:2; min-width:380px; background:white; border-radius:8px;
+                    box-shadow:0 2px 4px rgba(0,0,0,0.1); padding:14px 18px;">
+            <strong style="color:#2c3e50; font-size:14px;"><i class="fa-solid fa-crosshairs"></i> Partial Search</strong>
+            <div style="display:flex; gap:12px; margin-top:10px; flex-wrap:wrap;">
+
+                <!-- Region selector -->
+                <div style="flex:1; min-width:160px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <label style="font-size:12px; font-weight:bold; color:#555;"><i class="fa-solid fa-location-dot"></i> Regions</label>
+                        <span style="font-size:11px;">
+                            <a href="#" onclick="partialSelectAllRegions(); return false;" style="color:#2980b9;">All</a> /
+                            <a href="#" onclick="partialClearRegions(); return false;" style="color:#2980b9;">None</a>
+                        </span>
+                    </div>
+                    <div id="partial-region-list"
+                        style="max-height:190px; overflow-y:auto; border:1px solid #ddd; border-radius:4px; padding:5px; font-size:12px;">
+                    </div>
+                </div>
+
+                <!-- Terms selector -->
+                <div style="flex:1; min-width:200px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <label style="font-size:12px; font-weight:bold; color:#555;"><i class="fa-solid fa-magnifying-glass"></i> Terms</label>
+                        <span style="font-size:11px;">
+                            <a href="#" onclick="partialSelectAllTerms(); return false;" style="color:#2980b9;">All</a> /
+                            <a href="#" onclick="partialClearTerms(); return false;" style="color:#2980b9;">None</a>
+                        </span>
+                    </div>
+                    <div id="partial-term-list"
+                        style="max-height:120px; overflow-y:auto; border:1px solid #ddd; border-radius:4px; padding:5px; font-size:12px;">
+                    <label style="display:block;padding:1px 2px;cursor:pointer;"><input type="checkbox" class="partial-term-cb" value="security camera installer" checked style="margin-right:4px;">security camera installer</label><label style="display:block;padding:1px 2px;cursor:pointer;"><input type="checkbox" class="partial-term-cb" value="CCTV installer" checked style="margin-right:4px;">CCTV installer</label><label style="display:block;padding:1px 2px;cursor:pointer;"><input type="checkbox" class="partial-term-cb" value="IP camera installation" checked style="margin-right:4px;">IP camera installation</label><label style="display:block;padding:1px 2px;cursor:pointer;"><input type="checkbox" class="partial-term-cb" value="security camera installation company" checked style="margin-right:4px;">security camera installation company</label><label style="display:block;padding:1px 2px;cursor:pointer;"><input type="checkbox" class="partial-term-cb" value="CCTV installation company" checked style="margin-right:4px;">CCTV installation company</label><label style="display:block;padding:1px 2px;cursor:pointer;"><input type="checkbox" class="partial-term-cb" value="security alarm installation" checked style="margin-right:4px;">security alarm installation</label><label style="display:block;padding:1px 2px;cursor:pointer;"><input type="checkbox" class="partial-term-cb" value="alarm system installer" checked style="margin-right:4px;">alarm system installer</label><label style="display:block;padding:1px 2px;cursor:pointer;"><input type="checkbox" class="partial-term-cb" value="IT security camera install" checked style="margin-right:4px;">IT security camera install</label><label style="display:block;padding:1px 2px;cursor:pointer;"><input type="checkbox" class="partial-term-cb" value="network camera installation" checked style="margin-right:4px;">network camera installation</label><label style="display:block;padding:1px 2px;cursor:pointer;"><input type="checkbox" class="partial-term-cb" value="surveillance camera installation" checked style="margin-right:4px;">surveillance camera installation</label><label style="display:block;padding:1px 2px;cursor:pointer;"><input type="checkbox" class="partial-term-cb" value="security system installer" checked style="margin-right:4px;">security system installer</label><label style="display:block;padding:1px 2px;cursor:pointer;"><input type="checkbox" class="partial-term-cb" value="intruder alarm installer" checked style="margin-right:4px;">intruder alarm installer</label><label style="display:block;padding:1px 2px;cursor:pointer;"><input type="checkbox" class="partial-term-cb" value="CCTV security alarm" checked style="margin-right:4px;">CCTV security alarm</label><label style="display:block;padding:1px 2px;cursor:pointer;"><input type="checkbox" class="partial-term-cb" value="electrical security camera installation" checked style="margin-right:4px;">electrical security camera installation</label><label style="display:block;padding:1px 2px;cursor:pointer;"><input type="checkbox" class="partial-term-cb" value="smart home security camera" checked style="margin-right:4px;">smart home security camera</label>
+                    </div>
+                    <label style="font-size:11px; color:#888; display:block; margin-top:8px; margin-bottom:2px;">One-time extra terms (one per line):</label>
+                    <textarea id="partial-extra-terms" rows="3"
+                        style="width:100%; font-size:12px; padding:5px 7px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box; resize:vertical;"
+                        placeholder="e.g. home CCTV setup"></textarea>
+                </div>
+
+            </div>
+            <div style="display:flex; align-items:center; gap:12px; margin-top:10px; flex-wrap:wrap;">
+                <label style="font-size:12px; color:#555; cursor:pointer;">
+                    <input type="checkbox" id="partial-facebook" style="margin-right:4px;">
+                    <i class="fa-brands fa-facebook-f" style="color:#1877f2;"></i> Facebook (regional)
+                </label>
+                <label style="font-size:12px; color:#555; cursor:pointer;">
+                    <input type="checkbox" id="partial-facebook-nz" style="margin-right:4px;">
+                    <i class="fa-brands fa-facebook-f" style="color:#1877f2;"></i> Facebook (NZ-wide, no town)
+                </label>
+                <button onclick="runPartialSearch()"
+                    style="padding:7px 18px; background:#8e44ad; color:white; border:none; border-radius:5px;
+                           cursor:pointer; font-size:13px; font-weight:bold;">
+                    <i class="fa-solid fa-play"></i> Run Partial Search
+                </button>
+                <span id="partial-status" style="font-size:12px; color:#888;"></span>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+    // ── Search Terms Manager ──────────────────────────────────────────────────
+    var _terms = {"facebook": ["security camera installation", "CCTV installation", "security camera installer", "security alarm installation", "CCTV installer", "security camera company"], "google": ["security camera installer", "CCTV installer", "IP camera installation", "security camera installation company", "CCTV installation company", "security alarm installation", "alarm system installer", "IT security camera install", "network camera installation", "surveillance camera installation", "security system installer", "intruder alarm installer", "CCTV security alarm", "electrical security camera installation", "smart home security camera"]};
+    var _activeTab = 'google';
+
+    function showTermsTab(tab) {
+        _activeTab = tab;
+        document.getElementById('terms-google').style.display = tab === 'google' ? '' : 'none';
+        document.getElementById('terms-facebook').style.display = tab === 'facebook' ? '' : 'none';
+        document.getElementById('tab-btn-google').style.background = tab === 'google' ? '#2c3e50' : 'white';
+        document.getElementById('tab-btn-google').style.color = tab === 'google' ? 'white' : '#555';
+        document.getElementById('tab-btn-facebook').style.background = tab === 'facebook' ? '#1877f2' : 'white';
+        document.getElementById('tab-btn-facebook').style.color = tab === 'facebook' ? 'white' : '#555';
+    }
+
+    function renderTermsList(type) {
+        var el = document.getElementById('terms-list-' + type);
+        if (!el) return;
+        if (!_terms[type].length) { el.innerHTML = '<span style="color:#aaa;">No terms yet.</span>'; return; }
+        el.innerHTML = _terms[type].map(function(t, i) {
+            return '<div style="display:flex; justify-content:space-between; align-items:center; padding:2px 0; border-bottom:1px solid #f5f5f5;">'
+                + '<span>' + t + '</span>'
+                + '<button onclick="removeTerm('' + type + '',' + i + ')" '
+                + 'style="background:none; border:none; color:#e74c3c; cursor:pointer; font-size:13px; padding:0 4px;" title="Remove">&times;</button>'
+                + '</div>';
+        }).join('');
+    }
+
+    function loadTerms() {
+        fetch('/search-terms').then(function(r){return r.json();}).then(function(data) {
+            _terms.google = data.google || [];
+            _terms.facebook = data.facebook || [];
+            renderTermsList('google');
+            renderTermsList('facebook');
+            renderPartialTerms();
+        });
+    }
+
+    function saveTerms(type) {
+        var payload = {};
+        payload[type] = _terms[type];
+        fetch('/save-terms', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+    }
+
+    function addTerm(type) {
+        var input = document.getElementById('new-term-' + type);
+        var val = input.value.trim();
+        if (!val || _terms[type].indexOf(val) !== -1) return;
+        _terms[type].push(val);
+        input.value = '';
+        renderTermsList(type);
+        renderPartialTerms();
+        saveTerms(type);
+    }
+
+    function removeTerm(type, idx) {
+        _terms[type].splice(idx, 1);
+        renderTermsList(type);
+        renderPartialTerms();
+        saveTerms(type);
+    }
+
+    // ── Partial Search ────────────────────────────────────────────────────────
+    var _allRegions = ["Auckland", "Wellington", "Christchurch", "Hamilton", "Tauranga", "Dunedin", "Palmerston North", "Napier", "New Plymouth", "Whangarei", "Nelson", "Invercargill", "Gisborne", "Whanganui", "Rotorua", "Hastings", "Blenheim", "Timaru", "Pukekohe", "Taupo", "Kerikeri", "Kaitaia", "Dargaville", "Lower Hutt", "Upper Hutt", "Porirua", "Paraparaumu", "Thames", "Te Awamutu", "Tokoroa", "Whakatane", "Katikati", "Te Puke", "Waipukurau", "Wairoa", "Hawera", "Stratford", "Levin", "Feilding", "Motueka", "Richmond", "Picton", "Greymouth", "Westport", "Rangiora", "Ashburton", "Rolleston", "Queenstown", "Wanaka", "Oamaru", "Alexandra", "Gore"];
+
+    function renderPartialRegions() {
+        var el = document.getElementById('partial-region-list');
+        el.innerHTML = _allRegions.map(function(r) {
+            return '<label style="display:block; padding:1px 2px; cursor:pointer;">'
+                + '<input type="checkbox" class="partial-region-cb" value="' + r + '" checked style="margin-right:4px;">'
+                + r + '</label>';
+        }).join('');
+    }
+
+    function renderPartialTerms() {
+        var el = document.getElementById('partial-term-list');
+        el.innerHTML = _terms.google.map(function(t) {
+            return '<label style="display:block; padding:1px 2px; cursor:pointer;">'
+                + '<input type="checkbox" class="partial-term-cb" value="' + t + '" checked style="margin-right:4px;">'
+                + t + '</label>';
+        }).join('');
+    }
+
+    function partialSelectAllRegions() {
+        document.querySelectorAll('.partial-region-cb').forEach(function(cb){ cb.checked = true; });
+    }
+    function partialClearRegions() {
+        document.querySelectorAll('.partial-region-cb').forEach(function(cb){ cb.checked = false; });
+    }
+    function partialSelectAllTerms() {
+        document.querySelectorAll('.partial-term-cb').forEach(function(cb){ cb.checked = true; });
+    }
+    function partialClearTerms() {
+        document.querySelectorAll('.partial-term-cb').forEach(function(cb){ cb.checked = false; });
+    }
+
+    function runPartialSearch() {
+        var regions = Array.from(document.querySelectorAll('.partial-region-cb:checked')).map(function(cb){ return cb.value; });
+        var terms = Array.from(document.querySelectorAll('.partial-term-cb:checked')).map(function(cb){ return cb.value; });
+        var extraRaw = document.getElementById('partial-extra-terms').value.trim();
+        var extraTerms = extraRaw ? extraRaw.split('
+').map(function(t){ return t.trim(); }).filter(Boolean) : [];
+        var allTerms = terms.concat(extraTerms);
+        var includeFb = document.getElementById('partial-facebook').checked;
+        var includeFbNw = document.getElementById('partial-facebook-nz').checked;
+
+        if (!regions.length) { alert('Please select at least one region.'); return; }
+        if (!allTerms.length && !includeFb && !includeFbNw) { alert('Please select at least one term or enable Facebook search.'); return; }
+
+        var statusEl = document.getElementById('partial-status');
+        statusEl.textContent = 'Starting...';
+
+        fetch('/start-partial-search', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({regions: regions, google_terms: allTerms, include_facebook: includeFb, include_nationwide: includeFbNw})
+        }).then(function(r){ return r.json(); }).then(function(d) {
+            if (d.ok) {
+                statusEl.textContent = 'Search started!';
+                setTimeout(function(){ statusEl.textContent = ''; }, 4000);
+            } else {
+                statusEl.textContent = d.error || 'Error starting search.';
+            }
+        }).catch(function(){ statusEl.textContent = 'Request failed.'; });
+    }
+
+    loadTerms();
+    renderPartialRegions();
+    </script>
+
+    <div class="stats">
+        <div class="stat-box">
+            <h2>0</h2>
+            <p>Total Companies</p>
+        </div>
+        <div class="stat-box licensed">
+            <h2>0</h2>
+            <p>PSPLA Licensed</p>
+        </div>
+        <div class="stat-box unlicensed">
+            <h2>0</h2>
+            <p>Not Licensed</p>
+        </div>
+        <div class="stat-box expired">
+            <h2>0</h2>
+            <p>Expired License</p>
+        </div>
+        <div class="stat-box unknown">
+            <h2>0</h2>
+            <p>Unverified</p>
+        </div>
+    </div>
+
+    <div class="filters">
+        <input type="text" id="searchBox" placeholder="Search company name..." onkeyup="filterTable()">
+        <select id="regionFilter" onchange="filterTable()">
+            <option value="">All Regions</option>
+            
+        </select>
+        <select id="statusFilter" onchange="filterTable()">
+            <option value="">All Statuses</option>
+            <option value="licensed">Licensed</option>
+            <option value="unlicensed">Not Licensed</option>
+            <option value="expired">Expired</option>
+            <option value="unknown">Unknown</option>
+        </select>
+        <button class="btn btn-dark" onclick="window.location.reload()">Refresh</button>
+    </div>
+
+    <table id="companyTable">
+        <thead>
+            <tr>
+                <th><i class="fa-solid fa-building"></i> Company (Website)</th>
+                <th><i class="fa-solid fa-location-dot"></i> Region</th>
+                <th><i class="fa-solid fa-phone"></i> Phone</th>
+                <th><i class="fa-solid fa-envelope"></i> Email</th>
+                <th><i class="fa-solid fa-shield-halved"></i> PSPLA Status</th>
+                <th><i class="fa-solid fa-id-card"></i> PSPLA Registered Name</th>
+                <th><i class="fa-solid fa-hashtag"></i> License #</th>
+                <th><i class="fa-regular fa-calendar"></i> Expiry</th>
+                <th><i class="fa-solid fa-landmark"></i> Companies Office</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            
+        </tbody>
+    </table>
+
+    <script>
+        function filterTable() {
+            const search = document.getElementById('searchBox').value.toLowerCase();
+            const region = document.getElementById('regionFilter').value.toLowerCase();
+            const status = document.getElementById('statusFilter').value.toLowerCase();
+            const rows = document.querySelectorAll('.company-row');
+            rows.forEach(row => {
+                const nameMatch = !search || row.dataset.name.includes(search);
+                const regionMatch = !region || row.dataset.region.includes(region);
+                const statusMatch = !status || row.dataset.status === status;
+                const visible = nameMatch && regionMatch && statusMatch;
+                row.style.display = visible ? '' : 'none';
+                const detailRow = document.getElementById('detail-' + row.dataset.id);
+                if (detailRow && !visible) detailRow.classList.remove('open');
+            });
+        }
+
+        function lookupFacebook(id) {
+            var btn = document.getElementById('fb-btn-' + id);
+            var result = document.getElementById('fb-result-' + id);
+            var termInput = document.getElementById('fb-term-' + id);
+            var name = termInput ? termInput.value.trim() : '';
+            if (!name) return;
+            btn.disabled = true;
+            btn.textContent = 'Searching...';
+            fetch('/find-facebook', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id, name: name})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.found && d.url) {
+                    result.innerHTML = '<a href="' + d.url + '" target="_blank">' + d.url + '</a>';
+                    btn.textContent = 'Done';
+                    btn.style.background = '#27ae60';
+                } else if (d.error) {
+                    result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
+                    btn.textContent = 'Search';
+                    btn.disabled = false;
+                } else {
+                    result.innerHTML = '<em style="color:#aaa">not found</em>';
+                    btn.textContent = 'Not found';
+                    btn.style.background = '#95a5a6';
+                }
+            })
+            .catch(function(e) {
+                result.innerHTML = '<em style="color:#e74c3c">Request failed</em>';
+                btn.textContent = 'Search';
+                btn.disabled = false;
+            });
+        }
+
+        function recheckPspla(id) {
+            var btn = document.getElementById('pspla-btn-' + id);
+            var result = document.getElementById('pspla-recheck-result-' + id);
+            var termInput = document.getElementById('pspla-term-' + id);
+            var name = termInput ? termInput.value.trim() : '';
+            if (!name) return;
+            btn.disabled = true;
+            btn.textContent = 'Checking...';
+            fetch('/recheck-pspla', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id, name: name})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.error) {
+                    result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
+                    btn.textContent = 'Re-check';
+                    btn.disabled = false;
+                } else if (d.licensed) {
+                    result.innerHTML = '<strong style="color:#27ae60">Licensed</strong> — ' + (d.pspla_name || '');
+                    btn.textContent = 'Done';
+                    btn.style.background = '#27ae60';
+                } else {
+                    result.innerHTML = '<em style="color:#e74c3c">Not licensed</em>';
+                    btn.textContent = 'Done';
+                    btn.style.background = '#95a5a6';
+                }
+            })
+            .catch(function(e) {
+                result.innerHTML = '<em style="color:#e74c3c">Request failed</em>';
+                btn.textContent = 'Re-check';
+                btn.disabled = false;
+            });
+        }
+
+        function deleteCompany(id, name) {
+            if (!confirm('Delete "' + name + '"?
+This cannot be undone.')) return;
+            fetch('/delete-company', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.ok) {
+                    // Hide the main row and detail row
+                    var mainRow = document.querySelector('.company-row[data-id="' + id + '"]');
+                    var detailRow = document.querySelector('#detail-' + id);
+                    if (mainRow) mainRow.remove();
+                    if (detailRow) detailRow.remove();
+                } else {
+                    alert('Delete failed: ' + (d.error || 'unknown error'));
+                }
+            })
+            .catch(function() { alert('Delete request failed.'); });
+        }
+
+        function toggleDetail(btn, id) {
+            var row = document.getElementById('detail-' + id);
+            if (!row) return;
+            var isOpen = row.classList.contains('open');
+            row.classList.toggle('open');
+            btn.textContent = isOpen ? '▼ more' : '▲ less';
+        }
+
+        function copyAndOpen(e, licNum) {
+            e.preventDefault();
+            navigator.clipboard.writeText(licNum).catch(() => {});
+            const link = e.currentTarget;
+            const orig = link.title;
+            link.title = 'Copied! Paste into the PSPLA search box.';
+            setTimeout(() => { link.title = orig; }, 3000);
+            window.open('https://forms.justice.govt.nz/search/PSPLA/', '_blank');
+        }
+    </script>
+
+<!-- Clear DB Modal -->
+<div id="clear-db-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+     background:rgba(44,62,80,0.97); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:white; padding:40px; border-radius:12px; text-align:center; max-width:420px; width:90%;">
+        <i class="fa-solid fa-triangle-exclamation" style="font-size:48px; color:#e74c3c; margin-bottom:16px; display:block;"></i>
+        <h2 style="margin:0 0 8px; color:#c0392b;">Delete All Data</h2>
+        <p style="color:#555; font-size:15px; margin-bottom:6px;">
+            You are about to permanently delete
+            <strong style="color:#c0392b;">0 entries</strong>
+            from the database.
+        </p>
+        <p style="color:#888; font-size:13px; margin-bottom:24px;">
+            Search progress will also be reset so the next full search starts from scratch.
+            <strong>This cannot be undone.</strong>
+        </p>
+        <form method="POST" action="/clear-db">
+            <button type="submit"
+                style="width:100%; padding:11px; background:#e74c3c; color:white; border:none;
+                       border-radius:6px; font-size:15px; font-weight:bold; cursor:pointer;">
+                <i class="fa-solid fa-trash-can"></i> Yes, Delete Everything
+            </button>
+        </form>
+        <button onclick="document.getElementById('clear-db-modal').style.display='none';"
+            style="margin-top:10px; background:none; border:none; color:#999; cursor:pointer; font-size:13px;">Cancel</button>
+    </div>
+</div>
+
+<!-- Export CSV Modal -->
+<div id="export-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+     background:rgba(44,62,80,0.97); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:white; padding:40px; border-radius:12px; text-align:center; max-width:360px; width:90%;">
+        <h2 style="margin:0 0 8px; color:#2c3e50;">Export CSV</h2>
+        <p style="color:#666; font-size:14px; margin-bottom:24px;">Enter the password to download.</p>
+        <form method="POST" action="/export.csv">
+            <input type="password" name="export_password" placeholder="Password"
+                style="width:100%; padding:10px 14px; border:1px solid #ddd; border-radius:6px;
+                       font-size:15px; box-sizing:border-box; margin-bottom:12px;">
+            <button type="submit" style="width:100%; padding:10px; background:#2c3e50; color:white;
+                    border:none; border-radius:6px; font-size:15px; cursor:pointer;">Download</button>
+        </form>
+        <button onclick="document.getElementById('export-modal').style.display='none';"
+            style="margin-top:10px; background:none; border:none; color:#999; cursor:pointer; font-size:13px;">Cancel</button>
+    </div>
+</div>
+
+</body>
+</html>

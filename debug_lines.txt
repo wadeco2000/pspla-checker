@@ -1,0 +1,13 @@
+690:         }
+691: 
+692:         function copyAndOpen(e, licNum) {
+693:             e.preventDefault();
+694:             navigator.clipboard.writeText(licNum).catch(() => {});
+695:             const link = e.currentTarget;
+696:             const orig = link.title;
+697:             link.title = 'Copied! Paste into the PSPLA search box.';
+698:             setTimeout(() => { link.title = orig; }, 3000);
+699:             window.open('https://forms.justice.govt.nz/search/PSPLA/', '_blank');
+700:         }
+701:     </script>
+702: 
