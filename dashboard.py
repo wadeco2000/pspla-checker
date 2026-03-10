@@ -2768,17 +2768,7 @@ def backup_db():
     if not companies:
         return redirect(url_for("index", message="Nothing to back up — database is empty.", type="error"))
 
-    fields = [
-        "company_name", "website_url", "region", "phone", "email", "address",
-        "facebook_url", "linkedin_url",
-        "nzsa_member", "nzsa_accredited", "nzsa_grade", "nzsa_member_name",
-        "nzsa_contact_name", "nzsa_phone", "nzsa_email",
-        "pspla_licensed", "pspla_name", "pspla_license_number",
-        "pspla_license_status", "pspla_license_expiry", "license_type",
-        "match_method", "match_reason", "individual_license", "director_name",
-        "companies_office_name", "companies_office_address",
-        "companies_office_number", "nzbn", "date_added", "last_checked", "notes"
-    ]
+    fields = sorted(companies[0].keys())
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()
@@ -2850,18 +2840,8 @@ def clear_db():
     if not companies:
         return redirect(url_for("index", message="Database is already empty.", type="error"))
 
-    # Build CSV
-    fields = [
-        "company_name", "website_url", "region", "phone", "email", "address",
-        "facebook_url", "linkedin_url",
-        "nzsa_member", "nzsa_accredited", "nzsa_grade", "nzsa_member_name",
-        "nzsa_contact_name", "nzsa_phone", "nzsa_email",
-        "pspla_licensed", "pspla_name", "pspla_license_number",
-        "pspla_license_status", "pspla_license_expiry", "license_type",
-        "match_method", "match_reason", "individual_license", "director_name",
-        "companies_office_name", "companies_office_address",
-        "companies_office_number", "nzbn", "date_added", "last_checked", "notes"
-    ]
+    # Build CSV — use all columns returned from Supabase
+    fields = sorted(companies[0].keys())
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()
@@ -2948,18 +2928,7 @@ def export_csv():
     if EXPORT_PASSWORD and request.form.get("export_password") != EXPORT_PASSWORD:
         return redirect(url_for("index", message="Incorrect export password.", type="error"))
     companies = get_companies()
-    fields = [
-        "company_name", "website", "region", "phone", "email", "address",
-        "facebook_url", "linkedin_url",
-        "nzsa_member", "nzsa_accredited", "nzsa_grade", "nzsa_member_name",
-        "nzsa_contact_name", "nzsa_phone", "nzsa_email",
-        "pspla_licensed", "pspla_name", "pspla_address", "pspla_license_number",
-        "pspla_license_status", "pspla_license_expiry", "license_type",
-        "match_method", "match_reason", "individual_license", "director_name",
-        "companies_office_name", "companies_office_address",
-        "companies_office_number", "nzbn",
-        "last_checked", "notes"
-    ]
+    fields = sorted(companies[0].keys()) if companies else []
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()
