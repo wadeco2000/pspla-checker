@@ -134,7 +134,7 @@ HTML_TEMPLATE = """
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer" />
     <style>
         * { box-sizing: border-box; }
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f4f4f4; }
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f4f4f4; }
         h1 { color: #2c3e50; margin-bottom: 5px; }
         .subtitle { color: #666; margin-bottom: 25px; }
         .stats { display: flex; gap: 15px; margin-bottom: 25px; flex-wrap: wrap; }
@@ -180,85 +180,254 @@ HTML_TEMPLATE = """
                     padding:2px 6px; font-size:11px; font-weight:bold; margin-left:4px;
                     vertical-align:middle; white-space:nowrap; cursor:default; }
         .status-icon { margin-right:4px; }
+        /* ── Navbar ── */
+        .navbar { position:sticky; top:0; z-index:1000; background:linear-gradient(135deg,#1a2535 0%,#2c3e50 100%);
+                  border-bottom:1px solid #3d5166; box-shadow:0 2px 16px rgba(0,0,0,0.35);
+                  display:flex; align-items:stretch; padding:0 16px; height:54px; gap:0; }
+        .navbar-brand { display:flex; align-items:center; gap:10px; padding-right:18px;
+                        border-right:1px solid #3d5166; margin-right:4px; min-width:fit-content; text-decoration:none; }
+        .brand-logo { height:30px; width:auto; }
+        .brand-title { font-size:14px; font-weight:700; color:white; letter-spacing:0.3px; line-height:1.2; }
+        .brand-sub { font-size:10px; color:#7f95b0; display:block; }
+        .nav-menus { display:flex; align-items:stretch; flex:1; }
+        .nav-item { position:relative; display:flex; align-items:center; }
+        .nav-btn { background:none; border:none; color:#bdc3c7; font-size:13px; font-weight:500;
+                   padding:0 15px; height:100%; cursor:pointer; display:flex; align-items:center;
+                   gap:6px; transition:background 0.15s,color 0.15s; white-space:nowrap; }
+        .nav-btn:hover, .nav-item.open .nav-btn { background:rgba(255,255,255,0.09); color:white; }
+        .nav-chevron { font-size:9px; transition:transform 0.2s; opacity:0.6; }
+        .nav-item.open .nav-chevron { transform:rotate(180deg); }
+        .dropdown { display:none; position:absolute; top:100%; left:0; background:#1a2535;
+                    border:1px solid #3d5166; border-top:none; border-radius:0 0 8px 8px;
+                    box-shadow:0 10px 28px rgba(0,0,0,0.45); min-width:250px; z-index:1001;
+                    padding:6px 0; animation:dropIn 0.15s ease; }
+        .nav-item.open .dropdown { display:block; }
+        @keyframes dropIn { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:translateY(0)} }
+        .dd-item { display:flex; align-items:center; gap:10px; padding:9px 16px; color:#bdc3c7;
+                   font-size:13px; cursor:pointer; text-decoration:none; white-space:nowrap;
+                   transition:background 0.1s,color 0.1s; border:none; background:none; width:100%; text-align:left; }
+        .dd-item:hover { background:rgba(255,255,255,0.08); color:white; text-decoration:none; }
+        .dd-item .dd-icon { width:18px; text-align:center; opacity:0.75; flex-shrink:0; }
+        .dd-item .dd-sub { font-size:10px; color:#7f95b0; display:block; margin-top:1px; }
+        .dd-item.danger { color:#e74c3c; }
+        .dd-item.danger:hover { background:rgba(231,76,60,0.12); color:#ff6b6b; }
+        .dd-item.highlight { color:#27ae60; }
+        .dd-item.highlight:hover { background:rgba(39,174,96,0.1); color:#2ecc71; }
+        .dd-fresh { margin-left:auto; font-size:10px; padding:2px 7px; border-radius:3px;
+                    background:#d68910; color:white; border:none; cursor:pointer; white-space:nowrap; }
+        .dd-fresh:hover { background:#b7770d; }
+        .dd-divider { height:1px; background:#3d5166; margin:5px 0; }
+        .dd-label { padding:6px 16px 3px; font-size:10px; color:#7f95b0; text-transform:uppercase;
+                    letter-spacing:0.8px; font-weight:600; }
+        .navbar-right { display:flex; align-items:center; gap:10px; padding-left:14px;
+                        border-left:1px solid #3d5166; margin-left:4px; }
+        .credits-bar { display:flex; gap:12px; font-size:11px; }
+        .credits-bar span { color:#7f95b0; white-space:nowrap; }
+        .credits-bar b { color:#bdc3c7; }
+        .running-pill { display:flex; align-items:center; gap:7px; background:rgba(39,174,96,0.12);
+                        border:1px solid rgba(39,174,96,0.3); border-radius:20px; padding:3px 10px 3px 7px; }
+        .pulse-dot { width:7px; height:7px; border-radius:50%; background:#27ae60; flex-shrink:0;
+                     animation:pulse-glow 1.5s infinite; }
+        @keyframes pulse-glow { 0%{box-shadow:0 0 0 0 rgba(39,174,96,0.5)}
+                                 70%{box-shadow:0 0 0 7px rgba(39,174,96,0)}
+                                 100%{box-shadow:0 0 0 0 rgba(39,174,96,0)} }
+        .nav-action-btn { padding:4px 11px; border:none; border-radius:4px; cursor:pointer;
+                          font-size:12px; font-weight:600; display:flex; align-items:center; gap:5px; }
+        /* ── Page content wrapper ── */
+        .page-content { padding:20px; }
+        /* ── Panels ── */
+        .panel-wrap { margin-bottom:16px; }
     </style>
 </head>
 <body>
-    <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:8px;">
-        <div>
-            <h1>PSPLA Security Camera Company Checker</h1>
-            <p class="subtitle">NZ companies found installing security cameras — checked against PSPLA licensing register.</p>
-            <div id="api-credits-bar" style="display:flex; gap:14px; flex-wrap:wrap; margin-top:6px; font-size:12px;">
-                <span id="credit-serp" style="color:#aaa;">
-                    <i class="fa-solid fa-magnifying-glass"></i> SerpAPI: <span style="font-weight:bold;">loading…</span>
-                </span>
-                <span id="credit-tokens" style="color:#aaa;">
-                    <i class="fa-solid fa-robot"></i> Claude: <span style="font-weight:bold;">–</span>
-                </span>
-            </div>
-        </div>
-        <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-end; margin-top:10px;">
-            <div style="display:flex; gap:6px; align-items:center; flex-wrap:nowrap;">
-                <span id="btns-running" style="display:{{ 'contents' if search_running else 'none' }};">
-                    <span style="font-size:12px; color:#27ae60; font-weight:bold; white-space:nowrap;"><i class="fa-solid fa-circle" style="font-size:9px;"></i> Search running</span>
-                    <form method="POST" action="/resume-search" id="btn-resume" style="display:{{ 'inline' if search_paused else 'none' }};">
-                        <button class="btn" style="background:#27ae60; color:white;"><i class="fa-solid fa-play"></i> Resume</button>
-                    </form>
-                    <form method="POST" action="/pause-search" id="btn-pause" style="display:{{ 'none' if search_paused else 'inline' }};">
-                        <button class="btn" style="background:#e67e22; color:white;"><i class="fa-solid fa-pause"></i> Pause</button>
-                    </form>
-                    <form method="POST" action="/stop-search" onsubmit="return confirm('Stop the running search? Progress so far will be saved.')">
-                        <button class="btn" style="background:#c0392b; color:white;"><i class="fa-solid fa-stop"></i> Stop</button>
-                    </form>
-                </span>
-                <span id="btns-idle" style="display:{{ 'none' if search_running else 'contents' }};">
-                    <form method="POST" action="/start-search" onsubmit="return confirm('Start a full search? This will run in the background and may take a long time.')">
-                        <button class="btn" style="background:#27ae60; color:white;">&#9654; Full Search</button>
-                    </form>
-                    <form method="POST" action="/start-weekly-search" onsubmit="return confirm('Run a weekly light scan (last 7 days only)?')">
-                        <button class="btn" style="background:#16a085; color:white;">&#9654; Weekly Scan</button>
-                    </form>
-                    <span style="display:inline-flex; align-items:center; gap:4px;">
-                        <form method="POST" action="/start-facebook-search" onsubmit="return confirm('Run Facebook-only search? This adds Facebook-sourced companies on top of existing data.')">
-                            <button class="btn" style="background:#1877f2; color:white;"><i class="fa-brands fa-facebook-f"></i> Facebook</button>
-                        </form>
-                        <small id="fb-progress-badge" style="display:none; color:#e67e22; font-size:11px; white-space:nowrap;"></small>
-                        <form method="POST" action="/start-facebook-search" onsubmit="return confirm('Start Facebook search fresh (clear all saved progress)?');" style="display:none;" id="fb-fresh-form">
-                            <input type="hidden" name="fresh" value="1">
-                            <button class="btn" style="background:#d68910; color:white; font-size:11px; padding:3px 8px;" title="Start Fresh">&#8635; Fresh</button>
-                        </form>
-                    </span>
-                    <span style="display:inline-flex; align-items:center; gap:4px;">
-                        <form method="POST" action="/start-directory-import" onsubmit="return confirm('Import from NZSA and LinkedIn directories? Adds members not already in the database.')">
-                            <button class="btn" style="background:#c0392b; color:white;">&#9707; Directories</button>
-                        </form>
-                        <small id="dir-progress-badge" style="display:none; color:#e67e22; font-size:11px; white-space:nowrap;"></small>
-                        <form method="POST" action="/start-directory-import" onsubmit="return confirm('Start directory import fresh (clear all saved progress)?');" style="display:none;" id="dir-fresh-form">
-                            <input type="hidden" name="fresh" value="1">
-                            <button class="btn" style="background:#d68910; color:white; font-size:11px; padding:3px 8px;" title="Start Fresh">&#8635; Fresh</button>
-                        </form>
-                    </span>
-                </span>
-                <form method="POST" action="/dedupe-db" onsubmit="return confirm('Find and merge duplicate companies?\n\nGroups by: matching name, same domain, or same Facebook URL.\nKeeps the record with the most data (licensed > filled fields > oldest).\nAll data from duplicates is merged into the surviving record — nothing is lost.\nAn audit entry is written for every merge.')">
-                    <button class="btn" style="background:#8e44ad; color:white;"><i class="fa-solid fa-filter"></i> Dedupe DB</button>
-                </form>
-                <button class="btn" style="background:#e74c3c; color:white;"
-                    onclick="document.getElementById('clear-db-modal').style.display='flex';">
-                    <i class="fa-solid fa-trash-can"></i> Clear DB
-                </button>
-            </div>
-            <div style="display:flex; gap:6px; align-items:center; flex-wrap:nowrap;">
-                <form method="POST" action="/publish" onsubmit="return confirm('Publish current data to the live GitHub Pages site?')">
-                    <button class="btn btn-dark" style="background:#8e44ad;">&#x1F310; Publish Live</button>
-                </form>
-                <button class="btn btn-dark" onclick="document.getElementById('export-modal').style.display='flex';">&#x2B07; Export CSV</button>
-                <a href="/search-history" class="btn btn-dark" style="text-decoration:none;">&#x1F4CB; Search History</a>
-                <a href="/history" class="btn btn-dark" style="text-decoration:none;">&#x1F4DC; Version History</a>
-                <a href="/duplicates" class="btn btn-dark" style="text-decoration:none; background:#c0392b;">&#x26A0; Duplicates</a>
-                <a href="/audit-log" class="btn btn-dark" style="text-decoration:none; background:#6c3483;">&#x1F4CB; Audit Log</a>
-                <a href="/llm-log" class="btn btn-dark" style="text-decoration:none; background:#1a6e3c;">&#x1F916; LLM Log</a>
-            </div>
-        </div>
+<nav class="navbar">
+  <!-- Brand -->
+  <a class="navbar-brand" href="/">
+    <div>
+      <span class="brand-title">PSPLA Checker</span>
+      <span class="brand-sub">by Alarm Watch</span>
     </div>
+  </a>
+
+  <!-- Menus -->
+  <div class="nav-menus">
+
+    <!-- Searches -->
+    <div class="nav-item" id="menu-searches">
+      <button class="nav-btn" onclick="toggleMenu('menu-searches')">
+        <i class="fa-solid fa-magnifying-glass"></i> Searches
+        <i class="fa-solid fa-chevron-down nav-chevron"></i>
+      </button>
+      <div class="dropdown">
+        <div class="dd-label">Run a search</div>
+
+        <form method="POST" action="/start-search" onsubmit="return confirm('Start a full search? This will run in the background and may take a long time.')">
+          <button type="submit" class="dd-item highlight">
+            <i class="fa-solid fa-play dd-icon"></i>
+            <span>Full Search<span class="dd-sub">All regions × all terms + Facebook pass</span></span>
+          </button>
+        </form>
+
+        <form method="POST" action="/start-weekly-search" onsubmit="return confirm('Run a weekly light scan (last 7 days only)?')">
+          <button type="submit" class="dd-item">
+            <i class="fa-solid fa-calendar-week dd-icon" style="color:#16a085;"></i>
+            <span>Weekly Scan<span class="dd-sub">Light scan — recent changes only</span></span>
+          </button>
+        </form>
+
+        <div class="dd-divider"></div>
+
+        <!-- Facebook Search row with Fresh -->
+        <div style="display:flex; align-items:center;">
+          <form method="POST" action="/start-facebook-search" onsubmit="return confirm('Run Facebook-only search?')" style="flex:1;">
+            <button type="submit" class="dd-item">
+              <i class="fa-brands fa-facebook-f dd-icon" style="color:#1877f2;"></i>
+              <span>Facebook Search<small id="fb-progress-badge" style="display:none;color:#e67e22;margin-left:6px;font-size:10px;"></small><span class="dd-sub">Search FB for NZ security companies</span></span>
+            </button>
+          </form>
+          <form method="POST" action="/start-facebook-search" id="fb-fresh-form" style="display:none;" onsubmit="return confirm('Start Facebook search fresh?');">
+            <input type="hidden" name="fresh" value="1">
+            <button type="submit" class="dd-fresh" title="Start fresh — clear saved progress">&#8635; Fresh</button>
+          </form>
+        </div>
+
+        <!-- Directory Import row with Fresh -->
+        <div style="display:flex; align-items:center;">
+          <form method="POST" action="/start-directory-import" onsubmit="return confirm('Import from NZSA and LinkedIn directories?')" style="flex:1;">
+            <button type="submit" class="dd-item">
+              <i class="fa-solid fa-address-book dd-icon" style="color:#c0392b;"></i>
+              <span>Directory Import<small id="dir-progress-badge" style="display:none;color:#e67e22;margin-left:6px;font-size:10px;"></small><span class="dd-sub">NZSA + LinkedIn member lists</span></span>
+            </button>
+          </form>
+          <form method="POST" action="/start-directory-import" id="dir-fresh-form" style="display:none;" onsubmit="return confirm('Start directory import fresh?');">
+            <input type="hidden" name="fresh" value="1">
+            <button type="submit" class="dd-fresh" title="Start fresh — clear saved progress">&#8635; Fresh</button>
+          </form>
+        </div>
+
+        <div class="dd-divider"></div>
+
+        <button type="button" class="dd-item" onclick="togglePanel('panel-partial'); closeMenus();">
+          <i class="fa-solid fa-crosshairs dd-icon" style="color:#8e44ad;"></i>
+          <span>Partial Search<span class="dd-sub">Target specific regions or terms</span></span>
+        </button>
+
+        <button type="button" class="dd-item" onclick="togglePanel('panel-bulk'); closeMenus();">
+          <i class="fa-solid fa-rotate dd-icon" style="color:#e67e22;"></i>
+          <span>Bulk Recheck<span class="dd-sub">Re-run checks on existing companies</span></span>
+        </button>
+
+        <button type="button" class="dd-item" onclick="togglePanel('panel-terms'); closeMenus();">
+          <i class="fa-solid fa-list-check dd-icon" style="color:#7f8c8d;"></i>
+          <span>Search Terms<span class="dd-sub">Edit Google / Facebook search terms</span></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Database -->
+    <div class="nav-item" id="menu-database">
+      <button class="nav-btn" onclick="toggleMenu('menu-database')">
+        <i class="fa-solid fa-database"></i> Database
+        <i class="fa-solid fa-chevron-down nav-chevron"></i>
+      </button>
+      <div class="dropdown">
+        <div class="dd-label">Data management</div>
+
+        <form method="POST" action="/dedupe-db" onsubmit="return confirm('Find and merge duplicate companies?\n\nGroups by: matching name, same domain, or same Facebook URL.\nKeeps the record with the most data.\nAll data from duplicates is merged in — nothing is lost.\nAn audit entry is written for every merge.')">
+          <button type="submit" class="dd-item">
+            <i class="fa-solid fa-filter dd-icon" style="color:#8e44ad;"></i>
+            <span>Dedupe DB<span class="dd-sub">Auto-merge duplicates (name / domain / FB URL)</span></span>
+          </button>
+        </form>
+
+        <a href="/review-duplicates" class="dd-item">
+          <i class="fa-solid fa-eye dd-icon" style="color:#e67e22;"></i>
+          <span>Review Near-Matches<span class="dd-sub">Manually review possible duplicates</span></span>
+        </a>
+
+        <div class="dd-divider"></div>
+
+        <form method="POST" action="/publish" onsubmit="return confirm('Publish current data to the live GitHub Pages site?')">
+          <button type="submit" class="dd-item">
+            <i class="fa-solid fa-globe dd-icon" style="color:#8e44ad;"></i>
+            <span>Publish Live<span class="dd-sub">Push to GitHub Pages public site</span></span>
+          </button>
+        </form>
+
+        <button type="button" class="dd-item" onclick="document.getElementById('export-modal').style.display='flex'; closeMenus();">
+          <i class="fa-solid fa-file-csv dd-icon" style="color:#27ae60;"></i>
+          <span>Export CSV<span class="dd-sub">Download all companies as CSV</span></span>
+        </button>
+
+        <div class="dd-divider"></div>
+
+        <button type="button" class="dd-item danger" onclick="document.getElementById('clear-db-modal').style.display='flex'; closeMenus();">
+          <i class="fa-solid fa-trash-can dd-icon"></i>
+          <span>Clear DB<span class="dd-sub">Delete all company records</span></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Logs & History -->
+    <div class="nav-item" id="menu-logs">
+      <button class="nav-btn" onclick="toggleMenu('menu-logs')">
+        <i class="fa-solid fa-clock-rotate-left"></i> History &amp; Logs
+        <i class="fa-solid fa-chevron-down nav-chevron"></i>
+      </button>
+      <div class="dropdown">
+        <div class="dd-label">Activity &amp; decisions</div>
+        <a href="/search-history" class="dd-item">
+          <i class="fa-solid fa-rectangle-list dd-icon" style="color:#3498db;"></i>
+          <span>Search History<span class="dd-sub">All search runs and outcomes</span></span>
+        </a>
+        <a href="/audit-log" class="dd-item">
+          <i class="fa-solid fa-book dd-icon" style="color:#6c3483;"></i>
+          <span>Audit Log<span class="dd-sub">Every database change and AI decision</span></span>
+        </a>
+        <a href="/llm-log" class="dd-item">
+          <i class="fa-solid fa-robot dd-icon" style="color:#27ae60;"></i>
+          <span>LLM Log<span class="dd-sub">Every AI prompt and response</span></span>
+        </a>
+        <div class="dd-divider"></div>
+        <a href="/history" class="dd-item">
+          <i class="fa-solid fa-code-branch dd-icon" style="color:#7f8c8d;"></i>
+          <span>Version History<span class="dd-sub">Git commits — rollback if needed</span></span>
+        </a>
+        <a href="/duplicates" class="dd-item">
+          <i class="fa-solid fa-triangle-exclamation dd-icon" style="color:#e74c3c;"></i>
+          <span>Duplicates Report<span class="dd-sub">Companies flagged as possible duplicates</span></span>
+        </a>
+      </div>
+    </div>
+
+  </div><!-- /nav-menus -->
+
+  <!-- Right: credits + running state -->
+  <div class="navbar-right">
+    <div class="credits-bar" id="api-credits-bar">
+      <span id="credit-serp"><i class="fa-solid fa-magnifying-glass"></i> SerpAPI: <b>loading…</b></span>
+      <span id="credit-tokens"><i class="fa-solid fa-robot"></i> Claude: <b>–</b></span>
+    </div>
+
+    <span id="btns-running" style="display:{{ 'contents' if search_running else 'none' }};">
+      <div class="running-pill">
+        <div class="pulse-dot"></div>
+        <span style="font-size:12px; color:#2ecc71; font-weight:600; white-space:nowrap;">Running</span>
+      </div>
+      <form method="POST" action="/resume-search" id="btn-resume" style="display:{{ 'inline' if search_paused else 'none' }}; margin:0;">
+        <button class="nav-action-btn" style="background:#27ae60; color:white;"><i class="fa-solid fa-play"></i> Resume</button>
+      </form>
+      <form method="POST" action="/pause-search" id="btn-pause" style="display:{{ 'none' if search_paused else 'inline' }}; margin:0;">
+        <button class="nav-action-btn" style="background:#e67e22; color:white;"><i class="fa-solid fa-pause"></i> Pause</button>
+      </form>
+      <form method="POST" action="/stop-search" onsubmit="return confirm('Stop the running search?')" style="margin:0;">
+        <button class="nav-action-btn" style="background:#c0392b; color:white;"><i class="fa-solid fa-stop"></i> Stop</button>
+      </form>
+    </span>
+    <span id="btns-idle" style="display:none;"></span>
+  </div>
+</nav>
+<div class="page-content">
 
     {% set _s = init_status %}
     {% set _pct = ((_s.region_idx - 1) / _s.total_regions * 100) | round | int if _s.region_idx and _s.total_regions else 0 %}
@@ -303,6 +472,39 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
+    // ── Navbar dropdown logic ──────────────────────────────────────────
+    function toggleMenu(id) {
+        var el = document.getElementById(id);
+        var wasOpen = el.classList.contains('open');
+        closeMenus();
+        if (!wasOpen) el.classList.add('open');
+    }
+    function closeMenus() {
+        document.querySelectorAll('.nav-item.open').forEach(function(el) {
+            el.classList.remove('open');
+        });
+    }
+    // Close dropdowns when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('.nav-item')) closeMenus();
+    });
+
+    // ── Panel toggle ───────────────────────────────────────────────────
+    function togglePanel(id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        var opening = el.style.display === 'none';
+        // Close all panels first
+        ['panel-terms','panel-partial','panel-bulk'].forEach(function(pid) {
+            var p = document.getElementById(pid);
+            if (p) p.style.display = 'none';
+        });
+        if (opening) {
+            el.style.display = '';
+            el.scrollIntoView({ behavior:'smooth', block:'nearest' });
+        }
+    }
+
     // Log panel state — must be declared before poll() runs
     var _logOpen = true;
     var _lastLogLine = -1;
@@ -607,12 +809,12 @@ HTML_TEMPLATE = """
     loadTerms();
     </script>
 
-    <!-- Search Terms + Partial Search row -->
-    <div style="display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
+    <!-- Panels (toggled from navbar) -->
 
-        <!-- Search Terms Editor -->
-        <div style="flex:1; min-width:300px; background:white; border-radius:8px;
-                    box-shadow:0 2px 4px rgba(0,0,0,0.1); padding:14px 18px;">
+    <!-- Search Terms Panel -->
+    <div id="panel-terms" class="panel-wrap" style="display:none;">
+        <div style="background:white; border-radius:8px;
+                    box-shadow:0 2px 4px rgba(0,0,0,0.1); padding:14px 18px; max-width:520px;">
             <script>
             function showTermsTab(tab) {
                 if (typeof _activeTab !== 'undefined') _activeTab = tab;
@@ -662,10 +864,12 @@ HTML_TEMPLATE = """
                 </div>
             </div>
         </div>
+    </div>
 
-        <!-- Partial Search Panel -->
-        <div style="flex:2; min-width:380px; background:white; border-radius:8px;
-                    box-shadow:0 2px 4px rgba(0,0,0,0.1); padding:14px 18px;">
+    <!-- Partial Search Panel -->
+    <div id="panel-partial" class="panel-wrap" style="display:none;">
+        <div style="background:white; border-radius:8px;
+                    box-shadow:0 2px 4px rgba(0,0,0,0.1); padding:14px 18px; max-width:760px;">
             <strong style="color:#2c3e50; font-size:14px;"><i class="fa-solid fa-crosshairs"></i> Partial Search</strong>
             <div style="display:flex; gap:12px; margin-top:10px; flex-wrap:wrap;">
 
@@ -768,10 +972,10 @@ HTML_TEMPLATE = """
                 <span id="partial-status" style="font-size:12px; color:#888;"></span>
             </div>
         </div>
-
     </div>
 
     <!-- Bulk Recheck Panel -->
+    <div id="panel-bulk" class="panel-wrap" style="display:none;">
     <div id="bulkRecheckPanel" style="background:#1e1e2e; border:1px solid #333; border-radius:6px; padding:14px 18px; margin-bottom:14px;">
       <div style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;" onclick="toggleBulkPanel()">
         <strong style="color:#e0e0e0; font-size:13px;"><i class="fa-solid fa-rotate"></i> Bulk Recheck</strong>
@@ -825,6 +1029,7 @@ HTML_TEMPLATE = """
         </button>
         <span id="rcStatus" style="margin-left:12px; font-size:12px; color:#aaa;"></span>
       </div>
+    </div>
     </div>
 
     <div class="stats">
@@ -2003,6 +2208,7 @@ HTML_TEMPLATE = """
     </div>
 </div>
 
+</div><!-- /page-content -->
 </body>
 </html>
 """
