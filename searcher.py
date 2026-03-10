@@ -3947,7 +3947,9 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         "date_added": datetime.now(timezone.utc).isoformat(),
         "individual_license": individual_license_found,
         "director_name": ", ".join(directors),
-        "facebook_url": info.get("facebook_url"),
+        "facebook_url": info.get("facebook_url") or (
+            info.get("_fb_url") if info.get("_fb_url") and "facebook.com" in (info.get("_fb_url") or "") else None
+        ),
         "fb_followers": fb_page_data.get("followers"),
         "fb_phone": fb_page_data.get("phone"),
         "fb_email": fb_page_data.get("email"),

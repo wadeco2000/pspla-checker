@@ -4610,6 +4610,23 @@ def recheck_llm_sense():
             lines.append(f"  Address: {c['google_address']}")
             if c.get("google_phone"): lines.append(f"  Phone: {c['google_phone']}")
 
+        # Email — include domain so Claude can flag obvious mismatches
+        _free_domains = {"gmail.com","hotmail.com","yahoo.com","outlook.com",
+                         "xtra.co.nz","yahoo.co.nz","icloud.com","live.com","me.com","msn.com"}
+        _dir_domains  = {"facebook.com","linkedin.com","google.com","moneyhub.co.nz",
+                         "yellowpages.co.nz","trademe.co.nz"}
+        email_val = c.get("email") or ""
+        if email_val:
+            email_dom = email_val.split("@")[-1].lower() if "@" in email_val else ""
+            website_dom = (website.lower().replace("https://","").replace("http://","")
+                           .replace("www.","").split("/")[0]) if website else ""
+            lines.append(f"\nEMAIL ON RECORD: {email_val}")
+            if email_dom and email_dom not in _free_domains and email_dom not in _dir_domains:
+                if website_dom and website_dom not in _dir_domains and email_dom != website_dom:
+                    lines.append(f"  Note: email domain ({email_dom}) differs from stored website domain ({website_dom})")
+                else:
+                    lines.append(f"  Email domain: {email_dom}")
+
         if not lines:
             print("[LLM Sense] No associations to check.")
             return jsonify({"ok": True, "cleared": [], "message": "No associations to check."})
@@ -4640,6 +4657,11 @@ RULES:
 - For LinkedIn: same as Facebook.
 - For Companies Office: if the registered name is for a completely different business, flag it.
 - For Google Business: if the address or phone clearly belongs to a different business at a different location, flag it.
+- For Email: if the email domain clearly belongs to a completely different unrelated company, flag it.
+  IMPORTANT email rules: NEVER flag gmail/hotmail/xtra/yahoo/outlook/icloud — these are personal email providers.
+  NEVER flag if the stored website is a Facebook or directory URL (email domain can't be compared meaningfully to a social media URL).
+  ONLY flag if the email domain refers to a clearly different business — e.g. email is for a plumbing company when this is a security company.
+  If the email domain contains words that relate to the company name (even partially), it is fine.
 
 Respond with ONLY valid JSON — no markdown, no explanation outside the JSON.
 Use this exact structure:
@@ -4655,7 +4677,9 @@ Use this exact structure:
   "clear_companies_office": false,
   "clear_companies_office_reason": "",
   "clear_google":          false,
-  "clear_google_reason":   ""
+  "clear_google_reason":   "",
+  "clear_email":           false,
+  "clear_email_reason":    ""
 }}
 
 Set a value to true ONLY if you are confident the association is for a different company."""
@@ -4663,7 +4687,7 @@ Set a value to true ONLY if you are confident the association is for a different
         ai_client = _anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         response = ai_client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=700,
+            max_tokens=800,
             messages=[{"role": "user", "content": prompt}]
         )
         raw = response.content[0].text.strip()
@@ -4730,6 +4754,12 @@ Set a value to true ONLY if you are confident the association is for a different
                           "google_phone": None, "google_address": None,
                           "google_email": None})
             cleared.append(f"Google: {reason}")
+
+        if result.get("clear_email"):
+            reason = result.get("clear_email_reason", "")
+            print(f"[LLM Sense] Clearing email: {reason}")
+            patch["email"] = None
+            cleared.append(f"Email: {reason}")
 
         if patch:
             ph = {**headers, "Content-Type": "application/json", "Prefer": "return=minimal"}
