@@ -4028,7 +4028,7 @@ function escHtml(s) {
 function doRollback(auditId) {
   var entry = _data.find(function(r) { return r.id === auditId; });
   var companyName = entry ? (entry.company_name || 'this company') : 'this company';
-  if (!confirm('Revert "' + companyName + '" to the state before this change?\n\nThis will overwrite the current record and cannot be undone.')) return;
+  if (!confirm('Revert "' + companyName + '" to the state before this change?\\n\\nThis will overwrite the current record and cannot be undone.')) return;
   fetch('/rollback-to-snapshot', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
