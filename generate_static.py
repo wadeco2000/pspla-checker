@@ -132,45 +132,10 @@ STATIC_TEMPLATE = """<!DOCTYPE html>
         a:hover { text-decoration: underline; }
 
         .loading { text-align:center; padding: 60px; color: #888; font-size: 15px; }
-
-        /* Password overlay */
-        #password-overlay {
-            display: none; position: fixed; top:0; left:0; width:100%; height:100%;
-            background: rgba(44,62,80,0.97); z-index: 9999;
-            align-items: center; justify-content: center;
-        }
-        .pw-box {
-            background: white; padding: 40px; border-radius: 12px;
-            text-align: center; max-width: 360px; width: 90%;
-        }
-        .pw-box h2 { margin: 0 0 6px; color: #2c3e50; }
-        .pw-box p  { color: #666; font-size: 14px; margin-bottom: 20px; }
-        .pw-box input {
-            width: 100%; padding: 10px 14px; border: 1px solid #ddd;
-            border-radius: 6px; font-size: 15px; margin-bottom: 12px;
-        }
-        .pw-error { color: #e74c3c; font-size: 13px; margin-bottom: 10px; display: none; }
-        .pw-box button {
-            width: 100%; padding: 10px; background: #2c3e50; color: white;
-            border: none; border-radius: 6px; font-size: 15px; cursor: pointer;
-        }
-        .pw-box button:hover { background: #34495e; }
     </style>
 </head>
 <body>
 
-<!-- Password overlay -->
-<div id="password-overlay">
-    <div class="pw-box">
-        <h2>PSPLA Checker</h2>
-        <p>Enter the password to access this tool.</p>
-        <form onsubmit="checkPassword(); return false;">
-        <input type="password" id="pw-input" placeholder="Password" autocomplete="current-password">
-        <div class="pw-error" id="pw-error">Incorrect password. Please try again.</div>
-        <button type="submit">Enter</button>
-        </form>
-    </div>
-</div>
 
 <!-- Header -->
 <div class="page-header">
@@ -295,29 +260,8 @@ STATIC_TEMPLATE = """<!DOCTYPE html>
 // ── Config ────────────────────────────────────────────────────────────────────
 const SUPABASE_URL = '{supabase_url}';
 const SUPABASE_KEY = '{supabase_key}';
-const CORRECT_PASSWORD = '{password}';
 
-// ── Password ──────────────────────────────────────────────────────────────────
-const overlay = document.getElementById('password-overlay');
-
-function checkPassword() {{
-    var input = document.getElementById('pw-input').value;
-    if (input === CORRECT_PASSWORD) {{
-        sessionStorage.setItem('pspla_auth', '1');
-        overlay.style.display = 'none';
-        loadData();
-    }} else {{
-        document.getElementById('pw-error').style.display = 'block';
-        document.getElementById('pw-input').value = '';
-    }}
-}}
-
-if (CORRECT_PASSWORD && sessionStorage.getItem('pspla_auth') !== '1') {{
-    overlay.style.display = 'flex';
-    setTimeout(function() {{ document.getElementById('pw-input').focus(); }}, 100);
-}} else {{
-    loadData();
-}}
+loadData();
 
 // ── Countdown + auto-refresh ──────────────────────────────────────────────────
 var secondsLeft = 300;
@@ -643,16 +587,42 @@ function copyAndOpen(e, licNum) {{
 
 
 def generate():
+    import subprocess
     print("Generating public page (live Supabase JS fetch)...")
     html = STATIC_TEMPLATE
     html = html.replace("{supabase_url}", SUPABASE_URL or "")
     html = html.replace("{supabase_key}", SUPABASE_KEY or "")
-    html = html.replace("{password}", PAGES_PASSWORD)
     # Template uses {{ }} for JS braces (leftover from .format() style) — collapse to single braces
     html = html.replace("{{", "{").replace("}}", "}")
     os.makedirs("docs", exist_ok=True)
+    # Write unencrypted version first (will be replaced by StatiCrypt below)
     with open("docs/index.html", "w", encoding="utf-8") as f:
         f.write(html)
+
+    # Encrypt with StatiCrypt (AES-256) — replaces the plain HTML with an encrypted version
+    if not PAGES_PASSWORD:
+        print("WARNING: PAGES_PASSWORD not set — skipping encryption. Site will be unprotected.")
+        print("Generated docs/index.html — data loads live from Supabase in the browser.")
+        return
+
+    print("Encrypting with StatiCrypt...")
+    node = r"C:\Program Files\nodejs\node.exe"
+    staticrypt = r"C:\Users\WadeAdmin\AppData\Roaming\npm\node_modules\staticrypt\cli\index.js"
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    r = subprocess.run(
+        [node, staticrypt,
+         "docs/index.html",
+         "--password", PAGES_PASSWORD,
+         "--directory", "docs",
+         "--short",
+         "--remember", "0",
+         "--config", "false"],
+        capture_output=True, text=True, cwd=base_dir
+    )
+    if r.returncode != 0:
+        print(f"StatiCrypt error: {r.stderr or r.stdout}")
+    else:
+        print("Encrypted successfully — password is not visible in the published HTML.")
     print("Generated docs/index.html — data loads live from Supabase in the browser.")
 
 
