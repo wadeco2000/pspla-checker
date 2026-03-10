@@ -2824,13 +2824,19 @@ HTML_TEMPLATE = """
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(payload)
-            }).then(function(r) { return r.json(); }).then(function(d) {
-                if (d.ok) {
-                    closeNzsaModal();
-                } else {
-                    alert('Could not open browser: ' + (d.error || 'unknown error'));
+            }).then(function(r) {
+                var status = r.status;
+                return r.text().then(function(txt) {
+                    console.log('open-nzsa-report response', status, txt.substring(0, 300));
+                    if (status === 200) {
+                        closeNzsaModal();
+                        return;
+                    }
+                    var msg = 'unknown error';
+                    try { var d = JSON.parse(txt); msg = d.error || msg; } catch(e) { msg = txt.substring(0, 200); }
+                    alert('Could not open browser: ' + msg);
                     if (openBtn) { openBtn.textContent = 'Open Report Form'; openBtn.disabled = false; }
-                }
+                });
             }).catch(function(e) {
                 alert('Error: ' + e);
                 if (openBtn) { openBtn.textContent = 'Open Report Form'; openBtn.disabled = false; }
