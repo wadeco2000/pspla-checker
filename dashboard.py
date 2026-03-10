@@ -365,6 +365,13 @@ HTML_TEMPLATE = """
           <span>Export CSV<span class="dd-sub">Download all companies as CSV</span></span>
         </button>
 
+        <form method="POST" action="/backup-db">
+          <button type="submit" class="dd-item">
+            <i class="fa-solid fa-cloud-arrow-up dd-icon" style="color:#8e44ad;"></i>
+            <span>Backup Now<span class="dd-sub">Save CSV to local folder + Dropbox</span></span>
+          </button>
+        </form>
+
         <div class="dd-divider"></div>
 
         <button type="button" class="dd-item danger" onclick="document.getElementById('clear-db-modal').style.display='flex'; closeMenus();">
@@ -2726,6 +2733,75 @@ def dedupe_db():
         import traceback as _tb
         print(f"  [Dedupe error] {e}\n{_tb.format_exc()}")
         return redirect(url_for("index", message=f"Dedupe error: {e}", type="error"))
+
+
+@app.route("/backup-db", methods=["POST"])
+def backup_db():
+    companies = get_companies()
+    if not companies:
+        return redirect(url_for("index", message="Nothing to back up — database is empty.", type="error"))
+
+    fields = [
+        "company_name", "website_url", "region", "phone", "email", "address",
+        "facebook_url", "linkedin_url",
+        "nzsa_member", "nzsa_accredited", "nzsa_grade", "nzsa_member_name",
+        "nzsa_contact_name", "nzsa_phone", "nzsa_email",
+        "pspla_licensed", "pspla_name", "pspla_license_number",
+        "pspla_license_status", "pspla_license_expiry", "license_type",
+        "match_method", "match_reason", "individual_license", "director_name",
+        "companies_office_name", "companies_office_address",
+        "companies_office_number", "nzbn", "date_added", "last_checked", "notes"
+    ]
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    for c in companies:
+        writer.writerow({f: c.get(f, "") or "" for f in fields})
+    csv_data = output.getvalue()
+
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    filename = f"pspla_backup_{timestamp}.csv"
+    notes = []
+
+    # Local backup
+    backup_dir = os.path.join(BASE_DIR, "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+    try:
+        with open(os.path.join(backup_dir, filename), "w", encoding="utf-8", newline="") as f:
+            f.write(csv_data)
+        notes.append(f"Local: backups/{filename}")
+    except Exception as e:
+        notes.append(f"Local FAILED: {e}")
+
+    # Dropbox
+    if DROPBOX_TOKEN:
+        try:
+            resp = requests.post(
+                "https://content.dropboxapi.com/2/files/upload",
+                headers={
+                    "Authorization": f"Bearer {DROPBOX_TOKEN}",
+                    "Dropbox-API-Arg": json.dumps({
+                        "path": f"/pspla-backup/{filename}",
+                        "mode": "add",
+                        "autorename": True,
+                        "mute": False
+                    }),
+                    "Content-Type": "application/octet-stream"
+                },
+                data=csv_data.encode("utf-8"),
+                timeout=30
+            )
+            if resp.status_code == 200:
+                notes.append(f"Dropbox: /Apps/pspla-backup/{filename}")
+            else:
+                notes.append(f"Dropbox FAILED: {resp.text[:200]}")
+        except Exception as e:
+            notes.append(f"Dropbox FAILED: {e}")
+    else:
+        notes.append("Dropbox token not set — skipped")
+
+    msg = f"Backup complete ({len(companies)} records). " + " | ".join(notes)
+    return redirect(url_for("index", message=msg, type="success"))
 
 
 @app.route("/clear-db", methods=["POST"])
