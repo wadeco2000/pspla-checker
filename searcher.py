@@ -370,31 +370,44 @@ def get_google_business_profile(company_name, region=""):
             return None
         return raw
 
-    query = f'"{company_name}"'
-    if region:
-        query += f" {region}"
-    query += " New Zealand"
+    region_suffix = (f" {region}" if region else "") + " New Zealand"
+    # Try quoted first (more precise), fall back to unquoted if no panel/local results.
+    # Short or generic names (e.g. "Code 9") rarely trigger a knowledge panel when
+    # quoted because the query is too restrictive for Google's local index.
+    queries_to_try = [
+        f'"{company_name}"{region_suffix}',
+        f'{company_name}{region_suffix}',
+    ]
 
-    try:
-        response = requests.get(
-            "https://serpapi.com/search",
-            params={
-                "api_key": SERPAPI_KEY,
-                "engine": "google",
-                "q": query,
-                "num": 5,       # small — we mainly want the panel sections
-                "gl": "nz",
-                "hl": "en",
-            },
-            timeout=15,
-        )
-        data = response.json()
-    except Exception as e:
-        print(f"  [Google profile error] {e}")
-        return result
+    data = {}
+    for query in queries_to_try:
+        try:
+            response = requests.get(
+                "https://serpapi.com/search",
+                params={
+                    "api_key": SERPAPI_KEY,
+                    "engine": "google",
+                    "q": query,
+                    "num": 5,
+                    "gl": "nz",
+                    "hl": "en",
+                },
+                timeout=15,
+            )
+            data = response.json()
+        except Exception as e:
+            print(f"  [Google profile error] {e}")
+            return result
 
-    if "error" in data:
-        return result
+        if "error" in data:
+            return result
+
+        # If we got a knowledge panel or local results, use this response
+        if data.get("knowledge_graph") or data.get("local_results"):
+            print(f"  [Google profile] Found panel/local results with query: {query!r}")
+            break
+    # If neither query produced a panel, data holds the last response (still useful
+    # for organic snippet email scanning)
 
     # ── Knowledge Graph ───────────────────────────────────────────────────────
     kg = data.get("knowledge_graph", {})
