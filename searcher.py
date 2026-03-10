@@ -1795,16 +1795,42 @@ def verify_pspla_match(website_company, pspla_company, website_region, pspla_add
     # "guard" vs "guardian", etc. without a Claude call.
     _GENERIC = {'limited', 'security', 'services', 'solutions', 'systems', 'group',
                 'new', 'zealand', 'national', 'management', 'alarm', 'alarms',
-                'install', 'installer', 'surveillance', 'protection'}
+                'install', 'installer', 'surveillance', 'protection', 'electrical',
+                'plumbing', 'construction', 'engineering', 'contracting', 'maintenance'}
+    # Geographic qualifiers that can legitimately prefix a PSPLA name without indicating
+    # a different company (e.g. "Southern Guardian Security" for "Guardian Security")
+    _GEO_QUALIFIERS = {'north', 'south', 'east', 'west', 'central', 'upper', 'lower',
+                       'greater', 'northern', 'southern', 'eastern', 'western', 'outer',
+                       'inner', 'auckland', 'wellington', 'canterbury', 'otago', 'waikato',
+                       'nelson', 'tasman', 'marlborough', 'northland', 'hawkes', 'manawatu'}
     company_sig = [w for w in _re.findall(r'[a-z]+', website_company.lower())
                    if len(w) >= 4 and w not in _GENERIC]
-    pspla_exact = set(_re.findall(r'[a-z]+', pspla_company.lower()))
+    pspla_words = _re.findall(r'[a-z]+', pspla_company.lower())
+    pspla_exact = set(pspla_words)
     if company_sig:
         missing = [w for w in company_sig if w not in pspla_exact]
         if missing and len(missing) == len(company_sig):
             # Every distinctive word is absent — definitely not the same company
             return {"match": False, "confidence": "high",
                     "reason": f"Distinctive word(s) {missing} not found as exact words in PSPLA name"}
+
+    # Reverse check: if PSPLA name has distinctive words as a PREFIX that don't appear
+    # in the website company name, it's likely a different entity.
+    # e.g. website="Livewire Electrical", PSPLA="Addz Livewire Electrical"
+    # "addz" is a distinctive prefix → different company.
+    # Exception: geographic qualifiers are allowed (e.g. "Southern Guardian Security")
+    website_exact = set(_re.findall(r'[a-z]+', website_company.lower()))
+    first_website_idx = next(
+        (i for i, w in enumerate(pspla_words) if w in website_exact),
+        len(pspla_words)
+    )
+    if first_website_idx > 0:
+        prefix_words = pspla_words[:first_website_idx]
+        distinctive_prefix = [w for w in prefix_words
+                               if len(w) >= 4 and w not in _GENERIC and w not in _GEO_QUALIFIERS]
+        if distinctive_prefix:
+            return {"match": False, "confidence": "high",
+                    "reason": f"PSPLA name has distinctive prefix word(s) {distinctive_prefix} not present in website company name — indicates a different entity"}
 
     # Load and inject relevant lessons
     relevant_lessons = _get_relevant_lessons(website_company, pspla_company)
@@ -3054,9 +3080,27 @@ def check_nzsa(company_name, website=None):
     query_words = set(query_norm.split())
 
     # Generic words that alone don't identify a company
+    # "electrical", "plumbing", "construction" etc. are industry-generic — many unrelated
+    # companies share these words, so they must NOT count as a significant match signal.
     _GENERIC = {"security", "services", "solutions", "systems", "alarm", "alarms",
                 "group", "install", "camera", "cctv", "surveillance", "protection",
-                "management", "response", "patrol", "guard", "monitoring"}
+                "management", "response", "patrol", "guard", "monitoring",
+                "electrical", "plumbing", "construction", "building", "engineering",
+                "contracting", "contractors", "maintenance", "support", "technology",
+                "technologies", "consulting", "consultants"}
+
+    # Free/generic email providers — domain match against these is meaningless
+    _FREE_EMAIL = {"gmail.com", "hotmail.com", "yahoo.com", "outlook.com",
+                   "xtra.co.nz", "yahoo.co.nz", "icloud.com", "live.com",
+                   "me.com", "msn.com"}
+
+    def _email_domain(s):
+        """Extract domain from an email address or URL."""
+        s = (s or "").lower().strip()
+        if "@" in s:
+            return s.split("@")[-1]
+        d = _re.sub(r'^https?://(www\.)?', '', s).rstrip("/")
+        return d.split("/")[0] if d else ""
 
     sig_words = query_words - _GENERIC
 
@@ -3085,7 +3129,6 @@ def check_nzsa(company_name, website=None):
             continue
 
         # Score: significant word hits * 3, generic word hits * 1
-        # Penalise if many words don't match
         score = len(sig_common) * 3 + len(common - sig_common)
         # Require at least 1 significant word match
         if sig_common:
@@ -3096,6 +3139,20 @@ def check_nzsa(company_name, website=None):
 
     # Require score >= 3 (at least one significant word match)
     if best_member and best_score >= 3:
+        # Domain mismatch guard: if the company website domain and the NZSA member's
+        # email/website domain are both company-specific and clearly different, reject.
+        # This catches "Livewire Electrical" matching "Sefton Electrical" via shared
+        # generic industry word when domains are completely unrelated.
+        company_dom = _email_domain(website) if website else ""
+        member_dom = (_email_domain(best_member.get("email") or "")
+                      or _email_domain(best_member.get("website") or ""))
+        if (company_dom and member_dom
+                and company_dom not in _FREE_EMAIL
+                and member_dom not in _FREE_EMAIL
+                and company_dom != member_dom):
+            print(f"  [NZSA] Domain mismatch: company={company_dom}, member={member_dom} — rejecting '{best_member['name']}'")
+            return {"member": False, "member_name": None, "accredited": False, "grade": None,
+                    "contact_name": None, "phone": None, "email": None, "overview": None}
         return _member_hit(best_member)
 
     return {"member": False, "member_name": None, "accredited": False, "grade": None,
