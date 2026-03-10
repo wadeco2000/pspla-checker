@@ -6397,84 +6397,74 @@ def _scheduled_directories():
 
 @app.route("/open-nzsa-report", methods=["POST"])
 def open_nzsa_report():
-    import tempfile, subprocess, sys, json as _json, os as _os
+    import tempfile, subprocess, sys, json as _json, traceback as _tb
     try:
-        import playwright  # noqa: F401
-    except ImportError:
-        return jsonify({"ok": False, "error":
-            "Playwright not installed. Run: pip install playwright && "
-            "python -m playwright install chromium"})
-
-    try:
-      data = request.get_json(force=True)
-
-      # Write the form data to a temp JSON file
-      tmp_data = tempfile.NamedTemporaryFile(mode="w", suffix=".json",
-                                             delete=False, encoding="utf-8")
-      _json.dump(data, tmp_data)
-      tmp_data.flush()
-      tmp_data.close()
-
-      # Write the Playwright fill script to a temp .py file
-      script_src = r"""
-import sys, json, os
-try:
-    from playwright.sync_api import sync_playwright
-except ImportError:
-    sys.exit("Playwright not installed")
-
-data_path = sys.argv[1]
-data = json.load(open(data_path, encoding="utf-8"))
-
-def fill(page, sel, val):
-    if val:
         try:
-            page.wait_for_selector(sel, timeout=5000)
-            page.fill(sel, val)
-        except Exception as e:
-            print(f"  Could not fill {sel}: {e}")
+            import playwright  # noqa: F401
+        except Exception:
+            pass  # will fail later if really missing; don't block on import quirks
 
-with sync_playwright() as p:
-    browser = p.chromium.launch(headless=False)
-    page = browser.new_page()
-    print("Opening NZSA form...")
-    page.goto("https://security.org.nz/public-info/report-unlicensed-operators/")
-    page.wait_for_load_state("networkidle", timeout=30000)
-    fill(page, "#input_13_2_3", data.get("fname", ""))
-    fill(page, "#input_13_2_6", data.get("lname", ""))
-    fill(page, "#input_13_3",   data.get("email", ""))
-    fill(page, "#input_13_4",   data.get("mobile", ""))
-    fill(page, "#input_13_6",   data.get("party_name", ""))
-    fill(page, "#input_13_7",   data.get("location", ""))
-    fill(page, "#input_13_8",   data.get("evidence", ""))
-    print("Form filled. Review the form and click Submit when ready.")
-    try:
-        page.wait_for_event("close", timeout=600000)
-    except Exception:
-        pass
+        data = request.get_json(force=True) or {}
 
-try:
-    os.unlink(data_path)
-except Exception:
-    pass
-"""
-      tmp_script = tempfile.NamedTemporaryFile(mode="w", suffix=".py",
-                                               delete=False, encoding="utf-8")
-      tmp_script.write(script_src)
-      tmp_script.flush()
-      tmp_script.close()
+        # Write form data to a temp JSON file
+        tmp_data = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8")
+        _json.dump(data, tmp_data)
+        tmp_data.flush()
+        tmp_data.close()
 
-      # Launch detached so it doesn't block the Flask response
-      CREATE_NO_WINDOW = 0x08000000
-      subprocess.Popen(
-          [sys.executable, tmp_script.name, tmp_data.name],
-          creationflags=CREATE_NO_WINDOW,
-          close_fds=True
-      )
-      return jsonify({"ok": True})
+        # Build the Playwright fill script
+        script_lines = [
+            "import sys, json, os",
+            "from playwright.sync_api import sync_playwright",
+            "data = json.load(open(sys.argv[1], encoding='utf-8'))",
+            "def fill(page, sel, val):",
+            "    if val:",
+            "        try:",
+            "            page.wait_for_selector(sel, timeout=5000)",
+            "            page.fill(sel, val)",
+            "        except Exception as e:",
+            "            print('Could not fill', sel, e)",
+            "with sync_playwright() as p:",
+            "    browser = p.chromium.launch(headless=False)",
+            "    page = browser.new_page()",
+            "    page.goto('https://security.org.nz/public-info/report-unlicensed-operators/')",
+            "    page.wait_for_load_state('networkidle', timeout=30000)",
+            "    fill(page, '#input_13_2_3', data.get('fname', ''))",
+            "    fill(page, '#input_13_2_6', data.get('lname', ''))",
+            "    fill(page, '#input_13_3',   data.get('email', ''))",
+            "    fill(page, '#input_13_4',   data.get('mobile', ''))",
+            "    fill(page, '#input_13_6',   data.get('party_name', ''))",
+            "    fill(page, '#input_13_7',   data.get('location', ''))",
+            "    fill(page, '#input_13_8',   data.get('evidence', ''))",
+            "    print('Form filled.')",
+            "    try:",
+            "        page.wait_for_event('close', timeout=600000)",
+            "    except Exception:",
+            "        pass",
+            "try:",
+            "    os.unlink(sys.argv[1])",
+            "except Exception:",
+            "    pass",
+        ]
+        script_src = "\n".join(script_lines) + "\n"
+
+        tmp_script = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".py", delete=False, encoding="utf-8")
+        tmp_script.write(script_src)
+        tmp_script.flush()
+        tmp_script.close()
+
+        # Launch detached — Flask responds immediately, browser stays open
+        CREATE_NO_WINDOW = 0x08000000
+        subprocess.Popen(
+            [sys.executable, tmp_script.name, tmp_data.name],
+            creationflags=CREATE_NO_WINDOW,
+        )
+        return jsonify({"ok": True})
     except Exception as _e:
-      import traceback
-      return jsonify({"ok": False, "error": str(_e), "trace": traceback.format_exc()})
+        print("open-nzsa-report ERROR:", _tb.format_exc())
+        return jsonify({"ok": False, "error": str(_e)})
 
 
 if __name__ == "__main__":
