@@ -238,7 +238,7 @@ HTML_TEMPLATE = """
                         </form>
                     </span>
                 </span>
-                <form method="POST" action="/dedupe-db" onsubmit="return confirm('Merge duplicate company names? Keeps the best record and combines all regions into one entry.')">
+                <form method="POST" action="/dedupe-db" onsubmit="return confirm('Find and merge duplicate companies?\n\nGroups by: matching name, same domain, or same Facebook URL.\nKeeps the record with the most data (licensed > filled fields > oldest).\nAll data from duplicates is merged into the surviving record — nothing is lost.\nAn audit entry is written for every merge.')">
                     <button class="btn" style="background:#8e44ad; color:white;"><i class="fa-solid fa-filter"></i> Dedupe DB</button>
                 </form>
                 <button class="btn" style="background:#e74c3c; color:white;"
@@ -2254,64 +2254,250 @@ def start_directory_import():
 
 @app.route("/dedupe-db", methods=["POST"])
 def dedupe_db():
-    """Merge duplicate company names into one record, combining all regions.
-    Keeps the record with the most contact info (phone/email), deletes the rest."""
+    """Merge duplicate companies into one record, preserving ALL data.
+    Groups by: (1) normalised name, (2) same root_domain, (3) same FB URL slug.
+    Keeper = record with most valuable data (licensed > filled fields > lowest id).
+    Merges all non-null fields from duplicates into keeper — nothing is lost.
+    Writes an audit entry for every merge.
+    """
     if _search_process_alive():
         return redirect(url_for("index", message="Cannot dedupe while a search is running — stop it first.", type="error"))
+    import re as _re
+    try:
+        from searcher import write_audit
+    except Exception:
+        write_audit = None
+
     try:
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
         patch_headers = {**headers, "Content-Type": "application/json", "Prefer": "return=minimal"}
+        del_headers   = {**headers, "Content-Type": "application/json"}
 
-        # Fetch all — use high limit to avoid PostgREST default 1000-row cap
+        # Fetch ALL fields so we can merge without losing anything
         resp = requests.get(
-            f"{SUPABASE_URL}/rest/v1/Companies?select=id,company_name,region,phone,email&order=id.asc&limit=10000",
-            headers=headers)
+            f"{SUPABASE_URL}/rest/v1/Companies?select=*&order=id.asc&limit=10000",
+            headers=headers, timeout=30)
         rows = resp.json()
+        if not isinstance(rows, list):
+            return redirect(url_for("index", message=f"Dedupe error: unexpected response from Supabase", type="error"))
 
-        # Group by normalised name only
-        groups = {}
-        for row in rows:
-            name = (row.get("company_name") or "").strip().lower()
-            groups.setdefault(name, []).append(row)
+        # ── Helpers ────────────────────────────────────────────────────
+        def norm_name(name):
+            """Normalise company name for grouping: lowercase, strip punctuation,
+            remove common legal suffixes so 'ABC Security Ltd' == 'ABC Security'."""
+            n = (name or "").lower().strip()
+            n = _re.sub(r"[^\w\s]", " ", n)
+            for suffix in [r"\bnew zealand\b", r"\bnz\b", r"\blimited\b", r"\bltd\b",
+                           r"\bl t d\b", r"\bco\b", r"\bllc\b", r"\bpty\b", r"\binc\b"]:
+                n = _re.sub(suffix + r"\s*$", "", n)
+            return _re.sub(r"\s+", " ", n).strip()
 
-        to_delete = []
-        to_update = []  # (id, merged_region_string)
+        def norm_fb_slug(url):
+            """Extract and normalise the Facebook page slug from a URL."""
+            if not url:
+                return None
+            m = _re.search(r"facebook\.com/([^/?#&]+)", url.lower())
+            slug = m.group(1).rstrip("/") if m else None
+            return slug if slug and slug not in ("pages", "groups", "profile.php") else None
 
-        for name_key, group in groups.items():
-            if len(group) < 2:
-                continue
+        # Fields to merge from duplicates into keeper (everything meaningful)
+        MERGE_FIELDS = [
+            "website_url", "phone", "email", "address",
+            "pspla_licensed", "pspla_name", "pspla_address", "pspla_license_number",
+            "pspla_license_status", "pspla_license_expiry", "pspla_license_classes",
+            "pspla_license_start", "pspla_permit_type", "license_type",
+            "match_method", "match_reason",
+            "companies_office_name", "companies_office_address", "companies_office_number",
+            "nzbn", "co_status", "co_incorporated", "individual_license", "director_name",
+            "facebook_url", "fb_followers", "fb_phone", "fb_email", "fb_address",
+            "fb_description", "fb_category", "fb_rating",
+            "fb_alarm_systems", "fb_cctv_cameras", "fb_alarm_monitoring",
+            "linkedin_url", "linkedin_followers", "linkedin_description", "linkedin_industry",
+            "linkedin_location", "linkedin_website", "linkedin_size",
+            "nzsa_member", "nzsa_member_name", "nzsa_accredited", "nzsa_grade",
+            "nzsa_contact_name", "nzsa_phone", "nzsa_email", "nzsa_overview",
+            "has_alarm_systems", "has_cctv_cameras", "has_alarm_monitoring",
+            "google_rating", "google_reviews", "google_phone", "google_address", "google_email",
+            "root_domain", "source_url", "notes",
+        ]
+        # Boolean fields: use OR across group (True from any record wins)
+        BOOL_OR_FIELDS = {
+            "pspla_licensed", "individual_license",
+            "nzsa_member", "nzsa_accredited",
+            "has_alarm_systems", "has_cctv_cameras", "has_alarm_monitoring",
+            "fb_alarm_systems", "fb_cctv_cameras", "fb_alarm_monitoring",
+        }
 
-            # Collect all unique regions across the group (preserving original capitalisation)
+        def keeper_score(r):
+            score = 0
+            v = r.get("pspla_licensed")
+            if v is True or v == "true":   score += 10
+            if r.get("pspla_name"):        score += 3
+            if r.get("companies_office_name"): score += 2
+            v2 = r.get("nzsa_member")
+            if v2 is True or v2 == "true": score += 2
+            if r.get("facebook_url"):      score += 1
+            if r.get("linkedin_url"):      score += 1
+            # Count non-empty fields as a tiebreaker
+            for f in MERGE_FIELDS:
+                val = r.get(f)
+                if val is not None and val != "" and val is not False:
+                    score += 0.1
+            return score
+
+        def is_empty(val):
+            return val is None or val == "" or (isinstance(val, str) and val.lower() in ("none", "null"))
+
+        def merge_group(group, match_type, match_key):
+            """Merge a list of duplicate rows. Returns (keeper_id, patch_payload, dup_ids)."""
+            group = sorted(group, key=lambda r: (-keeper_score(r), r["id"]))
+            keeper = group[0]
+            dups   = group[1:]
+
+            patch = {}
+
+            # Regions: merge unique values across group
             seen_regions = []
+            seen_lower   = set()
             for r in group:
                 for reg in (r.get("region") or "").split(","):
                     reg = reg.strip()
-                    if reg and reg.lower() not in [s.lower() for s in seen_regions]:
+                    if reg and reg.lower() not in seen_lower:
                         seen_regions.append(reg)
+                        seen_lower.add(reg.lower())
             merged_region = ", ".join(seen_regions)
+            if merged_region != (keeper.get("region") or ""):
+                patch["region"] = merged_region
 
-            # Keep the record with the most contact info, then lowest id
-            def score(r):
-                return (1 if r.get("phone") else 0) + (1 if r.get("email") else 0)
-            group.sort(key=lambda r: (-score(r), r["id"]))
-            keeper = group[0]
-            to_update.append((keeper["id"], merged_region))
-            for dup in group[1:]:
-                to_delete.append(dup["id"])
+            # date_added: keep the earliest across group
+            dates = [r.get("date_added") for r in group if r.get("date_added")]
+            if dates:
+                earliest = min(dates)
+                if earliest != keeper.get("date_added"):
+                    patch["date_added"] = earliest
 
-        for rid, merged_region in to_update:
-            requests.patch(
-                f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{rid}",
-                headers=patch_headers,
-                json={"region": merged_region})
+            # Notes: concatenate non-empty notes from dups into keeper
+            keeper_notes = (keeper.get("notes") or "").strip()
+            extra_notes  = []
+            for d in dups:
+                dn = (d.get("notes") or "").strip()
+                if dn and dn != keeper_notes:
+                    extra_notes.append(f"[merged from ID {d['id']}] {dn}")
+            if extra_notes:
+                combined = (keeper_notes + "\n" + "\n".join(extra_notes)).strip()
+                patch["notes"] = combined
 
-        for rid in to_delete:
-            requests.delete(f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{rid}",
-                            headers={**headers, "Content-Type": "application/json"})
+            # Per-field merge
+            for field in MERGE_FIELDS:
+                if field == "notes":
+                    continue  # handled above
+                if field in BOOL_OR_FIELDS:
+                    # True wins — if any record in group has True, keeper gets True
+                    for r in group:
+                        v = r.get(field)
+                        if v is True or v == "true":
+                            if not (keeper.get(field) is True or keeper.get(field) == "true"):
+                                patch[field] = True
+                            break
+                else:
+                    # First non-empty value wins (keeper first, then dups in score order)
+                    if not is_empty(keeper.get(field)):
+                        continue  # keeper already has it
+                    for d in dups:
+                        dv = d.get(field)
+                        if not is_empty(dv):
+                            patch[field] = dv
+                            break
 
-        msg = f"Deduplication complete — {len(to_delete)} duplicate(s) merged and removed."
+            return keeper, patch, dups
+
+        # ── Grouping passes ────────────────────────────────────────────
+        claimed_ids = set()
+        groups_to_merge = []  # list of (match_type, match_key, [rows])
+
+        # Pass 1: exact normalised name
+        name_map = {}
+        for row in rows:
+            key = norm_name(row.get("company_name"))
+            if key:
+                name_map.setdefault(key, []).append(row)
+        for key, grp in name_map.items():
+            if len(grp) >= 2:
+                groups_to_merge.append(("name", key, grp))
+                for r in grp:
+                    claimed_ids.add(r["id"])
+
+        # Pass 2: same root_domain (unclaimed rows only)
+        domain_map = {}
+        for row in rows:
+            if row["id"] in claimed_ids:
+                continue
+            dom = (row.get("root_domain") or "").strip().lower()
+            if dom and dom not in ("", "none", "null"):
+                domain_map.setdefault(dom, []).append(row)
+        for dom, grp in domain_map.items():
+            if len(grp) >= 2:
+                groups_to_merge.append(("domain", dom, grp))
+                for r in grp:
+                    claimed_ids.add(r["id"])
+
+        # Pass 3: same Facebook URL slug (unclaimed rows only)
+        fb_map = {}
+        for row in rows:
+            if row["id"] in claimed_ids:
+                continue
+            slug = norm_fb_slug(row.get("facebook_url"))
+            if slug:
+                fb_map.setdefault(slug, []).append(row)
+        for slug, grp in fb_map.items():
+            if len(grp) >= 2:
+                groups_to_merge.append(("facebook", slug, grp))
+                for r in grp:
+                    claimed_ids.add(r["id"])
+
+        if not groups_to_merge:
+            return redirect(url_for("index", message="No duplicates found.", type="success"))
+
+        # ── Merge and delete ───────────────────────────────────────────
+        deleted_count = 0
+        group_count   = len(groups_to_merge)
+
+        for match_type, match_key, group in groups_to_merge:
+            keeper, patch, dups = merge_group(group, match_type, match_key)
+            dup_desc = ", ".join(f"ID {d['id']} ({d.get('company_name','')})" for d in dups)
+            fields_merged = [k for k in patch if k not in ("region", "date_added")]
+
+            # Patch keeper with merged data
+            if patch:
+                requests.patch(
+                    f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{keeper['id']}",
+                    headers=patch_headers, json=patch, timeout=15)
+
+            # Audit entry on the keeper
+            audit_note = (
+                f"Dedupe ({match_type} match: '{match_key}'): "
+                f"merged {len(dups)} duplicate(s) into this record — "
+                f"deleted: {dup_desc}. "
+                + (f"Fields enriched from duplicates: {', '.join(fields_merged)}." if fields_merged else "No new fields needed.")
+            )
+            if write_audit:
+                write_audit("updated", str(keeper["id"]), keeper.get("company_name", ""),
+                            changes=audit_note, triggered_by="manual-dedupe")
+
+            # Delete duplicates
+            for dup in dups:
+                requests.delete(
+                    f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{dup['id']}",
+                    headers=del_headers, timeout=15)
+                deleted_count += 1
+
+        msg = (f"Deduplication complete — {deleted_count} duplicate(s) removed across "
+               f"{group_count} group(s). All data preserved in the surviving records.")
         return redirect(url_for("index", message=msg, type="success"))
+
     except Exception as e:
+        import traceback as _tb
+        print(f"  [Dedupe error] {e}\n{_tb.format_exc()}")
         return redirect(url_for("index", message=f"Dedupe error: {e}", type="error"))
 
 
