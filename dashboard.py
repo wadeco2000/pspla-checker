@@ -4016,7 +4016,7 @@ function render() {
       + '<td class="co">' + escHtml(r.company_name||'-') + '</td>'
       + '<td class="changes">' + escHtml(r.changes||'') + notes + '</td>'
       + '<td class="tby">' + escHtml(r.triggered_by||'') + '</td>'
-      + '<td>' + (r.action === 'updated' ? '<button onclick="doRollback(' + r.id + ',\'' + (r.company_name||'').replace(/'/g,"\\\'") + '\')" style="padding:2px 8px;font-size:11px;background:#922b21;color:white;border:none;border-radius:3px;cursor:pointer;white-space:nowrap">Revert</button>' : '') + '</td>'
+      + '<td>' + (r.action === 'updated' ? '<button onclick="doRollback(' + r.id + ')" style="padding:2px 8px;font-size:11px;background:#922b21;color:white;border:none;border-radius:3px;cursor:pointer;white-space:nowrap">Revert</button>' : '') + '</td>'
       + '</tr>';
   });
   document.getElementById('auditBody').innerHTML = html || '<tr><td colspan="6" style="color:#aaa;padding:20px">No entries match.</td></tr>';
@@ -4024,7 +4024,9 @@ function render() {
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-function doRollback(auditId, companyName) {
+function doRollback(auditId) {
+  var entry = _data.find(function(r) { return r.id === auditId; });
+  var companyName = entry ? (entry.company_name || 'this company') : 'this company';
   if (!confirm('Revert "' + companyName + '" to the state before this change?\n\nThis will overwrite the current record and cannot be undone.')) return;
   fetch('/rollback-to-snapshot', {
     method: 'POST',
