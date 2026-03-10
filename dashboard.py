@@ -6399,17 +6399,18 @@ def open_nzsa_report():
             "Playwright not installed. Run: pip install playwright && "
             "python -m playwright install chromium"})
 
-    data = request.get_json(force=True)
+    try:
+      data = request.get_json(force=True)
 
-    # Write the form data to a temp JSON file
-    tmp_data = tempfile.NamedTemporaryFile(mode="w", suffix=".json",
-                                           delete=False, encoding="utf-8")
-    _json.dump(data, tmp_data)
-    tmp_data.flush()
-    tmp_data.close()
+      # Write the form data to a temp JSON file
+      tmp_data = tempfile.NamedTemporaryFile(mode="w", suffix=".json",
+                                             delete=False, encoding="utf-8")
+      _json.dump(data, tmp_data)
+      tmp_data.flush()
+      tmp_data.close()
 
-    # Write the Playwright fill script to a temp .py file
-    script_src = r"""
+      # Write the Playwright fill script to a temp .py file
+      script_src = r"""
 import sys, json, os
 try:
     from playwright.sync_api import sync_playwright
@@ -6451,20 +6452,23 @@ try:
 except Exception:
     pass
 """
-    tmp_script = tempfile.NamedTemporaryFile(mode="w", suffix=".py",
-                                              delete=False, encoding="utf-8")
-    tmp_script.write(script_src)
-    tmp_script.flush()
-    tmp_script.close()
+      tmp_script = tempfile.NamedTemporaryFile(mode="w", suffix=".py",
+                                               delete=False, encoding="utf-8")
+      tmp_script.write(script_src)
+      tmp_script.flush()
+      tmp_script.close()
 
-    # Launch detached so it doesn't block the Flask response
-    CREATE_NO_WINDOW = 0x08000000
-    subprocess.Popen(
-        [sys.executable, tmp_script.name, tmp_data.name],
-        creationflags=CREATE_NO_WINDOW,
-        close_fds=True
-    )
-    return jsonify({"ok": True})
+      # Launch detached so it doesn't block the Flask response
+      CREATE_NO_WINDOW = 0x08000000
+      subprocess.Popen(
+          [sys.executable, tmp_script.name, tmp_data.name],
+          creationflags=CREATE_NO_WINDOW,
+          close_fds=True
+      )
+      return jsonify({"ok": True})
+    except Exception as _e:
+      import traceback
+      return jsonify({"ok": False, "error": str(_e), "trace": traceback.format_exc()})
 
 
 if __name__ == "__main__":
