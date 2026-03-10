@@ -1051,7 +1051,7 @@ HTML_TEMPLATE = """
         </div>
         <p style="color:#666; font-size:12px; margin:0 0 12px;">
           When enabled, searches run automatically on the schedule below.
-          The dashboard must be running on your PC for scheduled searches to fire.
+          The dashboard process must be running on your PC (tray icon visible) — the browser tab does not need to be open.
         </p>
         <table style="width:100%; font-size:13px; border-collapse:collapse;">
           <thead>
