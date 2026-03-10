@@ -6398,6 +6398,7 @@ def _scheduled_directories():
 @app.route("/open-nzsa-report", methods=["POST"])
 def open_nzsa_report():
     import tempfile, subprocess, sys, json as _json, traceback as _tb
+    from flask import jsonify
     try:
         try:
             import playwright  # noqa: F401
