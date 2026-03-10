@@ -3169,6 +3169,7 @@ def check_nzsa(company_name, website=None):
 
     best_score = 0
     best_member = None
+    best_sig_common = set()
 
     for m in members:
         m_norm = _normalise_company_name(m["name"])
@@ -3195,10 +3196,10 @@ def check_nzsa(company_name, website=None):
         score = len(sig_common) * 3 + len(common - sig_common)
         # Require at least 1 significant word match
         if sig_common:
-            best_score = max(best_score, score)
             if score >= best_score:
                 best_score = score
                 best_member = m
+                best_sig_common = sig_common
 
     # Require score >= 3 (at least one significant word match)
     if best_member and best_score >= 3:
@@ -3217,6 +3218,20 @@ def check_nzsa(company_name, website=None):
         company_dom = _email_domain(website) if website else ""
         member_dom = (_email_domain(best_member.get("email") or "")
                       or _email_domain(best_member.get("website") or ""))
+
+        # When the domain check is bypassed (directory/no website), word matching is
+        # the only guard. Require either 2+ significant word hits OR a single word
+        # that is long enough to be uniquely identifying (>= 6 chars).
+        # This blocks short colour/adjective words like "red", "blue" from creating
+        # false matches between unrelated companies.
+        is_directory = (not company_dom or company_dom in _DIRECTORY_DOMAINS)
+        if is_directory:
+            strong_single = any(len(w) >= 6 for w in best_sig_common)
+            if not (len(best_sig_common) >= 2 or strong_single):
+                print(f"  [NZSA] Weak match rejected (directory website, sig={best_sig_common}): '{best_member['name']}'")
+                return {"member": False, "member_name": None, "accredited": False, "grade": None,
+                        "contact_name": None, "phone": None, "email": None, "overview": None}
+
         if (company_dom and member_dom
                 and company_dom not in _FREE_EMAIL
                 and company_dom not in _DIRECTORY_DOMAINS
