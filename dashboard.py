@@ -4207,7 +4207,16 @@ def recheck_companies_office_for_company():
     _rl = _recheck_log_capture(); _rl.__enter__()
     try:
         from searcher import check_companies_office, write_audit
+        print(f"[Companies Office] Searching for: {company_name}")
         result = check_companies_office(company_name)
+        if result.get("name"):
+            print(f"[Companies Office] Found: {result['name']} | Status: {result.get('status')} | NZBN: {result.get('nzbn')}")
+            if result.get("directors"):
+                print(f"[Companies Office] Directors: {', '.join(result['directors'])}")
+            if result.get("address"):
+                print(f"[Companies Office] Address: {result['address']}")
+        else:
+            print(f"[Companies Office] Not found on Companies Register")
         patch = {
             "companies_office_name":    result.get("name"),
             "companies_office_address": result.get("address"),
@@ -4256,6 +4265,7 @@ def recheck_google_profile_for_company():
     _rl = _recheck_log_capture(); _rl.__enter__()
     try:
         from searcher import get_google_business_profile, write_audit
+        print(f"[Google Profile] Searching for: {company_name}" + (f" ({company_region})" if company_region else ""))
         result = get_google_business_profile(company_name, company_region)
         patch = {
             "google_rating":  result.get("rating"),
@@ -4266,12 +4276,18 @@ def recheck_google_profile_for_company():
         }
         patch = {k: v for k, v in patch.items() if v is not None}
         if patch:
+            print(f"[Google Profile] Found: rating={result.get('rating')} reviews={result.get('reviews')}")
+            if result.get("phone"):  print(f"[Google Profile] Phone: {result['phone']}")
+            if result.get("address"): print(f"[Google Profile] Address: {result['address']}")
+            if result.get("email"):  print(f"[Google Profile] Email: {result['email']}")
             headers = {
                 "apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
                 "Content-Type": "application/json", "Prefer": "return=minimal",
             }
             requests.patch(f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
                            headers=headers, json=patch)
+        else:
+            print(f"[Google Profile] No Business Profile found")
         write_audit("updated", company_id, company_name,
                     changes=f"Google profile recheck: rating={result.get('rating')} reviews={result.get('reviews')} email={result.get('email')}",
                     triggered_by="manual (dashboard)")
@@ -4469,7 +4485,17 @@ def recheck_nzsa_for_company():
         ).json()
         website = row[0].get("website") if row else None
 
+        print(f"[NZSA] Checking membership for: {company_name}")
+        if website:
+            print(f"[NZSA] Using website for domain match: {website}")
         result = check_nzsa(company_name, website=website)
+        if result["member"]:
+            print(f"[NZSA] Member found: {result['member_name']}" + (" (Accredited)" if result.get("accredited") else ""))
+            if result.get("grade"):    print(f"[NZSA] Grade: {result['grade']}")
+            if result.get("contact_name"): print(f"[NZSA] Contact: {result['contact_name']}")
+            if result.get("email"):    print(f"[NZSA] Email: {result['email']}")
+        else:
+            print(f"[NZSA] Not a member")
         patch_headers = {**headers, "Content-Type": "application/json", "Prefer": "return=minimal"}
         requests.patch(
             f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
@@ -4507,9 +4533,14 @@ def recheck_services_for_company():
     _rl = _recheck_log_capture(); _rl.__enter__()
     try:
         from searcher import scrape_website, gather_service_text, detect_services, write_audit
+        print(f"[Services] Scraping: {website_url}")
         page_text, _, _, _ = scrape_website(website_url)
+        print(f"[Services] Page scraped ({len(page_text or '')} chars) — gathering service text")
         service_text = gather_service_text(website_url, page_text)
+        print(f"[Services] Running service detection ({len(service_text or '')} chars of text)")
         services = detect_services(service_text)
+        detected = [k for k, v in services.items() if v]
+        print(f"[Services] Detected: {', '.join(detected) if detected else 'none'}")
         headers = {
             "apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
             "Content-Type": "application/json", "Prefer": "return=minimal",
@@ -4586,6 +4617,9 @@ def recheck_pspla_for_company():
     _rl = _recheck_log_capture(); _rl.__enter__()
     try:
         from searcher import check_pspla, check_pspla_individual
+        print(f"[PSPLA] Starting recheck for: {company_name}" + (f" (region: {company_region})" if company_region else ""))
+        if co_name and co_name != company_name:
+            print(f"[PSPLA] Also checking Companies Office name: {co_name}")
         # Fetch stored context to improve LLM-assisted matching
         row_resp = requests.get(
             f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}&select=director_name,companies_office_name,companies_office_address,facebook_url,linkedin_url,nzsa_member_name,nzsa_grade",
@@ -4613,6 +4647,10 @@ def recheck_pspla_for_company():
                 result = co_result
         licensed = result.get("licensed")
         pspla_name = result.get("matched_name")
+        if pspla_name:
+            print(f"[PSPLA] Match: {pspla_name} | Licensed: {licensed} | Method: {result.get('match_method')}")
+        else:
+            print(f"[PSPLA] No company licence match found")
 
         # If no active company license, check individual license using the stored director names
         individual_license = None
@@ -4620,10 +4658,12 @@ def recheck_pspla_for_company():
             director_str = request.json.get("directors", "")
             directors = [d.strip() for d in director_str.split(",") if d.strip()] if director_str else []
             for director in directors:
+                print(f"[PSPLA] Checking individual licence for director: {director}")
                 ind = check_pspla_individual(director)
                 if ind.get("found"):
                     individual_license = ind["name"]
                     licensed = True
+                    print(f"[PSPLA] Individual licence found: {individual_license}")
                     break
 
         _pspla_fields = ["pspla_name", "pspla_address", "pspla_license_number",
