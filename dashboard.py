@@ -1983,28 +1983,32 @@ HTML_TEMPLATE = """
         // ── Recheck terminal panel ─────────────────────────────────────────────
         var _recheckTermTimer = null;
         function _recheckTermStart(label) {
-            var panel = document.getElementById('recheck-terminal');
-            var out   = document.getElementById('recheck-term-output');
-            var lbl   = document.getElementById('recheck-term-label');
-            var stat  = document.getElementById('recheck-term-status');
-            lbl.textContent  = '\u25B6 ' + label;
-            stat.textContent = 'running\u2026';
-            out.textContent  = '(waiting for output\u2026)';
-            panel.style.display = '';
-            _recheckTermPoll();
-            _recheckTermTimer = setInterval(_recheckTermPoll, 1000);
+            try {
+                var panel = document.getElementById('recheck-terminal');
+                var out   = document.getElementById('recheck-term-output');
+                var lbl   = document.getElementById('recheck-term-label');
+                var stat  = document.getElementById('recheck-term-status');
+                if (!panel || !out || !lbl || !stat) return;
+                lbl.textContent  = '\u25B6 ' + label;
+                stat.textContent = 'running\u2026';
+                out.textContent  = '(waiting for output\u2026)';
+                panel.style.display = '';
+                _recheckTermPoll();
+                _recheckTermTimer = setInterval(_recheckTermPoll, 1000);
+            } catch(e) {}
         }
         function _recheckTermStop() {
-            clearInterval(_recheckTermTimer);
-            _recheckTermTimer = null;
-            // One final poll to capture the last lines, then mark done
-            setTimeout(function() {
-                _recheckTermPoll();
-                var stat = document.getElementById('recheck-term-status');
-                if (stat) stat.textContent = 'done';
-                var lbl = document.getElementById('recheck-term-label');
-                if (lbl) lbl.textContent = lbl.textContent.replace('\u25B6', '\u2713');
-            }, 400);
+            try {
+                clearInterval(_recheckTermTimer);
+                _recheckTermTimer = null;
+                setTimeout(function() {
+                    _recheckTermPoll();
+                    var stat = document.getElementById('recheck-term-status');
+                    if (stat) stat.textContent = 'done';
+                    var lbl = document.getElementById('recheck-term-label');
+                    if (lbl) lbl.textContent = lbl.textContent.replace('\u25B6', '\u2713');
+                }, 400);
+            } catch(e) {}
         }
         function _recheckTermPoll() {
             fetch('/recheck-log')
