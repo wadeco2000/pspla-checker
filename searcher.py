@@ -477,6 +477,20 @@ def get_google_business_profile(company_name, region=""):
 _FB_SNIPPET_CACHE: dict = {}
 _LI_SNIPPET_CACHE: dict = {}
 
+# Hard-reject Facebook results whose snippet/title clearly indicate a non-NZ entity.
+# Checked before any enrichment or DB write to prevent overseas companies entering the DB.
+_FB_OVERSEAS_SIGNALS = [
+    "united states", "united states of america", " usa ", "u.s.a.",
+    "us-based", "u.s. based", " u.s. ", "(usa)", "(u.s.)",
+    "co.uk", ".co.uk", "united kingdom", ".com.au", "australia",
+]
+
+
+def _snippet_is_overseas(snippet: str, title: str = "") -> bool:
+    """Return True if the snippet or title contain hard overseas signals."""
+    text = (snippet + " " + title).lower()
+    return any(sig in text for sig in _FB_OVERSEAS_SIGNALS)
+
 
 def _parse_fb_snippet(snippet: str) -> dict:
     """Extract structured data from a Google search snippet for a Facebook business page.
@@ -575,7 +589,8 @@ def find_facebook_url(company_name, page_text=""):
     _SKIP_PATHS = {"posts", "photos", "videos", "events", "about",
                    "reviews", "community", "reels", "stories"}
     # Hard-exclude obvious non-NZ results
-    _HARD_OVERSEAS = ["co.uk", ".uk", "united kingdom", ".com.au", "co.au"]
+    _HARD_OVERSEAS = ["co.uk", ".uk", "united kingdom", ".com.au", "co.au",
+                      "united states", " usa ", "u.s.a.", "us-based"]
     # NZ city/domain signals — presence boosts score significantly
     _NZ_SIGNALS = ["new zealand", " nz", ".co.nz", ".nz",
                    "auckland", "wellington", "christchurch", "hamilton",
@@ -2816,6 +2831,16 @@ def _find_and_enrich_existing(company_name, region, fb_url, website_domain, snip
       3. By exact company name (definite match)
       4. By keyword fuzzy search + LLM confirmation (uncertain match)
     """
+    # Belt-and-suspenders: if the snippet indicates an overseas entity, strip the
+    # facebook_url from enrich_data so we don't pollute an existing NZ record with
+    # a foreign Facebook page URL even if the company name or domain matched.
+    if enrich_data.get("facebook_url") and _snippet_is_overseas(snippet or ""):
+        print(f"  [Overseas guard] Dropping facebook_url from enrich_data for '{company_name}'")
+        enrich_data = {k: v for k, v in enrich_data.items()
+                       if k not in ("facebook_url", "fb_followers", "fb_phone", "fb_email",
+                                    "fb_address", "fb_description", "fb_category", "fb_rating")}
+        fb_url = None  # don't attempt FB-URL match either
+
     # 1. FB URL match
     if fb_url:
         existing = get_company_by_facebook_url(fb_url)
@@ -3931,7 +3956,7 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         "nzsa_email": nzsa_result.get("email") or None,
         "nzsa_overview": nzsa_result.get("overview") or None,
         "root_domain": root_domain,
-        "source_url": info.get("_fb_url") or website_url,
+        "source_url": info.get("_fb_post_url") or info.get("_fb_url") or website_url,
         "last_checked": datetime.now(timezone.utc).isoformat(),
         "notes": f"Found via: {source_label}",
         "has_alarm_systems":    services.get("has_alarm_systems"),
@@ -4088,11 +4113,17 @@ def _process_fb_result(result, found_urls_all, fb_total, fb_new, term, fallback_
     """Process a single Facebook search result. Returns updated (fb_total, fb_new)."""
     skip_paths = ["/groups/", "/marketplace/", "/events/", "/photos/",
                   "/videos/", "/posts/", "/reels/", "/stories/"]
-    fb_url = result["link"]
+    fb_url = result["link"]        # original result URL (may be a post/content URL)
 
     if "facebook.com" not in fb_url:
         return fb_total, fb_new
     if any(p in fb_url for p in skip_paths):
+        return fb_total, fb_new
+
+    # Hard-filter results whose snippet/title clearly indicate a non-NZ entity.
+    # Check before normalisation so we don't waste effort or DB writes.
+    if _snippet_is_overseas(result.get("snippet", ""), result.get("title", "")):
+        print(f"  [Skipped - overseas signal] {fb_url}")
         return fb_total, fb_new
 
     fb_url_norm = normalise_fb_url(fb_url)
@@ -4149,6 +4180,9 @@ def _process_fb_result(result, found_urls_all, fb_total, fb_new, term, fallback_
     info["_page_text"] = page_text
     info["_fb_snippet"] = result.get("snippet", "")
     info["_fb_url"] = fb_url_norm
+    # Store the original result URL (may be a post/content URL that led to this page)
+    # so we can trace exactly which Facebook post triggered discovery.
+    info["_fb_post_url"] = fb_url if fb_url != fb_url_norm else None
     if fb_url_norm and info["_fb_snippet"]:
         _FB_SNIPPET_CACHE[fb_url_norm] = info["_fb_snippet"]
 
