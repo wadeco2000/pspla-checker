@@ -4461,15 +4461,22 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
                     triggered_by="llm_verify_associations")
         google_profile = {}
 
-    # Electrician licence check (MBIE register) — only when individual PSPLA licence found
+    # Electrician licence check (MBIE register) — try individual PSPLA name then CO directors
     ew_result = {"found": False}
+    _ew_names = []
     if individual_license_found:
-        print(f"  [EW] Checking electrician licence for {individual_license_found}")
-        ew_result = check_electrician_licence(individual_license_found)
+        _ew_names.append(individual_license_found)
+    for _d in co_directors:
+        if _d not in _ew_names:
+            _ew_names.append(_d)
+    for _ew_name in _ew_names:
+        print(f"  [EW] Checking electrician licence for {_ew_name}")
+        ew_result = check_electrician_licence(_ew_name)
         if ew_result.get("found"):
             print(f"  [EW] Found: {ew_result.get('ew_name')} | {ew_result.get('ew_reg_number')} | Licensed: {ew_result.get('ew_licensed')}")
+            break
         else:
-            print(f"  [EW] No electrician licence found")
+            print(f"  [EW] No electrician licence found for {_ew_name}")
 
     # Detect services mentioned on the company website (homepage + service sub-pages)
     service_text = gather_service_text(website_url, page_text) if website_url else page_text

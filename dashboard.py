@@ -1483,7 +1483,7 @@ HTML_TEMPLATE = """
                                 </div>
                                 <div style="margin-top:8px; padding-top:8px; border-top:1px solid #a3d9b1; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
                                     <span id="ew-recheck-result-{{ c.id }}" style="font-size:11px; color:#555;"></span>
-                                    <button onclick="recheckElectrician({{ c.id }}, '{{ (c.individual_license or '') | e }}')" id="ew-btn-{{ c.id }}"
+                                    <button onclick="recheckElectrician({{ c.id }}, '{{ (c.individual_license or '') | e }}', '{{ (c.director_name or '') | e }}')" id="ew-btn-{{ c.id }}"
                                             style="padding:2px 10px; font-size:11px; background:#555; color:white; border:none; border-radius:3px; cursor:pointer; white-space:nowrap;">
                                         Re-check
                                     </button>
@@ -2032,17 +2032,17 @@ HTML_TEMPLATE = """
             });
         }
 
-        function recheckElectrician(id, name) {
+        function recheckElectrician(id, name, directors) {
             var btn = document.getElementById('ew-btn-' + id);
             var result = document.getElementById('ew-recheck-result-' + id);
-            if (!name) return;
+            if (!name && !directors) return;
             btn.disabled = true;
             btn.textContent = 'Checking...';
-            _recheckTermStart('Electrician — ' + name);
+            _recheckTermStart('Electrician — ' + (name || directors));
             fetch('/recheck-electrician', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({id: id, name: name})
+                body: JSON.stringify({id: id, name: name || '', directors: directors || ''})
             })
             .then(function(r) { return r.json(); })
             .then(function(d) {
@@ -5108,22 +5108,32 @@ def recheck_nzsa_for_company():
 
 @app.route("/recheck-electrician", methods=["POST"])
 def recheck_electrician_for_company():
-    """Re-check MBIE Electrical Workers register for an individual and save the result."""
+    """Re-check MBIE Electrical Workers register — tries individual licence name then CO directors."""
     from flask import jsonify
-    company_id = request.json.get("id")
-    name = request.json.get("name", "").strip()
-    if not name:
-        return jsonify({"error": "No name provided"}), 400
+    company_id   = request.json.get("id")
+    name         = request.json.get("name", "").strip()       # individual_license name
+    directors_str = request.json.get("directors", "").strip() # comma-separated CO directors
+    names_to_try = []
+    if name:
+        names_to_try.append(name)
+    for d in [x.strip() for x in directors_str.split(",") if x.strip()]:
+        if d not in names_to_try:
+            names_to_try.append(d)
+    if not names_to_try:
+        return jsonify({"error": "No names provided"}), 400
     _rl = _recheck_log_capture(); _rl.__enter__()
     snapshot = _fetch_company_snapshot(company_id)
     try:
         from searcher import check_electrician_licence
-        print(f"[EW] Checking electrician licence for: {name}")
-        result = check_electrician_licence(name)
-        if result.get("found"):
-            print(f"[EW] Found: {result.get('ew_name')} | {result.get('ew_reg_number')} | Licensed: {result.get('ew_licensed')}")
-        else:
-            print(f"[EW] No electrician licence found")
+        result = {"found": False}
+        for n in names_to_try:
+            print(f"[EW] Checking electrician licence for: {n}")
+            result = check_electrician_licence(n)
+            if result.get("found"):
+                print(f"[EW] Found: {result.get('ew_name')} | {result.get('ew_reg_number')} | Licensed: {result.get('ew_licensed')}")
+                break
+            else:
+                print(f"[EW] No electrician licence found for {n}")
         headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
                    "Content-Type": "application/json", "Prefer": "return=minimal"}
         requests.patch(
