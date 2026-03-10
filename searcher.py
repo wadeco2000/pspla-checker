@@ -4005,6 +4005,49 @@ def normalise_fb_url(url):
     return urlunparse(parsed._replace(query="", fragment="")).rstrip("/")
 
 
+# Sub-paths that indicate a content URL rather than a company page root.
+_FB_CONTENT_PATHS = {"posts", "photos", "videos", "events", "about",
+                     "reviews", "community", "reels", "stories"}
+# Sub-paths that are never a company page at all.
+_FB_SKIP_SECTIONS = {"groups", "marketplace", "watch"}
+
+
+def fb_page_url_from_result_link(link):
+    """Normalise any Facebook result URL to a page home URL.
+
+    - Strips query string and trailing slash.
+    - Normalises m.facebook.com → www.facebook.com.
+    - Hard-rejects groups/marketplace/watch — never company pages.
+    - If the URL is a content URL (/posts/, /photos/ etc.), extracts the
+      base page URL and returns it along with the original URL.
+    - Returns (page_url, original_url_if_content_page) or (None, None).
+
+    original_url_if_content_page is non-None only when the link was a
+    content/post URL — callers should store it as the discovery source so
+    the exact post that triggered company discovery is traceable.
+    """
+    import re as _re
+    link = link.split("?")[0].rstrip("/")
+    link = _re.sub(r"^https?://m\.facebook\.com", "https://www.facebook.com", link)
+
+    if _re.search(r"facebook\.com/(" + "|".join(_FB_SKIP_SECTIONS) + r")/", link):
+        return None, None
+
+    # Numeric-only IDs are unusable
+    if _re.match(r"https?://(www\.)?facebook\.com/\d+$", link):
+        return None, None
+
+    # Content sub-path → extract base page, keep original for traceability
+    content_re = (r"(https?://(www\.)?facebook\.com"
+                  r"/(?:(?:p|people)/)?[^/?#\s]+)"
+                  r"/(" + "|".join(_FB_CONTENT_PATHS) + r")(?:/|$)")
+    cm = _re.match(content_re, link)
+    if cm:
+        return cm.group(1), link   # (page_url, original_post_url)
+
+    return link, None
+
+
 def extract_website_from_snippet(snippet):
     """Pull the first non-Facebook http URL out of a Google search snippet."""
     import re
@@ -4111,22 +4154,24 @@ Return ONLY valid JSON or null."""
 
 def _process_fb_result(result, found_urls_all, fb_total, fb_new, term, fallback_region):
     """Process a single Facebook search result. Returns updated (fb_total, fb_new)."""
-    skip_paths = ["/groups/", "/marketplace/", "/events/", "/photos/",
-                  "/videos/", "/posts/", "/reels/", "/stories/"]
     fb_url = result["link"]        # original result URL (may be a post/content URL)
 
     if "facebook.com" not in fb_url:
         return fb_total, fb_new
-    if any(p in fb_url for p in skip_paths):
+
+    # Normalise to page URL. If the result is a content/post URL (e.g. /posts/123),
+    # extract the base page URL and remember the original so we can store it as the
+    # discovery source — letting us trace exactly which post triggered the find.
+    fb_url_norm, original_post_url = fb_page_url_from_result_link(fb_url)
+    if not fb_url_norm:
         return fb_total, fb_new
 
     # Hard-filter results whose snippet/title clearly indicate a non-NZ entity.
-    # Check before normalisation so we don't waste effort or DB writes.
     if _snippet_is_overseas(result.get("snippet", ""), result.get("title", "")):
         print(f"  [Skipped - overseas signal] {fb_url}")
         return fb_total, fb_new
 
-    fb_url_norm = normalise_fb_url(fb_url)
+    fb_url_norm = normalise_fb_url(fb_url_norm)
     if fb_url_norm in found_urls_all:
         return fb_total, fb_new
     found_urls_all.add(fb_url_norm)
@@ -4180,9 +4225,9 @@ def _process_fb_result(result, found_urls_all, fb_total, fb_new, term, fallback_
     info["_page_text"] = page_text
     info["_fb_snippet"] = result.get("snippet", "")
     info["_fb_url"] = fb_url_norm
-    # Store the original result URL (may be a post/content URL that led to this page)
-    # so we can trace exactly which Facebook post triggered discovery.
-    info["_fb_post_url"] = fb_url if fb_url != fb_url_norm else None
+    # original_post_url is set when Google returned a content/post URL (e.g. /posts/123).
+    # Store it as the discovery source so the exact post is traceable.
+    info["_fb_post_url"] = original_post_url
     if fb_url_norm and info["_fb_snippet"]:
         _FB_SNIPPET_CACHE[fb_url_norm] = info["_fb_snippet"]
 
