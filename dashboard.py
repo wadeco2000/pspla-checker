@@ -1558,6 +1558,17 @@ HTML_TEMPLATE = """
                             </button>
                         </div>
 
+                        <!-- AI LLM SENSE CHECK -->
+                        <div style="background:#4a235a; border-radius:8px; padding:10px 16px; margin-bottom:12px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                            <span style="color:white; font-size:12px; font-weight:bold;">🤖 AI Sense Check</span>
+                            <span id="llm-sense-result-{{ c.id }}" style="font-size:12px; color:#ecf0f1; flex:1;"></span>
+                            <small style="color:#c39bd3; order:3;">Claude reviews all associations and removes obvious errors</small>
+                            <button onclick="recheckLlmSense({{ c.id }})" id="llm-sense-btn-{{ c.id }}"
+                                    style="padding:5px 16px; font-size:12px; background:#8e44ad; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold; order:2; white-space:nowrap;">
+                                AI Sense Check
+                            </button>
+                        </div>
+
                         <!-- AI DECISIONS -->
                         <div style="border-top:1px solid #ddd; padding-top:10px; margin-bottom:8px;">
                             <label style="font-weight:bold; color:#555; font-size:11px; display:block; margin-bottom:6px;">AI Matching Decisions</label>
@@ -2199,6 +2210,42 @@ HTML_TEMPLATE = """
             .catch(function() {
                 result.innerHTML = '<em style="color:#e74c3c">Request failed or timed out</em>';
                 btn.textContent = 'Re-check all'; btn.disabled = false;
+                _recheckTermStop();
+            });
+        }
+
+        function recheckLlmSense(id) {
+            var btn = document.getElementById('llm-sense-btn-' + id);
+            var result = document.getElementById('llm-sense-result-' + id);
+            if (!btn) return;
+            btn.disabled = true;
+            btn.textContent = 'Asking Claude...';
+            result.innerHTML = '<em style="color:#c39bd3;">Sending all associations to Claude for review...</em>';
+            _recheckTermStart('AI Sense Check — ID ' + id);
+            fetch('/recheck-llm-sense', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.error) {
+                    result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
+                    btn.textContent = 'AI Sense Check'; btn.disabled = false;
+                } else if (d.cleared && d.cleared.length > 0) {
+                    var txt = '<strong style="color:#e67e22;">Cleared ' + d.cleared.length + ' association(s):</strong><br>';
+                    d.cleared.forEach(function(r) { txt += '<small style="color:#ecf0f1;">&bull; ' + r + '</small><br>'; });
+                    result.innerHTML = txt;
+                    btnSaved(btn, '#e67e22', 'Done');
+                } else {
+                    result.innerHTML = '<strong style="color:#27ae60;">&#10003; All associations look correct</strong>';
+                    btnSaved(btn, '#27ae60', 'All OK');
+                }
+                _recheckTermStop();
+            })
+            .catch(function() {
+                result.innerHTML = '<em style="color:#e74c3c">Request failed</em>';
+                btn.textContent = 'AI Sense Check'; btn.disabled = false;
                 _recheckTermStop();
             });
         }
@@ -4486,6 +4533,210 @@ def full_recheck_for_company():
                     triggered_by="manual (dashboard)")
         return jsonify({"ok": True, "summary": summary})
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        _rl.__exit__(None, None, None)
+
+
+@app.route("/recheck-llm-sense", methods=["POST"])
+def recheck_llm_sense():
+    """Use Claude Sonnet to sense-check all associations on a record and clear any that
+    are clearly wrong (NZSA, PSPLA, Facebook, LinkedIn, Companies Office)."""
+    from flask import jsonify
+    import anthropic as _anthropic
+    import json as _json
+
+    company_id = request.json.get("id")
+    if not company_id:
+        return jsonify({"error": "No id provided"}), 400
+
+    _rl = _recheck_log_capture(); _rl.__enter__()
+    try:
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        rows = requests.get(
+            f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}&select=*",
+            headers=headers, timeout=10
+        ).json()
+        if not rows:
+            return jsonify({"error": "Company not found"}), 404
+        c = rows[0]
+        company_name = c.get("company_name") or ""
+        website      = c.get("website") or ""
+
+        print(f"[LLM Sense] Checking: {company_name}")
+        print(f"[LLM Sense] Website:  {website or '(none)'}")
+
+        # Build a readable summary of all associations
+        lines = []
+
+        if c.get("nzsa_member_name"):
+            lines.append(f"\nNZSA MEMBERSHIP:")
+            lines.append(f"  Member name: {c['nzsa_member_name']}")
+            if c.get("nzsa_accredited"): lines.append(f"  Accredited: {c['nzsa_accredited']}")
+            if c.get("nzsa_grade"):      lines.append(f"  Grade: {c['nzsa_grade']}")
+            if c.get("nzsa_contact_name"): lines.append(f"  Contact: {c['nzsa_contact_name']}")
+            if c.get("nzsa_email"):      lines.append(f"  Email: {c['nzsa_email']}")
+            if c.get("nzsa_overview"):   lines.append(f"  Overview: {c['nzsa_overview'][:300]}")
+
+        if c.get("pspla_name"):
+            lines.append(f"\nPSPLA LICENCE:")
+            lines.append(f"  Matched name: {c['pspla_name']}")
+            if c.get("pspla_license_status"): lines.append(f"  Status: {c['pspla_license_status']}")
+            if c.get("pspla_address"):   lines.append(f"  Address: {c['pspla_address']}")
+            if c.get("pspla_license_classes"): lines.append(f"  Classes: {c['pspla_license_classes']}")
+            if c.get("match_reason"):    lines.append(f"  Match reason: {c['match_reason']}")
+
+        if c.get("facebook_url"):
+            lines.append(f"\nFACEBOOK:")
+            lines.append(f"  URL: {c['facebook_url']}")
+            if c.get("fb_description"): lines.append(f"  Description: {c['fb_description'][:300]}")
+            if c.get("fb_category"):    lines.append(f"  Category: {c['fb_category']}")
+            if c.get("fb_address"):     lines.append(f"  Address: {c['fb_address']}")
+
+        if c.get("linkedin_url"):
+            lines.append(f"\nLINKEDIN:")
+            lines.append(f"  URL: {c['linkedin_url']}")
+            if c.get("linkedin_description"): lines.append(f"  Description: {c['linkedin_description'][:200]}")
+            if c.get("linkedin_location"):    lines.append(f"  Location: {c['linkedin_location']}")
+
+        if c.get("companies_office_name"):
+            lines.append(f"\nCOMPANIES OFFICE:")
+            lines.append(f"  Registered name: {c['companies_office_name']}")
+            if c.get("companies_office_address"): lines.append(f"  Address: {c['companies_office_address']}")
+            if c.get("co_status"): lines.append(f"  Status: {c['co_status']}")
+
+        if c.get("google_address"):
+            lines.append(f"\nGOOGLE BUSINESS:")
+            lines.append(f"  Address: {c['google_address']}")
+            if c.get("google_phone"): lines.append(f"  Phone: {c['google_phone']}")
+
+        if not lines:
+            print("[LLM Sense] No associations to check.")
+            return jsonify({"ok": True, "cleared": [], "message": "No associations to check."})
+
+        context = "\n".join(lines)
+
+        prompt = f"""You are auditing a New Zealand security company database record.
+
+COMPANY: {company_name}
+PRIMARY WEBSITE: {website or "(none recorded)"}
+REGION: {c.get("region") or "unknown"}
+
+The following associations were found automatically by a web search tool. Your job is to
+identify any that are CLEARLY wrong — i.e. they obviously belong to a different company
+and not to "{company_name}".
+{context}
+
+RULES:
+- Be CONSERVATIVE. Only flag something if you are SURE it is wrong. If you are uncertain, leave it.
+- Minor name variations are fine (Ltd/Limited, punctuation, word order, trading names).
+- A PSPLA or NZSA name that is a known trading name or abbreviation of the company is fine.
+- A Facebook/LinkedIn URL whose slug or description clearly matches the company name is fine.
+- Only flag if the association is OBVIOUSLY a completely different organisation.
+- NEVER clear something just because the name is slightly different — clear only if it is a different company entirely.
+- For NZSA: if the NZSA member name shares no meaningful words with "{company_name}" and the overview/contact details don't fit, it may be wrong.
+- For PSPLA: if the matched licence name is for a completely different business, flag it.
+- For Facebook: if the URL slug or description clearly refers to a different business or overseas entity, flag it.
+- For LinkedIn: same as Facebook.
+- For Companies Office: if the registered name is for a completely different business, flag it.
+
+Respond with ONLY valid JSON — no markdown, no explanation outside the JSON.
+Use this exact structure:
+{{
+  "clear_nzsa":            false,
+  "clear_nzsa_reason":     "",
+  "clear_pspla":           false,
+  "clear_pspla_reason":    "",
+  "clear_facebook":        false,
+  "clear_facebook_reason": "",
+  "clear_linkedin":        false,
+  "clear_linkedin_reason": "",
+  "clear_companies_office": false,
+  "clear_companies_office_reason": ""
+}}
+
+Set a value to true ONLY if you are confident the association is for a different company."""
+
+        ai_client = _anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        response = ai_client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=600,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        raw = response.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"): raw = raw[4:]
+        result = _json.loads(raw.strip())
+
+        print(f"[LLM Sense] AI response received.")
+
+        # Apply clearances
+        patch = {}
+        cleared = []
+
+        if result.get("clear_nzsa"):
+            reason = result.get("clear_nzsa_reason", "")
+            print(f"[LLM Sense] Clearing NZSA: {reason}")
+            patch.update({"nzsa_member": "false", "nzsa_member_name": None,
+                          "nzsa_accredited": "false", "nzsa_grade": None,
+                          "nzsa_contact_name": None, "nzsa_phone": None,
+                          "nzsa_email": None, "nzsa_overview": None})
+            cleared.append(f"NZSA: {reason}")
+
+        if result.get("clear_pspla"):
+            reason = result.get("clear_pspla_reason", "")
+            print(f"[LLM Sense] Clearing PSPLA: {reason}")
+            patch.update({"pspla_licensed": None, "pspla_name": None,
+                          "pspla_license_number": None, "pspla_license_status": None,
+                          "pspla_license_expiry": None, "pspla_license_classes": None,
+                          "pspla_license_start": None, "pspla_permit_type": None,
+                          "match_method": None, "match_reason": None})
+            cleared.append(f"PSPLA: {reason}")
+
+        if result.get("clear_facebook"):
+            reason = result.get("clear_facebook_reason", "")
+            print(f"[LLM Sense] Clearing Facebook: {reason}")
+            patch.update({"facebook_url": None, "fb_followers": None, "fb_phone": None,
+                          "fb_email": None, "fb_address": None, "fb_description": None,
+                          "fb_category": None, "fb_rating": None,
+                          "fb_alarm_systems": None, "fb_cctv_cameras": None, "fb_alarm_monitoring": None})
+            cleared.append(f"Facebook: {reason}")
+
+        if result.get("clear_linkedin"):
+            reason = result.get("clear_linkedin_reason", "")
+            print(f"[LLM Sense] Clearing LinkedIn: {reason}")
+            patch.update({"linkedin_url": None, "linkedin_followers": None,
+                          "linkedin_description": None, "linkedin_industry": None,
+                          "linkedin_location": None, "linkedin_website": None, "linkedin_size": None})
+            cleared.append(f"LinkedIn: {reason}")
+
+        if result.get("clear_companies_office"):
+            reason = result.get("clear_companies_office_reason", "")
+            print(f"[LLM Sense] Clearing Companies Office: {reason}")
+            patch.update({"companies_office_name": None, "companies_office_address": None,
+                          "companies_office_number": None, "nzbn": None,
+                          "co_status": None, "co_incorporated": None,
+                          "director_name": None, "individual_license": None})
+            cleared.append(f"Companies Office: {reason}")
+
+        if patch:
+            ph = {**headers, "Content-Type": "application/json", "Prefer": "return=minimal"}
+            requests.patch(f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
+                           headers=ph, json=patch, timeout=10)
+            from searcher import write_audit
+            write_audit("updated", str(company_id), company_name,
+                        changes="LLM sense-check cleared: " + "; ".join(cleared),
+                        triggered_by="manual (dashboard)")
+            print(f"[LLM Sense] Cleared {len(cleared)} association(s).")
+        else:
+            print("[LLM Sense] All associations look correct — nothing cleared.")
+
+        return jsonify({"ok": True, "cleared": cleared,
+                        "message": f"Cleared {len(cleared)} association(s)." if cleared else "All associations look correct."})
+
+    except Exception as e:
+        print(f"[LLM Sense] Error: {e}")
         return jsonify({"error": str(e)}), 500
     finally:
         _rl.__exit__(None, None, None)
