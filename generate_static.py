@@ -132,6 +132,8 @@ STATIC_TEMPLATE = """<!DOCTYPE html>
         a:hover { text-decoration: underline; }
 
         .loading { text-align:center; padding: 60px; color: #888; font-size: 15px; }
+
+        @keyframes pulse {{ 0%,100%{{opacity:1}} 50%{{opacity:0.4}} }}
     </style>
 </head>
 <body>
@@ -217,6 +219,16 @@ STATIC_TEMPLATE = """<!DOCTYPE html>
             <option value="date-desc">Sort: Newest First</option>
             <option value="date-asc">Sort: Oldest First</option>
         </select>
+    </div>
+
+    <!-- Live Search Status Panel -->
+    <div id="searchStatusPanel" style="display:none; background:#0d1117; border:1px solid #30363d; border-radius:8px; margin-bottom:20px; overflow:hidden;">
+      <div style="background:#161b22; padding:10px 16px; display:flex; align-items:center; gap:10px; border-bottom:1px solid #30363d;">
+        <span style="width:10px;height:10px;border-radius:50%;background:#2ecc71;display:inline-block;animation:pulse 1.5s infinite;"></span>
+        <strong style="color:#e6edf3;" id="ssType">Search Running</strong>
+        <span style="color:#8b949e; font-size:13px;" id="ssProgress"></span>
+      </div>
+      <div id="ssLog" style="padding:12px 16px; font-family:monospace; font-size:12px; color:#8b949e; max-height:300px; overflow-y:auto; white-space:pre-wrap; line-height:1.5;"></div>
     </div>
 
     <!-- Table -->
@@ -582,6 +594,32 @@ function copyAndOpen(e, licNum) {{
     navigator.clipboard.writeText(licNum).catch(function(){{}});
     window.open('https://forms.justice.govt.nz/search/PSPLA/', '_blank');
 }}
+
+// ── Live search status ────────────────────────────────────────────────────────
+function loadSearchStatus() {{
+    fetch(SUPABASE_URL + '/rest/v1/SearchStatus?id=eq.1&select=*', {{
+        headers: {{'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY}}
+    }})
+    .then(function(r) {{ return r.json(); }})
+    .then(function(rows) {{
+        var row = rows && rows[0];
+        var panel = document.getElementById('searchStatusPanel');
+        if (!panel) return;
+        if (row && row.is_running) {{
+            panel.style.display = 'block';
+            document.getElementById('ssType').textContent = row.search_type || 'Search Running';
+            document.getElementById('ssProgress').textContent = row.progress || '';
+            var logEl = document.getElementById('ssLog');
+            logEl.textContent = row.log_lines || '';
+            logEl.scrollTop = logEl.scrollHeight;
+        }} else {{
+            panel.style.display = 'none';
+        }}
+    }})
+    .catch(function() {{}});
+}}
+setInterval(loadSearchStatus, 10000);
+loadSearchStatus();
 </script>
 </body>
 </html>"""

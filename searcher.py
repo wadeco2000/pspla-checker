@@ -169,6 +169,40 @@ def get_llm_status():
 # Session log — tracks new companies added in the current run for email notifications
 _session_new_companies = []
 
+_LAST_SUPABASE_STATUS_PUSH = 0.0  # module-level throttle
+
+
+def _push_search_status(is_running, search_type="", progress="", log_lines=""):
+    """Push current search status to Supabase SearchStatus table (throttled to once per 15s)."""
+    global _LAST_SUPABASE_STATUS_PUSH
+    import time as _time
+    now = _time.time()
+    if now - _LAST_SUPABASE_STATUS_PUSH < 15 and is_running:
+        return  # throttle during active searches; always push on stop
+    _LAST_SUPABASE_STATUS_PUSH = now
+    try:
+        import requests as _req
+        _h = {
+            "apikey": SUPABASE_KEY,
+            "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json",
+            "Prefer": "resolution=merge-duplicates",
+        }
+        _payload = {
+            "id": 1,
+            "updated_at": __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),
+            "is_running": is_running,
+            "search_type": search_type or "",
+            "progress": progress or "",
+            "log_lines": log_lines or "",
+        }
+        _req.post(
+            f"{SUPABASE_URL}/rest/v1/SearchStatus",
+            headers=_h, json=_payload, timeout=8
+        )
+    except Exception:
+        pass  # never let status push break a search
+
 
 def reset_session_log():
     """Call at the start of each search run to clear the session log."""
@@ -3884,19 +3918,34 @@ def get_all_progress():
 
 def write_status(phase, region, term, region_idx, term_idx, total_regions, total_terms, total_found, total_new):
     """Write current search position to status file so the dashboard can show a progress bar."""
+    data = {
+        "phase": phase,
+        "region": region,
+        "term": term,
+        "region_idx": region_idx,
+        "term_idx": term_idx,
+        "total_regions": total_regions,
+        "total_terms": total_terms,
+        "total_found": total_found,
+        "total_new": total_new,
+    }
     try:
         with open(STATUS_FILE, "w") as f:
-            json.dump({
-                "phase": phase,
-                "region": region,
-                "term": term,
-                "region_idx": region_idx,
-                "term_idx": term_idx,
-                "total_regions": total_regions,
-                "total_terms": total_terms,
-                "total_found": total_found,
-                "total_new": total_new,
-            }, f)
+            json.dump(data, f)
+    except Exception:
+        pass
+    # Push to Supabase for public site
+    try:
+        _stype = ""
+        _sf = os.path.join(BASE_DIR, "search_start.json")
+        if os.path.exists(_sf):
+            with open(_sf) as _sfh:
+                _stype = json.load(_sfh).get("type", "")
+        _log = "\n".join(get_session_log()[-60:])
+        _prog = f"{data.get('total_found', 0)} companies found"
+        if data.get('region'):
+            _prog += f" — {data['region']}"
+        _push_search_status(True, search_type=_stype, progress=_prog, log_lines=_log)
     except Exception:
         pass
 
@@ -3904,6 +3953,7 @@ def write_status(phase, region, term, region_idx, term_idx, total_regions, total
 def clear_status():
     if os.path.exists(STATUS_FILE):
         os.remove(STATUS_FILE)
+    _push_search_status(False, search_type="", progress="", log_lines="")
 
 
 def record_search_start(run_type, started_iso, triggered_by):
@@ -3937,6 +3987,7 @@ def record_search_start(run_type, started_iso, triggered_by):
             json.dump(history, f, indent=2)
     except Exception as e:
         print(f"  [History start write error] {e}")
+    _push_search_status(True, search_type=run_type, progress="Starting...", log_lines="")
 
 
 def append_history(run_type, started_iso, total_found, total_new, status="completed", triggered_by="manual", notes=""):
