@@ -290,9 +290,48 @@ HTML_TEMPLATE = """
                           font-size:12px; font-weight:600; display:flex; align-items:center; gap:5px; }
         /* ── Page content wrapper ── */
         .page-content { padding:20px; }
+        /* ── Dark Mode ── */
+        #dark-toggle { background:none;border:none;cursor:pointer;font-size:18px;padding:2px 6px;line-height:1;opacity:0.8;flex-shrink:0; }
+        #dark-toggle:hover { opacity:1; }
+        html.dark #dark-toggle::before { content:'☀️'; }
+        html:not(.dark) #dark-toggle::before { content:'🌙'; }
+        html.dark body { background:#0f1923; color:#d0d0d0; }
+        html.dark h1,html.dark h2,html.dark h3 { color:#d0d0d0; }
+        html.dark .subtitle { color:#7f95b0; }
+        html.dark .stat-box { background:#1a2535; box-shadow:0 2px 4px rgba(0,0,0,0.4); }
+        html.dark .stat-box p { color:#7f95b0; }
+        html.dark .filters select,html.dark .filters input,html.dark select,
+        html.dark input[type="text"],html.dark input[type="search"],html.dark input[type="date"],html.dark textarea
+            { background:#1e2d40; border-color:#3d5166; color:#d0d0d0; }
+        html.dark table { background:#1a2535; }
+        html.dark th { background:#0f1923; }
+        html.dark td { border-bottom-color:#2c3e50; }
+        html.dark tr:hover td { background:#1e2d40; }
+        html.dark .detail-row td { background:#131e2b !important; }
+        html.dark .detail-item label { color:#7f95b0; }
+        html.dark a { color:#5dade2; }
+        html.dark .expand-btn { color:#5dade2; }
+        html.dark .detail-block { color:#7f95b0; }
+        html.dark .badge-licensed { background:#1a3a2a; color:#5dca8a; }
+        html.dark .badge-unlicensed { background:#3a1a1a; color:#e57373; }
+        html.dark .badge-expired { background:#3a2a1a; color:#f0a060; }
+        html.dark .badge-unknown { background:#2a3040; color:#95a5a6; }
+        html.dark .page-content { color:#d0d0d0; }
+        html.dark #clear-db-modal>div,html.dark #recheck-modal>div,
+        html.dark #export-modal>div,html.dark #search-conflict-modal>div
+            { background:#1a2535 !important; color:#d0d0d0 !important; }
+        html.dark #clear-db-modal h2,html.dark #recheck-modal h2,
+        html.dark #export-modal h2,html.dark #search-conflict-modal h2 { color:#d0d0d0 !important; }
+        html.dark #clear-db-modal p,html.dark #recheck-modal p,
+        html.dark #export-modal p,html.dark #search-conflict-modal p { color:#a0a0a0 !important; }
+        html.dark #recheck-result { background:#131e2b !important; color:#d0d0d0 !important; }
+        html.dark #recheck-terminal { background:#0a0f15 !important; border-color:#2c3e50 !important; }
+        html.dark #recheck-terminal pre { color:#a8d8a8 !important; }
+        html.dark #flash-msg { filter:brightness(0.85); }
         /* ── Panels ── */
         .panel-wrap { margin-bottom:16px; }
     </style>
+<script>(function(){if(localStorage.getItem("pspla-dark")==="1")document.documentElement.classList.add("dark");})()</script>
 </head>
 <body>
 <nav class="navbar">
@@ -484,6 +523,7 @@ HTML_TEMPLATE = """
 
   <!-- Right: credits + running state -->
   <div class="navbar-right">
+    <button id="dark-toggle" onclick="(function(){var d=document.documentElement.classList.toggle('dark');localStorage.setItem('pspla-dark',d?'1':'0');})()"></button>
     <div class="credits-bar" id="api-credits-bar">
       <span id="credit-serp"><i class="fa-solid fa-magnifying-glass"></i> SerpAPI: <b>loading…</b></span>
       <span id="credit-tokens"><i class="fa-solid fa-robot"></i> Claude: <b>–</b></span>

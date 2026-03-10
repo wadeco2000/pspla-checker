@@ -134,7 +134,31 @@ STATIC_TEMPLATE = """<!DOCTYPE html>
         .loading { text-align:center; padding: 60px; color: #888; font-size: 15px; }
 
         @keyframes pulse {{ 0%,100%{{opacity:1}} 50%{{opacity:0.4}} }}
+
+        /* ── Dark mode ── */
+        #dark-toggle {{ background:none;border:none;cursor:pointer;font-size:18px;padding:2px 6px;line-height:1;opacity:0.8;flex-shrink:0; }}
+        #dark-toggle:hover {{ opacity:1; }}
+        html.dark #dark-toggle::before {{ content:'☀️'; }}
+        html:not(.dark) #dark-toggle::before {{ content:'🌙'; }}
+        html.dark body {{ background:#0f1923; color:#d4dbe6; }}
+        html.dark .content {{ color:#d4dbe6; }}
+        html.dark .notice {{ background:#1a2535; border-color:#2d4060; color:#8ab4d4; }}
+        html.dark .stat-box {{ background:#1a2535; box-shadow:0 2px 4px rgba(0,0,0,0.4); }}
+        html.dark .stat-box p {{ color:#8898aa; }}
+        html.dark .filters select, html.dark .filters input {{ background:#1a2535; border-color:#2d4060; color:#d4dbe6; }}
+        html.dark table {{ background:#1a2535; box-shadow:0 2px 4px rgba(0,0,0,0.4); }}
+        html.dark td {{ border-bottom-color:#2d4060; color:#d4dbe6; }}
+        html.dark tr:hover td {{ background:#1e2e42; }}
+        html.dark .detail-row td {{ background:#142030; }}
+        html.dark .card {{ background:#1e2e42; border-color:#2d4060; color:#d4dbe6; }}
+        html.dark .card-row-item span {{ color:#c0ccd8; }}
+        html.dark .reason-block {{ background:#1a2d42; border-left-color:#2980b9; }}
+        html.dark .meta-strip {{ border-color:#2d4060; color:#6a7f96; }}
+        html.dark .meta-strip strong {{ color:#8898aa; }}
+        html.dark .badge-unknown {{ background:#2d3748; color:#a0aec0; }}
+        html.dark a {{ color:#5dade2; }}
     </style>
+<script>(function(){if(localStorage.getItem("pspla-dark")==="1")document.documentElement.classList.add("dark");})()</script>
 </head>
 <body>
 
@@ -149,6 +173,7 @@ STATIC_TEMPLATE = """<!DOCTYPE html>
         </div>
     </div>
     <div class="header-right">
+        <button id="dark-toggle" onclick="(function(){var d=document.documentElement.classList.toggle('dark');localStorage.setItem('pspla-dark',d?'1':'0');})()"></button>
         <div class="updated-badge"><i class="fa-regular fa-clock"></i> Updated: <span id="last-updated">loading...</span></div>
         <div class="refresh-badge" onclick="loadData()" title="Click to refresh now">
             <i class="fa-solid fa-rotate"></i> Refreshing in <span id="countdown">5:00</span>
