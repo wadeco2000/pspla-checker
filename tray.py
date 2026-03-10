@@ -58,6 +58,11 @@ def stop(icon, item):
     icon.title = "PSPLA Checker — Stopped"
 
 
+def restart(icon, item):
+    stop(icon, None)
+    start(icon, None)
+
+
 def open_browser(icon, item):
     webbrowser.open(DASHBOARD_URL)
 
@@ -73,6 +78,7 @@ def main():
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Start", start),
         pystray.MenuItem("Stop", stop),
+        pystray.MenuItem("Restart", restart),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit", quit_app),
     )

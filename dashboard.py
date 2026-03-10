@@ -4470,21 +4470,31 @@ def recheck_pspla_for_company():
                     licensed = True
                     break
 
-        update = {
-            "pspla_licensed": licensed,
-            "pspla_name": pspla_name,
-            "pspla_address": result.get("pspla_address"),
-            "pspla_license_number": result.get("pspla_license_number"),
-            "pspla_license_status": result.get("pspla_license_status"),
-            "pspla_license_expiry": result.get("pspla_license_expiry"),
-            "license_type": result.get("license_type"),
-            "match_method": result.get("match_method"),
-            "individual_license": individual_license,
-        }
-        # Remove None values to avoid overwriting good data with null
-        update = {k: v for k, v in update.items() if v is not None}
-        # Always save pspla_licensed even if False/None
-        update["pspla_licensed"] = licensed
+        _pspla_fields = ["pspla_name", "pspla_address", "pspla_license_number",
+                         "pspla_license_status", "pspla_license_expiry",
+                         "license_type", "match_method"]
+        if licensed or pspla_name:
+            # Match found — save what we have, skip None values so we don't wipe good data
+            update = {
+                "pspla_licensed": licensed,
+                "pspla_name": pspla_name,
+                "pspla_address": result.get("pspla_address"),
+                "pspla_license_number": result.get("pspla_license_number"),
+                "pspla_license_status": result.get("pspla_license_status"),
+                "pspla_license_expiry": result.get("pspla_license_expiry"),
+                "license_type": result.get("license_type"),
+                "match_method": result.get("match_method"),
+                "individual_license": individual_license,
+            }
+            update = {k: v for k, v in update.items() if v is not None}
+            update["pspla_licensed"] = licensed
+        else:
+            # No match found — explicitly null out all PSPLA fields so stale data is cleared.
+            # Without this, old wrong data (e.g. "Addz Livewire Electrical") stays in DB
+            # because None values were previously stripped before patching.
+            update = {f: None for f in _pspla_fields}
+            update["pspla_licensed"] = False
+            update["individual_license"] = individual_license
         headers = {
             "apikey": SUPABASE_KEY,
             "Authorization": f"Bearer {SUPABASE_KEY}",

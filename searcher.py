@@ -2201,6 +2201,39 @@ def check_pspla(company_name, website_region=None, page_text=None, co_result=Non
 
             needs_verification = (match_method and match_method != "full name") or multi_company_results
 
+            # Extra guard: even for a "full name" single-permit match, force verification
+            # if the top PSPLA result has a distinctive prefix word that doesn't appear in
+            # the company name.  Catches e.g. "Addz Livewire Electrical Limited" being
+            # trusted for "Livewire Electrical" because Solr returned it as the only hit.
+            if not needs_verification and docs:
+                import re as _re_pfx
+                _PFX_GENERIC = {'limited', 'security', 'services', 'solutions', 'systems',
+                                'group', 'new', 'zealand', 'national', 'management',
+                                'alarm', 'alarms', 'install', 'installer', 'surveillance',
+                                'protection', 'electrical', 'plumbing', 'construction',
+                                'engineering', 'contracting', 'maintenance'}
+                _PFX_GEO = {'north', 'south', 'east', 'west', 'central', 'upper', 'lower',
+                            'greater', 'northern', 'southern', 'eastern', 'western',
+                            'auckland', 'wellington', 'canterbury', 'otago', 'waikato',
+                            'nelson', 'tasman', 'northland', 'hawkes', 'manawatu'}
+                top_name = (get_field(docs[0], "name_txt") or
+                            get_field(docs[0], "caseTitle_s") or "").lower()
+                top_words = _re_pfx.findall(r'[a-z]+', top_name)
+                co_words = set(_re_pfx.findall(r'[a-z]+', company_name.lower()))
+                first_co_idx = next(
+                    (i for i, w in enumerate(top_words) if w in co_words),
+                    len(top_words)
+                )
+                if first_co_idx > 0:
+                    prefix_distinctive = [w for w in top_words[:first_co_idx]
+                                          if len(w) >= 4
+                                          and w not in _PFX_GENERIC
+                                          and w not in _PFX_GEO]
+                    if prefix_distinctive:
+                        print(f"  [PSPLA] Forcing verification — '{top_name}' has distinctive "
+                              f"prefix {prefix_distinctive} not in '{company_name}'")
+                        needs_verification = True
+
             if needs_verification:
                 candidates = sorted(docs[:5], key=_region_boost)  # region-boosted, else Solr order
                 verified_doc = None
