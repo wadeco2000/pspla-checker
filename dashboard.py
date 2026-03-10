@@ -1107,10 +1107,25 @@ HTML_TEMPLATE = """
         <button class="btn btn-dark" onclick="window.location.reload()">Refresh</button>
     </div>
 
-    <table id="companyTable">
+    <table id="companyTable" style="table-layout:fixed; width:100%;">
+        <colgroup>
+            <col style="width:28px">        <!-- checkbox -->
+            <col style="width:18%">         <!-- company -->
+            <col style="width:10%">         <!-- region -->
+            <col style="width:9%">          <!-- phone -->
+            <col style="width:13%">         <!-- email -->
+            <col style="width:28px">        <!-- fb -->
+            <col style="width:28px">        <!-- linkedin -->
+            <col style="width:40px">        <!-- nzsa -->
+            <col style="width:11%">         <!-- pspla status -->
+            <col style="width:16%">         <!-- pspla name -->
+            <col style="width:13%">         <!-- companies office -->
+            <col style="width:72px">        <!-- added -->
+            <col style="width:54px">        <!-- expand -->
+        </colgroup>
         <thead>
             <tr>
-                <th style="width:24px; padding:4px;"><input type="checkbox" id="selectAllRows" onchange="toggleSelectAll(this)" title="Select all" style="display:none;"></th>
+                <th style="width:28px; padding:4px;"><input type="checkbox" id="selectAllRows" onchange="toggleSelectAll(this)" title="Select all" style="display:none;"></th>
                 <th><i class="fa-solid fa-building"></i> Company (Website)</th>
                 <th><i class="fa-solid fa-location-dot"></i> Region</th>
                 <th><i class="fa-solid fa-phone"></i> Phone</th>
@@ -1119,9 +1134,7 @@ HTML_TEMPLATE = """
                 <th style="text-align:center"><i class="fa-brands fa-linkedin-in" style="color:#0a66c2"></i></th>
                 <th style="text-align:center"><span style="color:#c0392b;font-size:11px;font-weight:bold">NZSA</span></th>
                 <th><i class="fa-solid fa-shield-halved"></i> PSPLA Status</th>
-                <th><i class="fa-solid fa-id-card"></i> PSPLA Registered Name</th>
-                <th><i class="fa-solid fa-hashtag"></i> License #</th>
-                <th><i class="fa-regular fa-calendar"></i> Expiry</th>
+                <th><i class="fa-solid fa-id-card"></i> PSPLA Name</th>
                 <th><i class="fa-solid fa-landmark"></i> Companies Office</th>
                 <th><i class="fa-regular fa-calendar-plus"></i> Added</th>
                 <th></th>
@@ -1148,12 +1161,12 @@ HTML_TEMPLATE = """
                 data-id="{{ loop.index }}"
                 data-company-id="{{ c.id }}">
                 <td style="width:24px; padding:4px; text-align:center;"><input type="checkbox" class="row-select" value="{{ c.id }}" style="display:none;" onchange="updateSelectedCount()"></td>
-                <td class="company-cell">
+                <td class="company-cell" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ c.company_name or '' }}">
                     {% if c.website %}<a href="{{ c.website }}" target="_blank">{{ c.company_name or '-' }}</a>{% else %}{{ c.company_name or '-' }}{% endif %}
                 </td>
-                <td>{{ c.region or '-' }}</td>
-                <td>{{ c.phone or '-' }}</td>
-                <td>{% if c.email %}<a href="mailto:{{ c.email }}">{{ c.email }}</a>{% else %}-{% endif %}</td>
+                <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ c.region or '' }}">{{ c.region or '-' }}</td>
+                <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;" title="{{ c.phone or '' }}">{{ c.phone or '-' }}</td>
+                <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;" title="{{ c.email or '' }}">{% if c.email %}<a href="mailto:{{ c.email }}">{{ c.email }}</a>{% else %}-{% endif %}</td>
                 <td style="text-align:center">
                     {% if c.facebook_url %}
                         <a href="{{ c.facebook_url }}" target="_blank" class="fb-tag" title="{{ c.facebook_url }}"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512" width="7" height="11" fill="white" style="vertical-align:middle"><path d="M279.14 288l14.22-92.66h-88.91v-60.13c0-25.35 12.42-50.06 52.24-50.06h40.42V6.26S260.43 0 225.36 0c-73.22 0-121.08 44.38-121.08 124.72v70.62H22.89V288h81.39v224h100.17V288z"/></svg></a>
@@ -1190,21 +1203,11 @@ HTML_TEMPLATE = """
                         <span class="badge badge-unknown"><i class="fa-solid fa-circle-question status-icon"></i>UNKNOWN</span>
                     {% endif %}
                 </td>
-                <td>
+                <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ c.pspla_name or '' }}{% if c.pspla_address %} — {{ c.pspla_address }}{% endif %}">
                     {{ c.pspla_name or '-' }}
-                    {% if c.pspla_address %}<div class="detail-block">{{ c.pspla_address }}</div>{% endif %}
                 </td>
-                <td>
-                    {% if c.pspla_license_number %}
-                        <a href="https://forms.justice.govt.nz/search/PSPLA/" target="_blank"
-                           title="Click to copy licence number &amp; open PSPLA register"
-                           onclick="copyAndOpen(event, '{{ c.pspla_license_number }}')">{{ c.pspla_license_number }}</a>
-                    {% else %}-{% endif %}
-                </td>
-                <td>{{ c.pspla_license_expiry or '-' }}</td>
-                <td>
+                <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;" title="{{ c.companies_office_name or '' }}{% if c.companies_office_address %} — {{ c.companies_office_address }}{% endif %}">
                     {{ c.companies_office_name or '-' }}
-                    {% if c.companies_office_address %}<div class="detail-block">{{ c.companies_office_address }}</div>{% endif %}
                 </td>
                 <td style="white-space:nowrap; font-size:12px; color:#666;">{{ (c.date_added or '')[:10] or '-' }}</td>
                 <td>
@@ -1212,7 +1215,7 @@ HTML_TEMPLATE = """
                 </td>
             </tr>
             <tr class="detail-row" id="detail-{{ loop.index }}">
-                <td colspan="15">
+                <td colspan="13">
                     {% if c.match_reason %}
                     <div style="background:#eaf4fb; border-left:4px solid #2980b9; padding:10px 14px; margin-bottom:10px; border-radius:4px; font-size:13px;">
                         <strong style="color:#2471a3;">Why this classification?</strong><br>
