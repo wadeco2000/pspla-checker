@@ -323,6 +323,13 @@ HTML_TEMPLATE = """
           <i class="fa-solid fa-list-check dd-icon" style="color:#7f8c8d;"></i>
           <span>Search Terms<span class="dd-sub">Edit Google / Facebook search terms</span></span>
         </button>
+
+        <button type="button" class="dd-item" onclick="togglePanel('panel-schedule'); closeMenus();">
+          <i class="fa-solid fa-calendar-days dd-icon" style="color:{{ '#27ae60' if schedule_enabled else '#95a5a6' }};"></i>
+          <span>Scheduled Searches
+            <span class="dd-sub">Auto-runs — currently <strong style="color:{{ '#27ae60' if schedule_enabled else '#e74c3c' }};">{{ 'Enabled' if schedule_enabled else 'Disabled' }}</strong></span>
+          </span>
+        </button>
       </div>
     </div>
 
@@ -510,7 +517,7 @@ HTML_TEMPLATE = """
         if (!el) return;
         var opening = el.style.display === 'none';
         // Close all panels first
-        ['panel-terms','panel-partial','panel-bulk'].forEach(function(pid) {
+        ['panel-terms','panel-partial','panel-bulk','panel-schedule'].forEach(function(pid) {
             var p = document.getElementById(pid);
             if (p) p.style.display = 'none';
         });
@@ -738,28 +745,6 @@ HTML_TEMPLATE = """
         }, 5000);
     </script>
     {% endif %}
-
-    <div style="display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
-
-        <div style="flex:1; min-width:260px; background:white; border-radius:8px;
-                    box-shadow:0 2px 4px rgba(0,0,0,0.1); padding:14px 18px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                <strong style="color:#2c3e50; font-size:14px;">&#128197; Scheduled Searches</strong>
-                <form method="POST" action="/toggle-schedule" style="margin:0;">
-                    <button class="btn" style="padding:4px 10px; font-size:12px;
-                        background:{{ '#27ae60' if schedule_enabled else '#95a5a6' }}; color:white;">
-                        {{ 'Enabled' if schedule_enabled else 'Disabled' }}
-                    </button>
-                </form>
-            </div>
-            <table style="width:100%; font-size:12px; border-collapse:collapse;">
-                <tr><td style="color:#666; padding:2px 0;"><i class="fa-solid fa-magnifying-glass" style="width:14px;"></i> Full search</td><td style="color:#2c3e50;">1st of month, 2am</td></tr>
-                <tr><td style="color:#666; padding:2px 0;"><i class="fa-solid fa-calendar-week" style="width:14px;"></i> Weekly scan</td><td style="color:#2c3e50;">8th, 15th, 22nd, 2am</td></tr>
-                <tr><td style="color:#666; padding:2px 0;"><i class="fa-brands fa-facebook-f" style="width:14px; color:#1877f2;"></i> Facebook scan</td><td style="color:#2c3e50;">Tue &amp; Fri, 3am</td></tr>
-            </table>
-        </div>
-
-    </div>
 
     <script>
     var _terms = {google: [], facebook: []};
@@ -1049,6 +1034,56 @@ HTML_TEMPLATE = """
         <span id="rcStatus" style="margin-left:12px; font-size:12px; color:#aaa;"></span>
       </div>
     </div>
+    </div>
+
+    <!-- Scheduled Searches panel -->
+    <div id="panel-schedule" class="panel-wrap" style="display:none;">
+      <div style="background:white; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.1); padding:18px 22px; max-width:480px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+          <strong style="color:#2c3e50; font-size:15px;"><i class="fa-solid fa-calendar-days" style="margin-right:6px;"></i> Scheduled Searches</strong>
+          <form method="POST" action="/toggle-schedule" style="margin:0;">
+            <button class="btn" style="padding:5px 14px; font-size:12px; font-weight:bold;
+                background:{{ '#27ae60' if schedule_enabled else '#95a5a6' }}; color:white; border:none; border-radius:4px; cursor:pointer;">
+              <i class="fa-solid fa-{{ 'circle-check' if schedule_enabled else 'circle-xmark' }}"></i>
+              {{ 'Enabled' if schedule_enabled else 'Disabled' }}
+            </button>
+          </form>
+        </div>
+        <p style="color:#666; font-size:12px; margin:0 0 12px;">
+          When enabled, searches run automatically on the schedule below.
+          The dashboard must be running on your PC for scheduled searches to fire.
+        </p>
+        <table style="width:100%; font-size:13px; border-collapse:collapse;">
+          <thead>
+            <tr style="border-bottom:2px solid #eee;">
+              <th style="text-align:left; padding:5px 0; color:#888; font-weight:normal; font-size:11px;">Search</th>
+              <th style="text-align:left; padding:5px 0; color:#888; font-weight:normal; font-size:11px;">Schedule (NZ time)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom:1px solid #f5f5f5;">
+              <td style="padding:7px 0; color:#2c3e50;"><i class="fa-solid fa-magnifying-glass" style="width:16px; color:#8e44ad;"></i> Full Search</td>
+              <td style="padding:7px 0; color:#555;">1st of month, 2:00am</td>
+            </tr>
+            <tr style="border-bottom:1px solid #f5f5f5;">
+              <td style="padding:7px 0; color:#2c3e50;"><i class="fa-solid fa-calendar-week" style="width:16px; color:#16a085;"></i> Weekly Scan</td>
+              <td style="padding:7px 0; color:#555;">8th, 15th, 22nd, 2:00am</td>
+            </tr>
+            <tr style="border-bottom:1px solid #f5f5f5;">
+              <td style="padding:7px 0; color:#2c3e50;"><i class="fa-brands fa-facebook-f" style="width:16px; color:#1877f2;"></i> Facebook Search</td>
+              <td style="padding:7px 0; color:#555;">Tue &amp; Fri, 3:00am</td>
+            </tr>
+            <tr>
+              <td style="padding:7px 0; color:#2c3e50;"><i class="fa-solid fa-address-book" style="width:16px; color:#c0392b;"></i> Directory Import</td>
+              <td style="padding:7px 0; color:#555;">15th of month, 4:00am</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style="color:#e67e22; font-size:11px; margin:12px 0 0;">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          If a search is already running when a scheduled job fires, it will be skipped automatically.
+        </p>
+      </div>
     </div>
 
     <div class="stats">
