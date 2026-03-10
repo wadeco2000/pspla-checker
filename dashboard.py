@@ -1810,6 +1810,7 @@ HTML_TEMPLATE = """
             if (!name) return;
             btn.disabled = true;
             btn.textContent = 'Checking...'; btn.style.background = '#555';
+            _recheckTermStart('Facebook — ' + name);
             fetch('/find-facebook', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -1827,11 +1828,13 @@ HTML_TEMPLATE = """
                     result.innerHTML = '<em style="color:#aaa">not found</em>';
                     btnSaved(btn, '#95a5a6', 'Not found');
                 }
+                _recheckTermStop();
             })
             .catch(function(e) {
                 result.innerHTML = '<em style="color:#e74c3c">Request failed</em>';
                 btn.textContent = 'Search';
                 btn.disabled = false;
+                _recheckTermStop();
             });
         }
 
@@ -1888,6 +1891,7 @@ HTML_TEMPLATE = """
             if (!name) return;
             btn.disabled = true;
             btn.textContent = 'Checking...'; btn.style.background = '#555';
+            _recheckTermStart('LinkedIn — ' + name);
             fetch('/find-linkedin', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -1914,11 +1918,13 @@ HTML_TEMPLATE = """
                     result.innerHTML = '<em style="color:#aaa">not found</em>';
                     btnSaved(btn, '#95a5a6', 'Not found');
                 }
+                _recheckTermStop();
             })
             .catch(function(e) {
                 result.innerHTML = '<em style="color:#e74c3c">Request failed</em>';
                 btn.textContent = 'Search';
                 btn.disabled = false;
+                _recheckTermStop();
             });
         }
 
@@ -4168,11 +4174,18 @@ def find_facebook_for_company():
     company_name = request.json.get("name", "")
     if not company_name:
         return jsonify({"error": "No company name provided"}), 400
+    _rl = _recheck_log_capture(); _rl.__enter__()
     try:
         from searcher import find_facebook_url, scrape_facebook_page, write_audit
+        print(f"[Facebook] Searching for Facebook page: {company_name}")
         fb_url = find_facebook_url(company_name)
         if fb_url:
+            print(f"[Facebook] Found URL: {fb_url}")
             fb_data = scrape_facebook_page(fb_url, company_name=company_name)
+            if fb_data.get("followers"): print(f"[Facebook] Followers: {fb_data['followers']}")
+            if fb_data.get("phone"):     print(f"[Facebook] Phone: {fb_data['phone']}")
+            if fb_data.get("email"):     print(f"[Facebook] Email: {fb_data['email']}")
+            if fb_data.get("category"):  print(f"[Facebook] Category: {fb_data['category']}")
             patch = {
                 "facebook_url": fb_url,
                 "fb_followers": fb_data.get("followers"),
@@ -4195,9 +4208,12 @@ def find_facebook_for_company():
                         changes=f"Facebook recheck: url={fb_url} followers={fb_data.get('followers')}",
                         triggered_by="manual (dashboard)")
             return jsonify({"found": True, "url": fb_url, **fb_data})
+        print(f"[Facebook] No Facebook page found")
         return jsonify({"found": False})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    finally:
+        _rl.__exit__(None, None, None)
 
 
 @app.route("/recheck-companies-office", methods=["POST"])
@@ -4573,11 +4589,17 @@ def find_linkedin_for_company():
     company_name = request.json.get("name", "")
     if not company_name:
         return jsonify({"error": "No company name provided"}), 400
+    _rl = _recheck_log_capture(); _rl.__enter__()
     try:
         from searcher import find_linkedin_url, scrape_linkedin_page, write_audit
+        print(f"[LinkedIn] Searching for LinkedIn page: {company_name}")
         li_url = find_linkedin_url(company_name)
         if li_url:
+            print(f"[LinkedIn] Found URL: {li_url}")
             li_data = scrape_linkedin_page(li_url, company_name=company_name)
+            if li_data.get("followers"): print(f"[LinkedIn] Followers: {li_data['followers']}")
+            if li_data.get("industry"):  print(f"[LinkedIn] Industry: {li_data['industry']}")
+            if li_data.get("location"):  print(f"[LinkedIn] Location: {li_data['location']}")
             patch = {"linkedin_url": li_url}
             for field in ("followers", "description", "industry", "location", "website", "size"):
                 if li_data.get(field):
@@ -4603,9 +4625,12 @@ def find_linkedin_for_company():
                             "location": li_data.get("location"),
                             "website": li_data.get("website"),
                             "size": li_data.get("size")})
+        print(f"[LinkedIn] No LinkedIn page found")
         return jsonify({"found": False})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    finally:
+        _rl.__exit__(None, None, None)
 
 
 @app.route("/recheck-pspla", methods=["POST"])
