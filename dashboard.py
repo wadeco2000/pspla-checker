@@ -2,8 +2,11 @@ import os
 import csv
 import io
 import json
+import sys
+import threading
 import time as _time
 import subprocess
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -35,6 +38,49 @@ PID_FILE = os.path.join(BASE_DIR, "search_pid.txt")
 LOG_FILE = os.path.join(BASE_DIR, "search_log.txt")
 START_FILE = os.path.join(BASE_DIR, "search_start.json")
 BACKUP_LOG_FILE = os.path.join(BASE_DIR, "backup_log.txt")
+RECHECK_LOG_FILE = os.path.join(BASE_DIR, "recheck_log.txt")
+
+# ── Recheck log capture ────────────────────────────────────────────────────────
+# Tees sys.stdout to recheck_log.txt during individual recheck endpoint calls
+# so all print() output from searcher.py is visible in the dashboard terminal.
+_recheck_log_lock = threading.Lock()
+
+class _TeeWriter:
+    """Write to both the real stdout and an open file handle."""
+    def __init__(self, real, f):
+        self._real = real
+        self._f = f
+    def write(self, data):
+        self._real.write(data)
+        try:
+            self._f.write(data)
+            self._f.flush()
+        except Exception:
+            pass
+    def flush(self):
+        self._real.flush()
+        try:
+            self._f.flush()
+        except Exception:
+            pass
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+@contextmanager
+def _recheck_log_capture():
+    """Context manager: redirect stdout → recheck_log.txt for the duration."""
+    with _recheck_log_lock:
+        try:
+            f = open(RECHECK_LOG_FILE, "w", encoding="utf-8", buffering=1)
+            old = sys.stdout
+            sys.stdout = _TeeWriter(old, f)
+            yield
+        finally:
+            sys.stdout = old
+            try:
+                f.close()
+            except Exception:
+                pass
 
 NZ_REGIONS = [
     # Major cities
@@ -1789,6 +1835,7 @@ HTML_TEMPLATE = """
             if (!name) return;
             btn.disabled = true;
             btn.textContent = 'Checking...';
+            _recheckTermStart('NZSA — ' + name);
             fetch('/recheck-nzsa', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -1816,10 +1863,12 @@ HTML_TEMPLATE = """
                     result.innerHTML = '<em style="color:#aaa">not found / not a member</em>';
                     btnSaved(btn, '#95a5a6', 'Not found');
                 }
+                _recheckTermStop();
             })
             .catch(function() {
                 result.innerHTML = '<em style="color:#e74c3c">Request failed</em>';
                 btn.textContent = 'Re-check'; btn.disabled = false;
+                _recheckTermStop();
             });
         }
 
@@ -1876,6 +1925,7 @@ HTML_TEMPLATE = """
             var directors = btn.dataset.directors || '';
             var region = btn.dataset.region || '';
             var coname = btn.dataset.coname || '';
+            _recheckTermStart('PSPLA — ' + name);
             fetch('/recheck-pspla', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -1899,11 +1949,13 @@ HTML_TEMPLATE = """
                     result.innerHTML = '<em style="color:#e74c3c">Not licensed</em>';
                     btnSaved(btn, '#95a5a6');
                 }
+                _recheckTermStop();
             })
             .catch(function(e) {
                 result.innerHTML = '<em style="color:#e74c3c">Request failed</em>';
                 btn.textContent = 'Re-check';
                 btn.disabled = false;
+                _recheckTermStop();
             });
         }
 
@@ -1920,11 +1972,51 @@ HTML_TEMPLATE = """
             }, 2000);
         }
 
+        // ── Recheck terminal panel ─────────────────────────────────────────────
+        var _recheckTermTimer = null;
+        function _recheckTermStart(label) {
+            var panel = document.getElementById('recheck-terminal');
+            var out   = document.getElementById('recheck-term-output');
+            var lbl   = document.getElementById('recheck-term-label');
+            var stat  = document.getElementById('recheck-term-status');
+            lbl.textContent  = '\u25B6 ' + label;
+            stat.textContent = 'running\u2026';
+            out.textContent  = '(waiting for output\u2026)';
+            panel.style.display = '';
+            _recheckTermPoll();
+            _recheckTermTimer = setInterval(_recheckTermPoll, 1000);
+        }
+        function _recheckTermStop() {
+            clearInterval(_recheckTermTimer);
+            _recheckTermTimer = null;
+            // One final poll to capture the last lines, then mark done
+            setTimeout(function() {
+                _recheckTermPoll();
+                var stat = document.getElementById('recheck-term-status');
+                if (stat) stat.textContent = 'done';
+                var lbl = document.getElementById('recheck-term-label');
+                if (lbl) lbl.textContent = lbl.textContent.replace('\u25B6', '\u2713');
+            }, 400);
+        }
+        function _recheckTermPoll() {
+            fetch('/recheck-log')
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    var out = document.getElementById('recheck-term-output');
+                    if (!out) return;
+                    var lines = d.lines || [];
+                    out.textContent = lines.length ? lines.join('\n') : '(no output yet)';
+                    out.scrollTop = out.scrollHeight;
+                })
+                .catch(function() {});
+        }
+
         function recheckServices(id, btn) {
             var website = btn.dataset.website;
             if (!website) { alert('No website URL available.'); return; }
             btn.disabled = true;
             btn.textContent = 'Checking...';
+            _recheckTermStart('Services — ' + website);
             fetch('/recheck-services', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -1960,8 +2052,9 @@ HTML_TEMPLATE = """
                     row.insertBefore(n, insertBefore);
                 }
                 btnSaved(btn, '#27ae60', 'Re-check');
+                _recheckTermStop();
             })
-            .catch(function() { btn.textContent = 'Re-check'; btn.disabled = false; });
+            .catch(function() { btn.textContent = 'Re-check'; btn.disabled = false; _recheckTermStop(); });
         }
 
         function recheckCompaniesOffice(id) {
@@ -1972,6 +2065,7 @@ HTML_TEMPLATE = """
             if (!name) return;
             btn.disabled = true;
             btn.textContent = 'Checking...';
+            _recheckTermStart('Companies Office — ' + name);
             fetch('/recheck-companies-office', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -1994,10 +2088,12 @@ HTML_TEMPLATE = """
                     result.innerHTML = '<em style="color:#aaa">Not found on Companies Register</em>';
                     btnSaved(btn, '#95a5a6', 'Not found');
                 }
+                _recheckTermStop();
             })
             .catch(function() {
                 result.innerHTML = '<em style="color:#e74c3c">Request failed</em>';
                 btn.textContent = 'Re-check'; btn.disabled = false;
+                _recheckTermStop();
             });
         }
 
@@ -2010,6 +2106,7 @@ HTML_TEMPLATE = """
             if (!name) return;
             btn.disabled = true;
             btn.textContent = 'Checking...';
+            _recheckTermStart('Google Profile — ' + name);
             fetch('/recheck-google-profile', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -2032,10 +2129,12 @@ HTML_TEMPLATE = """
                     result.innerHTML = '<em style="color:#aaa">No Google Business Profile found</em>';
                     btnSaved(btn, '#95a5a6', 'Not found');
                 }
+                _recheckTermStop();
             })
             .catch(function() {
                 result.innerHTML = '<em style="color:#e74c3c">Request failed</em>';
                 btn.textContent = 'Re-check'; btn.disabled = false;
+                _recheckTermStop();
             });
         }
 
@@ -2047,6 +2146,7 @@ HTML_TEMPLATE = """
             btn.disabled = true;
             btn.textContent = 'Running all checks...';
             result.innerHTML = '<em style="color:#888;">Running Companies Office → Facebook → Google → PSPLA → NZSA... this may take a minute.</em>';
+            _recheckTermStart('Full Re-check — ' + name);
             fetch('/full-recheck', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -2071,10 +2171,12 @@ HTML_TEMPLATE = """
                     result.innerHTML = txt;
                     btnSaved(btn);
                 }
+                _recheckTermStop();
             })
             .catch(function() {
                 result.innerHTML = '<em style="color:#e74c3c">Request failed or timed out</em>';
                 btn.textContent = 'Re-check all'; btn.disabled = false;
+                _recheckTermStop();
             });
         }
 
@@ -2412,6 +2514,23 @@ HTML_TEMPLATE = """
             </button>
         </div>
     </div>
+</div>
+
+<!-- Recheck Terminal — floating panel, shown during individual recheck calls -->
+<div id="recheck-terminal" style="display:none; position:fixed; bottom:16px; right:16px; width:480px; max-width:calc(100vw - 32px);
+     background:#1e1e1e; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.5); z-index:8000;
+     font-family:monospace; font-size:11px; color:#d4d4d4; overflow:hidden;">
+    <div style="background:#2d2d2d; padding:7px 12px; display:flex; align-items:center; gap:8px; border-bottom:1px solid #444;">
+        <i class="fa-solid fa-terminal" style="color:#6dbf6d; font-size:12px;"></i>
+        <span id="recheck-term-label" style="flex:1; color:#ccc; font-size:11px;"></span>
+        <span id="recheck-term-status" style="font-size:10px; color:#888;"></span>
+        <button onclick="document.getElementById('recheck-terminal').style.display='none';"
+            style="background:none; border:none; color:#888; cursor:pointer; font-size:13px; padding:0 2px; line-height:1;"
+            title="Close">&#x2715;</button>
+    </div>
+    <pre id="recheck-term-output"
+        style="margin:0; padding:10px 12px; max-height:300px; overflow-y:auto;
+               white-space:pre-wrap; word-break:break-all; color:#d4d4d4;">(waiting for output...)</pre>
 </div>
 
 </div><!-- /page-content -->
@@ -3269,6 +3388,19 @@ def search_log():
         return jsonify({"lines": [f"[log error: {e}]"]})
 
 
+@app.route("/recheck-log")
+def recheck_log():
+    from flask import jsonify
+    try:
+        if not os.path.exists(RECHECK_LOG_FILE):
+            return jsonify({"lines": []})
+        with open(RECHECK_LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+        return jsonify({"lines": [l.rstrip() for l in lines[-300:]]})
+    except Exception as e:
+        return jsonify({"lines": [f"[recheck log error: {e}]"]})
+
+
 @app.route("/open-terminal", methods=["POST"])
 def open_terminal():
     from flask import jsonify
@@ -4064,6 +4196,7 @@ def recheck_companies_office_for_company():
     company_name = request.json.get("name", "")
     if not company_name:
         return jsonify({"error": "No company name provided"}), 400
+    _rl = _recheck_log_capture(); _rl.__enter__()
     try:
         from searcher import check_companies_office, write_audit
         result = check_companies_office(company_name)
@@ -4099,6 +4232,8 @@ def recheck_companies_office_for_company():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    finally:
+        _rl.__exit__(None, None, None)
 
 
 @app.route("/recheck-google-profile", methods=["POST"])
@@ -4110,6 +4245,7 @@ def recheck_google_profile_for_company():
     company_region = request.json.get("region", "") or ""
     if not company_name:
         return jsonify({"error": "No company name provided"}), 400
+    _rl = _recheck_log_capture(); _rl.__enter__()
     try:
         from searcher import get_google_business_profile, write_audit
         result = get_google_business_profile(company_name, company_region)
@@ -4141,6 +4277,8 @@ def recheck_google_profile_for_company():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    finally:
+        _rl.__exit__(None, None, None)
 
 
 @app.route("/full-recheck", methods=["POST"])
@@ -4153,6 +4291,7 @@ def full_recheck_for_company():
     company_region = request.json.get("region", "") or ""
     if not company_name:
         return jsonify({"error": "No company name provided"}), 400
+    _rl = _recheck_log_capture(); _rl.__enter__()
     try:
         from searcher import (
             check_companies_office, check_pspla, check_pspla_individual,
@@ -4299,6 +4438,8 @@ def full_recheck_for_company():
         return jsonify({"ok": True, "summary": summary})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    finally:
+        _rl.__exit__(None, None, None)
 
 
 @app.route("/recheck-nzsa", methods=["POST"])
@@ -4309,6 +4450,7 @@ def recheck_nzsa_for_company():
     company_name = request.json.get("name", "")
     if not company_name:
         return jsonify({"error": "No company name provided"}), 400
+    _rl = _recheck_log_capture(); _rl.__enter__()
     try:
         from searcher import check_nzsa
         # Fetch website for domain matching
@@ -4342,6 +4484,8 @@ def recheck_nzsa_for_company():
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    finally:
+        _rl.__exit__(None, None, None)
 
 
 @app.route("/recheck-services", methods=["POST"])
@@ -4352,6 +4496,7 @@ def recheck_services_for_company():
     website_url = request.json.get("website", "")
     if not company_id or not website_url:
         return jsonify({"error": "Missing id or website"}), 400
+    _rl = _recheck_log_capture(); _rl.__enter__()
     try:
         from searcher import scrape_website, gather_service_text, detect_services, write_audit
         page_text, _, _, _ = scrape_website(website_url)
@@ -4373,6 +4518,8 @@ def recheck_services_for_company():
         return jsonify({"ok": True, **services})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    finally:
+        _rl.__exit__(None, None, None)
 
 
 @app.route("/find-linkedin", methods=["POST"])
@@ -4428,6 +4575,7 @@ def recheck_pspla_for_company():
     co_name = request.json.get("co_name", "") or None
     if not company_name:
         return jsonify({"error": "No company name provided"}), 400
+    _rl = _recheck_log_capture(); _rl.__enter__()
     try:
         from searcher import check_pspla, check_pspla_individual
         # Fetch stored context to improve LLM-assisted matching
@@ -4518,6 +4666,8 @@ def recheck_pspla_for_company():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    finally:
+        _rl.__exit__(None, None, None)
 
 
 @app.route("/duplicates")
