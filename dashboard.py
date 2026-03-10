@@ -1526,6 +1526,8 @@ HTML_TEMPLATE = """
                         <!-- METADATA ROW -->
                         <div style="display:flex; flex-wrap:wrap; gap:16px; font-size:11px; color:#888; padding:8px 4px; border-top:1px solid #eee; border-bottom:1px solid #eee; margin-bottom:12px;">
                             {% if c.website_url %}<span><strong style="color:#555;">Website:</strong> <a href="{{ c.website_url }}" target="_blank" style="color:#2980b9;">{{ c.website_url }}</a></span>{% endif %}
+                            {% if c.email %}<span><strong style="color:#555;">Email:</strong> <a href="mailto:{{ c.email }}" style="color:#2980b9;">{{ c.email }}</a>{% if c.email_source %} <em style="color:#bbb; font-size:10px;">({{ c.email_source }})</em>{% endif %}</span>{% endif %}
+                            {% if c.phone %}<span><strong style="color:#555;">Phone:</strong> {{ c.phone }}{% if c.phone_source %} <em style="color:#bbb; font-size:10px;">({{ c.phone_source }})</em>{% endif %}</span>{% endif %}
                             <span><strong style="color:#555;">Found via:</strong> {{ c.notes or '-' }}</span>
                             <span><strong style="color:#555;">Date added:</strong> {{ (c.date_added or '')[:10] or '-' }}</span>
                             <span><strong style="color:#555;">Last checked:</strong> {{ (c.last_checked or '')[:10] or '-' }}</span>
@@ -2948,6 +2950,7 @@ def dedupe_db():
             "match_method", "match_reason",
             "companies_office_name", "companies_office_address", "companies_office_number",
             "nzbn", "co_status", "co_incorporated", "co_website", "individual_license", "director_name",
+            "email_source", "phone_source",
             "facebook_url", "fb_followers", "fb_phone", "fb_email", "fb_address",
             "fb_description", "fb_category", "fb_rating",
             "fb_alarm_systems", "fb_cctv_cameras", "fb_alarm_monitoring",

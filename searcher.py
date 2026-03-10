@@ -3610,6 +3610,8 @@ RECORD_TEMPLATE = {
     "co_status": None,
     "co_incorporated": None,
     "co_website": None,
+    "email_source": None,
+    "phone_source": None,
     "date_added": None,
     "fb_followers": None,
     "fb_phone": None,
@@ -3940,6 +3942,7 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         # Backfill email if we don't have one yet
         if not info.get("email") and fb_page_data.get("email"):
             info["email"] = fb_page_data["email"]
+            info["_email_source"] = "facebook"
             print(f"  [Email from FB] {info['email']}")
 
     # Detect services from Facebook content (description + category + search snippet)
@@ -3957,9 +3960,11 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
     # Backfill phone/email if we don't have one yet
     if not info.get("phone") and google_profile.get("phone"):
         info["phone"] = google_profile["phone"]
+        info["_phone_source"] = "google"
         print(f"  [Phone from Google] {info['phone']}")
     if not info.get("email") and google_profile.get("email"):
         info["email"] = google_profile["email"]
+        info["_email_source"] = "google"
         print(f"  [Email from Google] {info['email']}")
 
     # Build list of all names to try on PSPLA
@@ -4240,6 +4245,8 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         "website": website_url,
         "phone": info.get("phone"),
         "email": info.get("email"),
+        "email_source": info.get("_email_source") or ("website" if info.get("email") else None),
+        "phone_source": info.get("_phone_source") or ("website" if info.get("phone") else None),
         "address": info.get("address"),
         "region": website_region,
         "pspla_licensed": licensed_val,
@@ -4591,7 +4598,9 @@ def _process_fb_result(result, found_urls_all, fb_total, fb_new, term, fallback_
         "fb_category": fb_page_data.get("category"),
         "fb_rating": fb_page_data.get("rating"),
         "phone": info.get("phone") or fb_page_data.get("phone"),
+        "phone_source": ("website" if info.get("phone") else ("facebook" if fb_page_data.get("phone") else None)),
         "email": info.get("email") or fb_page_data.get("email"),
+        "email_source": ("website" if info.get("email") else ("facebook" if fb_page_data.get("email") else None)),
         "region": region,
     }
 
