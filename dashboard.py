@@ -3764,7 +3764,7 @@ def audit_log_data():
     limit = request.args.get("limit", 1000)
     headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
     resp = requests.get(
-        f"{SUPABASE_URL}/rest/v1/AuditLog?select=*&order=timestamp.desc&limit={limit}",
+        f"{SUPABASE_URL}/rest/v1/AuditLog?select=id,timestamp,action,company_id,company_name,changes,triggered_by,notes&order=timestamp.desc&limit={limit}",
         headers=headers, timeout=15
     )
     return jsonify(resp.json() if resp.ok else [])
@@ -4016,7 +4016,7 @@ function render() {
       + '<td class="co">' + escHtml(r.company_name||'-') + '</td>'
       + '<td class="changes">' + escHtml(r.changes||'') + notes + '</td>'
       + '<td class="tby">' + escHtml(r.triggered_by||'') + '</td>'
-      + '<td>' + (r.snapshot_before ? '<button onclick="doRollback(' + r.id + ',\'' + (r.company_name||'').replace(/'/g,"\\\'") + '\')" style="padding:2px 8px;font-size:11px;background:#922b21;color:white;border:none;border-radius:3px;cursor:pointer;white-space:nowrap">Revert</button>' : '') + '</td>'
+      + '<td>' + (r.action === 'updated' ? '<button onclick="doRollback(' + r.id + ',\'' + (r.company_name||'').replace(/'/g,"\\\'") + '\')" style="padding:2px 8px;font-size:11px;background:#922b21;color:white;border:none;border-radius:3px;cursor:pointer;white-space:nowrap">Revert</button>' : '') + '</td>'
       + '</tr>';
   });
   document.getElementById('auditBody').innerHTML = html || '<tr><td colspan="6" style="color:#aaa;padding:20px">No entries match.</td></tr>';
