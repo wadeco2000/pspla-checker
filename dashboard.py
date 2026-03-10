@@ -6617,12 +6617,87 @@ IT companies are NOT registered electricians and do NOT have the s22(d) exemptio
 - General CCTV for non-crime-detection purposes (e.g., a factory monitoring production quality)
 
 ---
+---
+PENALTIES FOR OPERATING WITHOUT A LICENCE
+
+Section 23 of the Act sets out the maximum penalties:
+- Individual operating without a licence: fine up to **$40,000**
+- Company (body corporate) operating without a licence: fine up to **$60,000**
+- General offences with no specific penalty (s107): fine up to $5,000
+
+Enforcement is carried out by the CIPU (Criminal Investigation and Prosecution Unit) and NZ Police. The PSPLA Licensing Authority can also refer cases to CIPU for prosecution.
+
+Key point: Both the COMPANY and the INDIVIDUAL can be fined simultaneously. A company using unlicensed staff can also face prosecution, as can the unlicensed worker themselves.
+
+---
+REAL PSPLA ENFORCEMENT CASES (from PSPLA decisions register)
+
+These are actual cases that show the types of conduct the Authority takes seriously:
+
+**2026 NZPSPLA 007 — CIPU v Principle Protection Services Limited**
+Violation: Engaged a crowd controller who did not hold a Certificate of Approval (COA). Also failed to file annual returns.
+Penalty: **3-month suspension** of company licence, plus written warning that further breaches would result in cancellation.
+Note: The company had a prior similar finding of misconduct — the 3-month suspension reflected this repeat offending.
+Key lesson: Companies must verify every worker holds a valid COA before deploying them. "I didn't know" is not a defence.
+
+**2026 NZPSPLA 004 — Police & CIPU v Secpro and Tautali**
+Violation: Continued operating a security business after their licence had been declined. Also failed to comply with conditions attached to a COA.
+Penalty: COA cancelled. Matter **referred back to CIPU to pursue criminal prosecution** (i.e., potential $40,000–$60,000 fine in court).
+Key lesson: Operating after being declined a licence is treated very seriously — it results in prosecution referral, not just a warning.
+
+**2025 NZPSPLA 118 — Licensed company using unlicensed subcontractor**
+Violation: A licensed security company subcontracted work to an unlicensed security company.
+Finding: While there is no explicit statutory prohibition on this, it was found to constitute **unsatisfactory conduct** under s78(1B). The licensed company was responsible for ensuring its subcontractors were properly licensed.
+Key lesson: You cannot outsource your way around licensing. Using an unlicensed subcontractor exposes the licensed company to disciplinary action.
+
+**2025 NZPSPLA 139 — Police v Faasisila**
+Violation: Failed to provide information to police on request (s67).
+Penalty: Fine, reprimand, and mandatory further training required.
+Key lesson: Licence holders have ongoing obligations — including cooperating with police. Failure to comply results in fines and conditions.
+
+**2025 NZPSPLA 125 — Property theft while on duty**
+Violation: Stole goods from the property being guarded. Dealt with by alternative dispute resolution (no criminal conviction).
+Penalty: Fine, reprimand, and conditions imposed on licence.
+Key lesson: Misconduct while performing security work results in disciplinary action even without a criminal conviction.
+
+**2026 NZPSPLA 002 — Stewart**
+Violation: While wearing a security uniform, posted a video to social media showing gang and drug associations.
+Penalty: COA cancelled. Conditions imposed on any future reapplication.
+Key lesson: Conduct outside work hours that undermines public confidence in the security industry can cost you your licence.
+
+---
+FITNESS TO HOLD A LICENCE — DISQUALIFYING FACTORS
+
+Certain criminal convictions automatically disqualify a person from holding a PSPLA licence:
+- Convictions for violence offences (assault, serious violence)
+- Convictions for dishonesty offences (theft, fraud, money laundering)
+- Sentences of imprisonment
+- Active warrants for arrest
+
+Many recent cases (2025-2026) involve COA cancellations for holders who acquired disqualifying convictions after being granted their licence. The Authority monitors licence holders and cancels on this basis.
+
+A person with a disqualifying conviction CAN apply for a waiver, but these are rarely granted for serious violence or dishonesty offences.
+
+---
+PRACTICAL TAKEAWAYS FROM THE CASES
+
+1. Deploying a worker without checking their COA is misconduct — even once.
+2. Operating after your application is declined triggers prosecution referral.
+3. Using unlicensed subcontractors is unsatisfactory conduct for the licensed company.
+4. Annual returns must be filed — failure is a separate breach.
+5. The fines are substantial: up to $40k (individual) and $60k (company).
+6. Criminal convictions, even for conduct outside work, can result in COA cancellation.
+7. The PSPLA decisions register is public — all outcomes are visible.
+
+---
 USEFUL REFERENCES
 - The Act: legislation.govt.nz/act/public/2010/0115/latest/DLM1594432.html
+- PSPLA decisions register: justice.govt.nz/tribunals/licences-certificates/pspla/decisions/
 - PSPLA apply/renew: justice.govt.nz/tribunals/licences-certificates/pspla/apply-or-renew/
 - NZSA/Master Electricians position statement: security.org.nz/wp-content/uploads/2025/07/NZSA_positionstatement25_July.pdf
 - Section 6 (Security Technician): legislation.govt.nz/act/public/2010/0115/latest/DLM1594499.html
 - Section 22 (Exemptions): legislation.govt.nz/act/public/2010/0115/latest/DLM1594521.html
+- Section 23 (Penalties): legislation.govt.nz/act/public/2010/0115/latest/whole.html
 """
 
 _LICENSE_CHAT_HTML = r"""<!doctype html>
