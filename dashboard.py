@@ -2005,7 +2005,7 @@ HTML_TEMPLATE = """
                     var out = document.getElementById('recheck-term-output');
                     if (!out) return;
                     var lines = d.lines || [];
-                    out.textContent = lines.length ? lines.join('\n') : '(no output yet)';
+                    out.textContent = lines.length ? lines.join('\\n') : '(no output yet)';
                     out.scrollTop = out.scrollHeight;
                 })
                 .catch(function() {});
