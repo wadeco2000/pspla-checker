@@ -606,9 +606,30 @@ def generate():
         return
 
     print("Encrypting with StatiCrypt...")
-    node = r"C:\Program Files\nodejs\node.exe"
-    staticrypt = r"C:\Users\WadeAdmin\AppData\Roaming\npm\node_modules\staticrypt\cli\index.js"
+    import shutil, sys
     base_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Find node — check PATH first, then common Windows location
+    node = shutil.which("node") or r"C:\Program Files\nodejs\node.exe"
+
+    # Find staticrypt script — check npm global locations across platforms
+    staticrypt_candidates = [
+        # Unix/Linux (npm -g)
+        "/usr/local/lib/node_modules/staticrypt/cli/index.js",
+        "/usr/lib/node_modules/staticrypt/cli/index.js",
+        # macOS (homebrew npm)
+        os.path.expanduser("~/.npm-global/lib/node_modules/staticrypt/cli/index.js"),
+        # Windows
+        os.path.expanduser(r"~\AppData\Roaming\npm\node_modules\staticrypt\cli\index.js"),
+        r"C:\Users\WadeAdmin\AppData\Roaming\npm\node_modules\staticrypt\cli\index.js",
+    ]
+    staticrypt = next((p for p in staticrypt_candidates if os.path.exists(p)), None)
+
+    if not staticrypt:
+        print("StatiCrypt not found — skipping encryption. Run: npm install -g staticrypt")
+        print("Generated docs/index.html — WARNING: unencrypted.")
+        return
+
     r = subprocess.run(
         [node, staticrypt,
          "docs/index.html",
