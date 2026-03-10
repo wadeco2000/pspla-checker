@@ -3418,66 +3418,92 @@ def check_pspla_individual(name):
 # MBIE Electrical Workers register
 # ---------------------------------------------------------------------------
 
+def _ew_search_rows(fname, lname, include_all=False):
+    """Fetch MBIE EW search results and return all parsed rows.
+    include_all=True adds includeall param to return expired/historical records too.
+    Each row: {found, ew_name, ew_reg_number, ew_city, ew_region, ew_licensed, ew_profile_url}
+    """
+    from bs4 import BeautifulSoup as _BS
+    params = {
+        "fname": fname, "lname": lname,
+        "mname": "", "pname": "", "city": "",
+        "ltype": "", "rclass": "", "rnumber": "", "pid": "",
+        "btnSearch": "Search"
+    }
+    if include_all:
+        params["includeall"] = "true"
+    resp = requests.get(
+        "https://kete.mbie.govt.nz/EW/EWPRSearch/AEWPRSearch/",
+        params=params,
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=15
+    )
+    if resp.status_code != 200:
+        return []
+    soup = _BS(resp.text, "html.parser")
+    table = soup.find("table", {"id": "data"})
+    if not table:
+        return []
+    results = []
+    for row in table.find("tbody").find_all("tr"):
+        cells = row.find_all("td")
+        if len(cells) < 5:
+            continue
+        link = cells[0].find("a")
+        profile_path = link["href"] if link else None
+        results.append({
+            "found": True,
+            "ew_name":        cells[0].text.strip(),
+            "ew_reg_number":  cells[1].text.strip(),
+            "ew_city":        cells[2].text.strip(),
+            "ew_region":      cells[3].text.strip(),
+            "ew_licensed":    cells[4].text.strip().lower() == "yes",
+            "ew_profile_url": f"https://kete.mbie.govt.nz{profile_path}" if profile_path else None,
+        })
+    return results
+
+
 def check_electrician_licence(name):
     """Search MBIE Electrical Workers Public Register for a person by name.
-    Returns dict with: found, ew_name, ew_reg_number, ew_city, ew_region, ew_licensed
+    Returns the best single match (exact name preferred, active preferred).
+    Returns dict with: found, ew_name, ew_reg_number, ew_city, ew_region, ew_licensed, ew_profile_url
     """
     if not name or not name.strip():
         return {"found": False}
     try:
-        from bs4 import BeautifulSoup as _BS
         parts = name.strip().split()
         if len(parts) < 2:
             return {"found": False}
-        fname = parts[0]
-        lname = parts[-1]
-        resp = requests.get(
-            "https://kete.mbie.govt.nz/EW/EWPRSearch/AEWPRSearch/",
-            params={
-                "fname": fname, "lname": lname,
-                "mname": "", "pname": "", "city": "",
-                "ltype": "", "rclass": "", "rnumber": "", "pid": "",
-                "btnSearch": "Search"
-            },
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=15
-        )
-        if resp.status_code != 200:
-            return {"found": False}
-        soup = _BS(resp.text, "html.parser")
-        table = soup.find("table", {"id": "data"})
-        if not table:
-            return {"found": False}
-        rows = table.find("tbody").find_all("tr")
+        rows = _ew_search_rows(parts[0], parts[-1], include_all=False)
         if not rows:
             return {"found": False}
         name_norm = name.strip().lower()
-        best = None
+        # Prefer exact name match, then active licence, then first result
         for row in rows:
-            cells = row.find_all("td")
-            if len(cells) < 5:
-                continue
-            row_name = cells[0].text.strip()
-            reg_num  = cells[1].text.strip()
-            city     = cells[2].text.strip()
-            region   = cells[3].text.strip()
-            licensed = cells[4].text.strip().lower() == "yes"
-            entry = {
-                "found": True,
-                "ew_name": row_name,
-                "ew_reg_number": reg_num,
-                "ew_city": city,
-                "ew_region": region,
-                "ew_licensed": licensed,
-            }
-            if row_name.lower() == name_norm:
-                return entry   # exact match — done
-            if best is None:
-                best = entry   # keep first result as fallback
-        return best or {"found": False}
+            if row["ew_name"].lower() == name_norm:
+                return row
+        active = [r for r in rows if r["ew_licensed"]]
+        return active[0] if active else rows[0]
     except Exception as e:
         print(f"  [EW] Error checking electrician licence for {name}: {e}")
         return {"found": False}
+
+
+def check_electrician_licence_all(name):
+    """Return ALL MBIE EW register results for a name, including expired records.
+    Used by the Utilities panel for a full lookup.
+    Returns list of result dicts.
+    """
+    if not name or not name.strip():
+        return []
+    try:
+        parts = name.strip().split()
+        if len(parts) < 2:
+            return []
+        return _ew_search_rows(parts[0], parts[-1], include_all=True)
+    except Exception as e:
+        print(f"  [EW] Error in full electrician lookup for {name}: {e}")
+        return []
 
 
 # ---------------------------------------------------------------------------

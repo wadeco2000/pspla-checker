@@ -2171,12 +2171,25 @@ HTML_TEMPLATE = """
             }).then(function(r){return r.json();}).then(function(d){
                 btn.disabled = false; btn.textContent = 'Search';
                 if (d.error) { out.innerHTML = '<em style="color:#e74c3c">Error: '+d.error+'</em>'; return; }
-                if (!d.found) { out.innerHTML = '<em style="color:#aaa">No electrician licence found for '+fname+' '+lname+'</em>'; return; }
-                var html = '<div style="background:#f0fbf4;border:1px solid #a3d9b1;border-radius:6px;padding:10px 14px;">';
-                html += '<strong style="color:#1a6b35;">'+d.ew_name+'</strong>';
-                html += ' &nbsp;<span style="color:#555;">'+d.ew_reg_number+'</span>';
-                html += ' &nbsp;Licensed: <strong style="color:'+(d.ew_licensed?'#27ae60':'#e74c3c')+'">'+(d.ew_licensed?'Yes':'No')+'</strong>';
-                if (d.ew_city||d.ew_region) html += '<br><span style="color:#777;font-size:12px;">'+[d.ew_city,d.ew_region].filter(Boolean).join(', ')+'</span>';
+                if (!d.results || !d.results.length) { out.innerHTML = '<em style="color:#aaa">No electrician licence found for '+fname+' '+lname+'</em>'; return; }
+                var html = '<div style="font-size:12px;color:#777;margin-bottom:6px;">'+d.count+' record'+(d.count!==1?'s':'')+'found (includes expired)</div>';
+                html += '<div style="display:flex;flex-direction:column;gap:6px;">';
+                d.results.forEach(function(r){
+                    var active = r.ew_licensed;
+                    var bg     = active ? '#f0fbf4' : '#fafafa';
+                    var border = active ? '#a3d9b1' : '#ddd';
+                    html += '<div style="background:'+bg+';border:1px solid '+border+';border-radius:6px;padding:8px 12px;">';
+                    html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">';
+                    html += '<strong style="color:#2c3e50;">'+r.ew_name+'</strong>';
+                    html += '<span style="color:#555;font-size:12px;">'+r.ew_reg_number+'</span>';
+                    html += '<span style="font-weight:bold;color:'+(active?'#27ae60':'#e74c3c')+'">'+(active?'✓ Licensed':'✗ Not Licensed')+'</span>';
+                    if (r.ew_profile_url) html += '<a href="'+r.ew_profile_url+'" target="_blank" style="font-size:11px;color:#3498db;margin-left:auto;">View profile ↗</a>';
+                    html += '</div>';
+                    if (r.ew_city || r.ew_region) {
+                        html += '<div style="color:#777;font-size:12px;margin-top:3px;">'+[r.ew_city,r.ew_region].filter(Boolean).join(', ')+'</div>';
+                    }
+                    html += '</div>';
+                });
                 html += '</div>';
                 out.innerHTML = html;
             }).catch(function(){ btn.disabled=false; btn.textContent='Search'; out.innerHTML='<em style="color:#e74c3c">Request failed</em>'; });
@@ -5283,16 +5296,16 @@ def recheck_nzsa_for_company():
 
 @app.route("/util/electrician-search", methods=["POST"])
 def util_electrician_search():
-    """Standalone electrician lookup — no DB save."""
+    """Standalone electrician lookup — returns all matches including historical, no DB save."""
     from flask import jsonify
     fname = request.json.get("fname", "").strip()
     lname = request.json.get("lname", "").strip()
     if not fname or not lname:
         return jsonify({"error": "First and last name required"}), 400
     try:
-        from searcher import check_electrician_licence
-        result = check_electrician_licence(f"{fname} {lname}")
-        return jsonify(result)
+        from searcher import check_electrician_licence_all
+        results = check_electrician_licence_all(f"{fname} {lname}")
+        return jsonify({"results": results, "count": len(results)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
