@@ -263,14 +263,14 @@ HTML_TEMPLATE = """
       <div class="dropdown">
         <div class="dd-label">Run a search</div>
 
-        <form method="POST" action="/start-search" onsubmit="return confirm('Start a full search? This will run in the background and may take a long time.')">
+        <form method="POST" action="/start-search" onsubmit="return searchFormCheck(this, 'Full Search')">
           <button type="submit" class="dd-item highlight">
             <i class="fa-solid fa-play dd-icon"></i>
             <span>Full Search<span class="dd-sub">All regions × all terms + Facebook pass</span></span>
           </button>
         </form>
 
-        <form method="POST" action="/start-weekly-search" onsubmit="return confirm('Run a weekly light scan (last 7 days only)?')">
+        <form method="POST" action="/start-weekly-search" onsubmit="return searchFormCheck(this, 'Weekly Scan')">
           <button type="submit" class="dd-item">
             <i class="fa-solid fa-calendar-week dd-icon" style="color:#16a085;"></i>
             <span>Weekly Scan<span class="dd-sub">Light scan — recent changes only</span></span>
@@ -281,13 +281,13 @@ HTML_TEMPLATE = """
 
         <!-- Facebook Search row with Fresh -->
         <div style="display:flex; align-items:center;">
-          <form method="POST" action="/start-facebook-search" onsubmit="return confirm('Run Facebook-only search?')" style="flex:1;">
+          <form method="POST" action="/start-facebook-search" onsubmit="return searchFormCheck(this, 'Facebook Search')" style="flex:1;">
             <button type="submit" class="dd-item">
               <i class="fa-brands fa-facebook-f dd-icon" style="color:#1877f2;"></i>
               <span>Facebook Search<small id="fb-progress-badge" style="display:none;color:#e67e22;margin-left:6px;font-size:10px;"></small><span class="dd-sub">Search FB for NZ security companies</span></span>
             </button>
           </form>
-          <form method="POST" action="/start-facebook-search" id="fb-fresh-form" style="display:none;" onsubmit="return confirm('Start Facebook search fresh?');">
+          <form method="POST" action="/start-facebook-search" id="fb-fresh-form" style="display:none;" onsubmit="return searchFormCheck(this, 'Facebook Search (Fresh)');">
             <input type="hidden" name="fresh" value="1">
             <button type="submit" class="dd-fresh" title="Start fresh — clear saved progress">&#8635; Fresh</button>
           </form>
@@ -295,13 +295,13 @@ HTML_TEMPLATE = """
 
         <!-- Directory Import row with Fresh -->
         <div style="display:flex; align-items:center;">
-          <form method="POST" action="/start-directory-import" onsubmit="return confirm('Import from NZSA and LinkedIn directories?')" style="flex:1;">
+          <form method="POST" action="/start-directory-import" onsubmit="return searchFormCheck(this, 'Directory Import')" style="flex:1;">
             <button type="submit" class="dd-item">
               <i class="fa-solid fa-address-book dd-icon" style="color:#c0392b;"></i>
               <span>Directory Import<small id="dir-progress-badge" style="display:none;color:#e67e22;margin-left:6px;font-size:10px;"></small><span class="dd-sub">NZSA + LinkedIn member lists</span></span>
             </button>
           </form>
-          <form method="POST" action="/start-directory-import" id="dir-fresh-form" style="display:none;" onsubmit="return confirm('Start directory import fresh?');">
+          <form method="POST" action="/start-directory-import" id="dir-fresh-form" style="display:none;" onsubmit="return searchFormCheck(this, 'Directory Import (Fresh)');">
             <input type="hidden" name="fresh" value="1">
             <button type="submit" class="dd-fresh" title="Start fresh — clear saved progress">&#8635; Fresh</button>
           </form>
@@ -945,31 +945,35 @@ HTML_TEMPLATE = """
                     if (!allTerms.length && !includeFb && !includeFbNw) { alert('Please select at least one term or enable Facebook search.'); return; }
                     var statusEl = document.getElementById('partial-status');
                     statusEl.style.color = '#888';
-                    statusEl.textContent = 'Starting...';
-                    fetch('/start-partial-search', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({regions: regions, google_terms: allTerms, include_facebook: includeFb, include_nationwide: includeFbNw, fresh: !!fresh})
-                    }).then(function(r){ return r.json(); }).then(function(d) {
-                        if (d.ok) {
-                            statusEl.style.color = '#27ae60';
-                            statusEl.textContent = 'Search started! Scroll up to see the log.';
-                            var wrap = document.getElementById('progress-wrap');
-                            if (wrap) {
-                                wrap.style.display = 'block';
-                                var logPanel = document.getElementById('log-panel');
-                                if (logPanel) logPanel.style.display = '';
-                                var logBtn = document.getElementById('log-toggle-btn');
-                                if (logBtn) logBtn.textContent = 'Hide log';
-                                wrap.scrollIntoView({behavior: 'smooth', block: 'start'});
+                    statusEl.textContent = 'Checking...';
+                    checkRunning('Partial Search', function() {
+                        statusEl.textContent = 'Starting...';
+
+                        fetch('/start-partial-search', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({regions: regions, google_terms: allTerms, include_facebook: includeFb, include_nationwide: includeFbNw, fresh: !!fresh})
+                        }).then(function(r){ return r.json(); }).then(function(d) {
+                            if (d.ok) {
+                                statusEl.style.color = '#27ae60';
+                                statusEl.textContent = 'Search started! Scroll up to see the log.';
+                                var wrap = document.getElementById('progress-wrap');
+                                if (wrap) {
+                                    wrap.style.display = 'block';
+                                    var logPanel = document.getElementById('log-panel');
+                                    if (logPanel) logPanel.style.display = '';
+                                    var logBtn = document.getElementById('log-toggle-btn');
+                                    if (logBtn) logBtn.textContent = 'Hide log';
+                                    wrap.scrollIntoView({behavior: 'smooth', block: 'start'});
+                                }
+                                loadSearchProgress();
+                                setTimeout(function(){ statusEl.textContent = ''; }, 8000);
+                            } else {
+                                statusEl.style.color = '#e74c3c';
+                                statusEl.textContent = d.error || 'Error starting search.';
                             }
-                            loadSearchProgress();
-                            setTimeout(function(){ statusEl.textContent = ''; }, 8000);
-                        } else {
-                            statusEl.style.color = '#e74c3c';
-                            statusEl.textContent = d.error || 'Error starting search.';
-                        }
-                    }).catch(function(){ statusEl.style.color = '#e74c3c'; statusEl.textContent = 'Request failed.'; });
+                        }).catch(function(){ statusEl.style.color = '#e74c3c'; statusEl.textContent = 'Request failed.'; });
+                    }, function() { statusEl.textContent = ''; });
                 }
                 </script>
                 <button onclick="runPartialSearch(false)"
@@ -1664,44 +1668,48 @@ HTML_TEMPLATE = """
 
             var btn = document.getElementById('rcStartBtn');
             var status = document.getElementById('rcStatus');
-            btn.disabled = true;
-            btn.textContent = 'Starting...';
-            status.textContent = '';
-
-            fetch('/start-bulk-recheck', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({checks: checks, company_ids: company_ids})
-            })
-            .then(function(r) { return r.json(); })
-            .then(function(d) {
-                if (d.ok) {
-                    status.textContent = d.message || 'Started!';
-                    status.style.color = '#27ae60';
-                    btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Run Recheck';
-                    btn.disabled = false;
-                    var wrap = document.getElementById('progress-wrap');
-                    if (wrap) {
-                        wrap.style.display = 'block';
-                        var logPanel = document.getElementById('log-panel');
-                        if (logPanel) logPanel.style.display = '';
-                        wrap.scrollIntoView({behavior: 'smooth', block: 'start'});
-                    }
-                    loadSearchProgress();
-                    setTimeout(function(){ status.textContent = ''; }, 8000);
-                } else {
-                    status.textContent = 'Error: ' + (d.error || 'unknown');
-                    status.style.color = '#e74c3c';
-                    btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Run Recheck';
-                    btn.disabled = false;
-                }
-            })
-            .catch(function(e) {
-                status.textContent = 'Request failed';
-                status.style.color = '#e74c3c';
+            var resetBtn = function() {
                 btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Run Recheck';
                 btn.disabled = false;
-            });
+            };
+            btn.disabled = true;
+            btn.textContent = 'Checking...';
+            status.textContent = '';
+
+            checkRunning('Bulk Recheck', function() {
+                btn.textContent = 'Starting...';
+                fetch('/start-bulk-recheck', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({checks: checks, company_ids: company_ids})
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    if (d.ok) {
+                        status.textContent = d.message || 'Started!';
+                        status.style.color = '#27ae60';
+                        resetBtn();
+                        var wrap = document.getElementById('progress-wrap');
+                        if (wrap) {
+                            wrap.style.display = 'block';
+                            var logPanel = document.getElementById('log-panel');
+                            if (logPanel) logPanel.style.display = '';
+                            wrap.scrollIntoView({behavior: 'smooth', block: 'start'});
+                        }
+                        loadSearchProgress();
+                        setTimeout(function(){ status.textContent = ''; }, 8000);
+                    } else {
+                        status.textContent = 'Error: ' + (d.error || 'unknown');
+                        status.style.color = '#e74c3c';
+                        resetBtn();
+                    }
+                })
+                .catch(function(e) {
+                    status.textContent = 'Request failed';
+                    status.style.color = '#e74c3c';
+                    resetBtn();
+                });
+            }, resetBtn);
         }
         // ── End Bulk Recheck ──────────────────────────────────────────────────────────
 
@@ -2218,6 +2226,63 @@ HTML_TEMPLATE = """
             setTimeout(() => { link.title = orig; }, 3000);
             window.open('https://forms.justice.govt.nz/search/PSPLA/', '_blank');
         }
+
+        // ── Running Search Conflict System ───────────────────────────────────────────
+        var _srConflictCallback = null;
+        var _srCancelCallback = null;
+
+        function checkRunning(actionLabel, callback, onCancel) {
+            fetch('/search-running-info')
+                .then(function(r) { return r.json(); })
+                .then(function(d) {
+                    if (!d.running) { callback(); return; }
+                    _srConflictCallback = callback;
+                    _srCancelCallback = onCancel || null;
+                    var mins = d.minutes;
+                    var timeStr = mins < 1 ? 'less than a minute' : (mins === 1 ? '1 minute' : mins + ' minutes');
+                    var msg = 'A <strong>' + d.type_label + '</strong> has been running for <strong>' + timeStr + '</strong>.<br>'
+                            + 'Stop it and start <strong>' + actionLabel + '</strong> instead, or cancel?';
+                    document.getElementById('sc-message').innerHTML = msg;
+                    document.getElementById('search-conflict-modal').style.display = 'flex';
+                })
+                .catch(function() { callback(); });
+        }
+
+        function _srStopAndProceed() {
+            var btn = document.getElementById('sc-stop-btn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Stopping...';
+            fetch('/stop-search', {method: 'POST'})
+                .then(function() {
+                    setTimeout(function() {
+                        document.getElementById('search-conflict-modal').style.display = 'none';
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="fa-solid fa-stop"></i> Stop &amp; Start New';
+                        var cb = _srConflictCallback;
+                        _srConflictCallback = null;
+                        _srCancelCallback = null;
+                        if (cb) cb();
+                    }, 2000);
+                })
+                .catch(function() {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fa-solid fa-stop"></i> Stop &amp; Start New';
+                });
+        }
+
+        function _srDismiss() {
+            document.getElementById('search-conflict-modal').style.display = 'none';
+            _srConflictCallback = null;
+            var cc = _srCancelCallback;
+            _srCancelCallback = null;
+            if (cc) cc();
+        }
+
+        function searchFormCheck(form, actionLabel) {
+            checkRunning(actionLabel, function() { form.submit(); });
+            return false;
+        }
+        // ── End Running Search Conflict System ───────────────────────────────────────
     </script>
 
 <!-- Clear DB Modal -->
@@ -2291,6 +2356,28 @@ HTML_TEMPLATE = """
         </form>
         <button onclick="document.getElementById('export-modal').style.display='none';"
             style="margin-top:10px; background:none; border:none; color:#999; cursor:pointer; font-size:13px;">Cancel</button>
+    </div>
+</div>
+
+<!-- Running Search Conflict Modal -->
+<div id="search-conflict-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+     background:rgba(44,62,80,0.97); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:white; padding:36px; border-radius:12px; max-width:440px; width:90%; text-align:center;">
+        <i class="fa-solid fa-circle-exclamation" style="font-size:42px; color:#e67e22; margin-bottom:14px; display:block;"></i>
+        <h2 style="margin:0 0 8px; color:#2c3e50;">Search Already Running</h2>
+        <p id="sc-message" style="color:#555; font-size:14px; margin-bottom:24px;"></p>
+        <div style="display:flex; gap:10px; margin-bottom:10px;">
+            <button id="sc-stop-btn" onclick="_srStopAndProceed()"
+                style="flex:1; padding:11px; background:#e74c3c; color:white; border:none;
+                       border-radius:6px; font-size:14px; font-weight:bold; cursor:pointer;">
+                <i class="fa-solid fa-stop"></i> Stop &amp; Start New
+            </button>
+            <button onclick="_srDismiss()"
+                style="flex:1; padding:11px; background:#95a5a6; color:white; border:none;
+                       border-radius:6px; font-size:14px; font-weight:bold; cursor:pointer;">
+                <i class="fa-solid fa-xmark"></i> Cancel
+            </button>
+        </div>
     </div>
 </div>
 
@@ -3028,6 +3115,42 @@ def publish():
             return redirect(url_for("index", message=f"GitHub API error: {resp.status_code} {resp.text[:200]}", type="error"))
     except Exception as e:
         return redirect(url_for("index", message=f"Publish error: {e}", type="error"))
+
+
+@app.route("/search-running-info")
+def search_running_info():
+    """Lightweight endpoint: is a search running, what type, for how long?"""
+    from flask import jsonify
+    running = _search_process_alive()
+    if not running:
+        return jsonify({"running": False})
+    _type_labels = {
+        "full": "Full Search", "google-weekly": "Weekly Scan",
+        "facebook": "Facebook Search", "directories": "Directory Import",
+        "google-partial": "Partial Search", "bulk-recheck": "Bulk Recheck",
+    }
+    search_type = "search"
+    started_iso = None
+    minutes = 0
+    if os.path.exists(START_FILE):
+        try:
+            with open(START_FILE) as f:
+                start_data = json.load(f)
+            search_type = start_data.get("type", "search")
+            started_iso = start_data.get("started")
+            if started_iso:
+                started = datetime.fromisoformat(started_iso)
+                elapsed = datetime.now(timezone.utc) - started
+                minutes = int(elapsed.total_seconds() / 60)
+        except Exception:
+            pass
+    return jsonify({
+        "running": True,
+        "type": search_type,
+        "type_label": _type_labels.get(search_type, search_type.replace("-", " ").title()),
+        "minutes": minutes,
+        "started": started_iso,
+    })
 
 
 @app.route("/search-status")
