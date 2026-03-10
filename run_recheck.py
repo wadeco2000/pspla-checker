@@ -50,14 +50,15 @@ def fetch_companies(company_ids="all"):
         return []
 
 
-def _patch(company_id, updates, company_name, audit_changes, triggered_by="bulk-recheck"):
+def _patch(company_id, updates, company_name, audit_changes, triggered_by="bulk-recheck", snapshot_before=None):
     """Patch a company record and write an audit entry."""
     clean = {k: v for k, v in updates.items() if v is not None}
     if not clean:
         return
     patch_company(company_id, clean)
     write_audit("updated", str(company_id), company_name,
-                changes=audit_changes, triggered_by=triggered_by)
+                changes=audit_changes, triggered_by=triggered_by,
+                snapshot_before=snapshot_before)
 
 
 def recheck_facebook(company, triggered_by="bulk-recheck"):
@@ -108,7 +109,8 @@ def recheck_facebook(company, triggered_by="bulk-recheck"):
         if not existing_fb and fb_url:
             changes_str = f"FB found: {fb_url}. " + changes_str
         write_audit("updated", str(company_id), company_name,
-                    changes=changes_str, triggered_by=triggered_by)
+                    changes=changes_str, triggered_by=triggered_by,
+                    snapshot_before=company)
         print(f"  [Facebook] Updated {company_name}: followers={fb_data.get('followers')}")
     else:
         print(f"  [Facebook] No new data for {company_name}")
@@ -133,7 +135,8 @@ def recheck_google(company, triggered_by="bulk-recheck"):
         patch_company(company_id, updates)
         write_audit("updated", str(company_id), company_name,
                     changes=f"Google recheck: rating={result.get('rating')} phone={result.get('phone')}",
-                    triggered_by=triggered_by)
+                    triggered_by=triggered_by,
+                    snapshot_before=company)
         print(f"  [Google] Updated {company_name}: rating={result.get('rating')}")
     else:
         print(f"  [Google] No data for {company_name}")
@@ -167,7 +170,8 @@ def recheck_linkedin(company, triggered_by="bulk-recheck"):
     if not existing_li:
         changes_str = f"LinkedIn found: {li_url}. " + changes_str
     write_audit("updated", str(company_id), company_name,
-                changes=changes_str, triggered_by=triggered_by)
+                changes=changes_str, triggered_by=triggered_by,
+                snapshot_before=company)
     print(f"  [LinkedIn] Updated {company_name}: {li_url}")
 
 
@@ -193,7 +197,8 @@ def recheck_nzsa(company, triggered_by="bulk-recheck"):
     patch_company(company_id, updates)
     write_audit("updated", str(company_id), company_name,
                 changes=f"NZSA recheck: member={result['member']} name={result.get('member_name')}",
-                triggered_by=triggered_by)
+                triggered_by=triggered_by,
+                snapshot_before=company)
     print(f"  [NZSA] {company_name}: member={result['member']}")
 
 
@@ -220,7 +225,8 @@ def recheck_companies_office(company, triggered_by="bulk-recheck"):
         patch_company(company_id, updates)
         write_audit("updated", str(company_id), company_name,
                     changes=f"CO recheck: name={result.get('name')} status={result.get('status')} nzbn={result.get('nzbn')}",
-                    triggered_by=triggered_by)
+                    triggered_by=triggered_by,
+                    snapshot_before=company)
         print(f"  [CO] Updated {company_name}: {result.get('name')}")
     else:
         print(f"  [CO] No data for {company_name}")
@@ -281,7 +287,8 @@ def recheck_pspla(company, triggered_by="bulk-recheck"):
     patch_company(company_id, updates)
     write_audit("updated", str(company_id), company_name,
                 changes=f"PSPLA recheck: licensed={licensed} name={pspla_name} status={result.get('license_status')}",
-                triggered_by=triggered_by)
+                triggered_by=triggered_by,
+                snapshot_before=company)
     print(f"  [PSPLA] {company_name}: licensed={licensed} name={pspla_name}")
 
 
@@ -442,7 +449,8 @@ Set a value to true ONLY if you are confident the association is for a different
         patch_company(company_id, patch)
         write_audit("updated", str(company_id), company_name,
                     changes="LLM sense-check cleared: " + "; ".join(cleared),
-                    triggered_by=triggered_by)
+                    triggered_by=triggered_by,
+                    snapshot_before=c)
         print(f"  [LLM Sense] Cleared {len(cleared)}: {'; '.join(cleared)}")
     else:
         print(f"  [LLM Sense] All associations look correct.")

@@ -3935,6 +3935,7 @@ tr:hover td { background: #fafafa; }
 .badge-deleted { background: #e74c3c; }
 .badge-email { background: #8e44ad; }
 .badge-correction { background: #d35400; }
+.badge-rollback { background: #7f8c8d; color: white; }
 .ts { color: #888; white-space: nowrap; }
 .changes { color: #555; max-width: 380px; }
 .tby { color: #999; }
@@ -3954,6 +3955,7 @@ tr:hover td { background: #fafafa; }
     <option value="deleted">Deleted</option>
     <option value="email">Email</option>
     <option value="correction">Correction</option>
+    <option value="rollback">Rollback</option>
   </select>
   <input id="filterDate" type="date" onchange="render()" title="Filter by date">
   <button onclick="load()">&#x21BA; Refresh</button>
@@ -3968,6 +3970,7 @@ tr:hover td { background: #fafafa; }
       <th>Company</th>
       <th>Changes</th>
       <th style="width:150px">Triggered By</th>
+      <th style="width:60px"></th>
     </tr>
   </thead>
   <tbody id="auditBody"></tbody>
@@ -4013,12 +4016,28 @@ function render() {
       + '<td class="co">' + escHtml(r.company_name||'-') + '</td>'
       + '<td class="changes">' + escHtml(r.changes||'') + notes + '</td>'
       + '<td class="tby">' + escHtml(r.triggered_by||'') + '</td>'
+      + '<td>' + (r.snapshot_before ? '<button onclick="doRollback(' + r.id + ',\'' + (r.company_name||'').replace(/'/g,"\\\'") + '\')" style="padding:2px 8px;font-size:11px;background:#922b21;color:white;border:none;border-radius:3px;cursor:pointer;white-space:nowrap">Revert</button>' : '') + '</td>'
       + '</tr>';
   });
-  document.getElementById('auditBody').innerHTML = html || '<tr><td colspan="5" style="color:#aaa;padding:20px">No entries match.</td></tr>';
+  document.getElementById('auditBody').innerHTML = html || '<tr><td colspan="6" style="color:#aaa;padding:20px">No entries match.</td></tr>';
 }
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function doRollback(auditId, companyName) {
+  if (!confirm('Revert "' + companyName + '" to the state before this change?\n\nThis will overwrite the current record and cannot be undone.')) return;
+  fetch('/rollback-to-snapshot', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({audit_id: auditId})
+  }).then(function(r){ return r.json(); }).then(function(d) {
+    if (d.ok) {
+      alert('Reverted "' + companyName + '" successfully.');
+      load();
+    } else {
+      alert('Rollback failed: ' + (d.error || 'unknown error'));
+    }
+  }).catch(function(e) { alert('Request failed: ' + e); });
 }
 load();
 </script>
@@ -4225,6 +4244,20 @@ def stop_search():
     return redirect(url_for("index", message="Search stopped.", type="success"))
 
 
+def _fetch_company_snapshot(company_id):
+    """Fetch the current full company row from Supabase for use as a pre-change snapshot."""
+    try:
+        _h = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}&select=*",
+            headers=_h, timeout=10
+        )
+        rows = resp.json() if resp.ok else []
+        return rows[0] if rows else None
+    except Exception:
+        return None
+
+
 @app.route("/find-facebook", methods=["POST"])
 def find_facebook_for_company():
     """Look up a Facebook page URL, scrape its profile data, and save all fb_* fields."""
@@ -4234,6 +4267,7 @@ def find_facebook_for_company():
     if not company_name:
         return jsonify({"error": "No company name provided"}), 400
     _rl = _recheck_log_capture(); _rl.__enter__()
+    snapshot = _fetch_company_snapshot(company_id)
     try:
         from searcher import find_facebook_url, scrape_facebook_page, write_audit
         print(f"[Facebook] Searching for Facebook page: {company_name}")
@@ -4265,7 +4299,8 @@ def find_facebook_for_company():
                            headers=headers, json=patch)
             write_audit("updated", company_id, company_name,
                         changes=f"Facebook recheck: url={fb_url} followers={fb_data.get('followers')}",
-                        triggered_by="manual (dashboard)")
+                        triggered_by="manual (dashboard)",
+                        snapshot_before=snapshot)
             return jsonify({"found": True, "url": fb_url, **fb_data})
         print(f"[Facebook] No Facebook page found")
         return jsonify({"found": False})
@@ -4284,6 +4319,7 @@ def recheck_companies_office_for_company():
     if not company_name:
         return jsonify({"error": "No company name provided"}), 400
     _rl = _recheck_log_capture(); _rl.__enter__()
+    snapshot = _fetch_company_snapshot(company_id)
     try:
         from searcher import check_companies_office, write_audit
         # Fetch company region from DB to validate CO address against known location
@@ -4361,7 +4397,8 @@ def recheck_companies_office_for_company():
                            headers=headers, json=patch)
         write_audit("updated", company_id, company_name,
                     changes=f"CO recheck: name={result.get('name')} status={result.get('status')} nzbn={result.get('nzbn')}",
-                    triggered_by="manual (dashboard)")
+                    triggered_by="manual (dashboard)",
+                    snapshot_before=snapshot)
         return jsonify({
             "found": bool(result.get("name")),
             "co_name": result.get("name"),
@@ -4386,6 +4423,7 @@ def recheck_google_profile_for_company():
     if not company_name:
         return jsonify({"error": "No company name provided"}), 400
     _rl = _recheck_log_capture(); _rl.__enter__()
+    snapshot = _fetch_company_snapshot(company_id)
     try:
         from searcher import get_google_business_profile, write_audit
         print(f"[Google Profile] Searching for: {company_name}" + (f" ({company_region})" if company_region else ""))
@@ -4413,7 +4451,8 @@ def recheck_google_profile_for_company():
             print(f"[Google Profile] No Business Profile found")
         write_audit("updated", company_id, company_name,
                     changes=f"Google profile recheck: rating={result.get('rating')} reviews={result.get('reviews')} email={result.get('email')}",
-                    triggered_by="manual (dashboard)")
+                    triggered_by="manual (dashboard)",
+                    snapshot_before=snapshot)
         return jsonify({
             "found": bool(result.get("rating") or result.get("phone") or result.get("address")),
             "google_rating": result.get("rating"),
@@ -4439,6 +4478,7 @@ def full_recheck_for_company():
     if not company_name:
         return jsonify({"error": "No company name provided"}), 400
     _rl = _recheck_log_capture(); _rl.__enter__()
+    snapshot = _fetch_company_snapshot(company_id)
     try:
         from searcher import (
             check_companies_office, check_pspla, check_pspla_individual,
@@ -4581,7 +4621,8 @@ def full_recheck_for_company():
 
         write_audit("updated", company_id, company_name,
                     changes=f"Full recheck: pspla={licensed} co={co_result.get('name')} nzsa={nzsa_result['member']} google_rating={gp.get('rating')}",
-                    triggered_by="manual (dashboard)")
+                    triggered_by="manual (dashboard)",
+                    snapshot_before=snapshot)
         return jsonify({"ok": True, "summary": summary})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -4843,6 +4884,7 @@ def recheck_nzsa_for_company():
     if not company_name:
         return jsonify({"error": "No company name provided"}), 400
     _rl = _recheck_log_capture(); _rl.__enter__()
+    snapshot = _fetch_company_snapshot(company_id)
     try:
         from searcher import check_nzsa
         # Fetch website for domain matching
@@ -4882,7 +4924,8 @@ def recheck_nzsa_for_company():
         from searcher import write_audit
         write_audit("updated", company_id, company_name,
                     changes=f"NZSA recheck: member={result['member']}, name={result['member_name']}",
-                    triggered_by="manual (dashboard)")
+                    triggered_by="manual (dashboard)",
+                    snapshot_before=snapshot)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -4938,6 +4981,7 @@ def find_linkedin_for_company():
     if not company_name:
         return jsonify({"error": "No company name provided"}), 400
     _rl = _recheck_log_capture(); _rl.__enter__()
+    snapshot = _fetch_company_snapshot(company_id)
     try:
         from searcher import find_linkedin_url, scrape_linkedin_page, write_audit
         print(f"[LinkedIn] Searching for LinkedIn page: {company_name}")
@@ -4965,7 +5009,8 @@ def find_linkedin_for_company():
             )
             write_audit("updated", company_id, company_name,
                         changes=f"LinkedIn found: {li_url} followers={li_data.get('followers')} industry={li_data.get('industry')}",
-                        triggered_by="manual (dashboard)")
+                        triggered_by="manual (dashboard)",
+                        snapshot_before=snapshot)
             return jsonify({"found": True, "url": li_url,
                             "followers": li_data.get("followers"),
                             "description": li_data.get("description"),
@@ -4992,6 +5037,7 @@ def recheck_pspla_for_company():
     if not company_name:
         return jsonify({"error": "No company name provided"}), 400
     _rl = _recheck_log_capture(); _rl.__enter__()
+    snapshot = _fetch_company_snapshot(company_id)
     try:
         from searcher import check_pspla, check_pspla_individual
         print(f"[PSPLA] Starting recheck for: {company_name}" + (f" (region: {company_region})" if company_region else ""))
@@ -5082,7 +5128,8 @@ def recheck_pspla_for_company():
         from searcher import write_audit
         write_audit("updated", company_id, company_name,
                     changes=f"PSPLA recheck: licensed={licensed}, name={pspla_name}",
-                    triggered_by="manual (dashboard)")
+                    triggered_by="manual (dashboard)",
+                    snapshot_before=snapshot)
         return jsonify({
             "licensed": licensed,
             "pspla_name": pspla_name,
@@ -5464,6 +5511,8 @@ def confirm_recheck():
     approved    = request.json.get("approved", False)
     proposed    = request.json.get("proposed", {})
 
+    snapshot = _fetch_company_snapshot(company_id)
+
     if approved and proposed:
         patch = {k: v for k, v in proposed.items() if v is not None}
         patch["pspla_licensed"] = proposed.get("licensed")  # always include
@@ -5487,8 +5536,53 @@ def confirm_recheck():
         action = "approved" if approved else "rejected"
         write_audit("updated", company_id, company_name,
                     changes=f"Recheck {action} by user. New PSPLA: {proposed.get('pspla_name') if approved else 'None'}",
-                    triggered_by="manual (correction confirm)")
+                    triggered_by="manual (correction confirm)",
+                    snapshot_before=snapshot)
         return jsonify({"ok": True, "approved": approved})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/rollback-to-snapshot", methods=["POST"])
+def rollback_to_snapshot():
+    from flask import jsonify
+    import json as _json_rb
+    audit_id = request.json.get("audit_id")
+    if not audit_id:
+        return jsonify({"error": "No audit_id provided"}), 400
+    try:
+        _h = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/AuditLog?id=eq.{audit_id}&select=*",
+            headers=_h, timeout=10
+        )
+        rows = resp.json() if resp.ok else []
+        if not rows:
+            return jsonify({"error": "Audit entry not found"}), 404
+        entry = rows[0]
+        snapshot_json = entry.get("snapshot_before")
+        if not snapshot_json:
+            return jsonify({"error": "No snapshot available for this entry"}), 400
+        snapshot = _json_rb.loads(snapshot_json) if isinstance(snapshot_json, str) else snapshot_json
+        company_id = entry.get("company_id")
+        company_name = entry.get("company_name", "Unknown")
+        if not company_id:
+            return jsonify({"error": "Audit entry has no company_id"}), 400
+        # Restore snapshot — include None values (true rollback, not a partial patch)
+        _EXCLUDE = {"id", "date_added"}
+        restore = {k: v for k, v in snapshot.items() if k not in _EXCLUDE}
+        _ph = {**_h, "Content-Type": "application/json", "Prefer": "return=minimal"}
+        pr = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/Companies?id=eq.{company_id}",
+            headers=_ph, json=restore, timeout=15
+        )
+        if pr.status_code not in (200, 204):
+            return jsonify({"error": f"Supabase PATCH failed: {pr.status_code}"}), 500
+        from searcher import write_audit
+        write_audit("rollback", company_id, company_name,
+                    changes=f"Rolled back to state before audit entry {audit_id} ({entry.get('timestamp','')[:19]})",
+                    triggered_by="manual (dashboard)")
+        return jsonify({"ok": True, "company_id": company_id, "company_name": company_name})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

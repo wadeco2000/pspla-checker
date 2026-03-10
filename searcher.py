@@ -4847,7 +4847,7 @@ _LINKEDIN_IMPORT_QUERIES = [
 ]
 
 
-def write_audit(action, company_id, company_name, changes="", triggered_by="manual", notes=""):
+def write_audit(action, company_id, company_name, changes="", triggered_by="manual", notes="", snapshot_before=None):
     """Write an audit log entry to the AuditLog table in Supabase."""
     try:
         url = f"{SUPABASE_URL}/rest/v1/AuditLog"
@@ -4865,6 +4865,7 @@ def write_audit(action, company_id, company_name, changes="", triggered_by="manu
             "changes": changes,
             "triggered_by": triggered_by,
             "notes": notes,
+            "snapshot_before": json.dumps(snapshot_before) if snapshot_before is not None else None,
         }
         requests.post(url, headers=headers, json=payload, timeout=10)
     except Exception as e:
