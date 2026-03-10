@@ -2722,14 +2722,19 @@ def check_companies_office(company_name, pspla_address=None):
             def _rule_variants(name):
                 """Generate cheap rule-based name variants to retry CO search."""
                 variants = []
+                # Replace slash/hyphen with space: "24/Seven" → "24 Seven", "A-1" → "A 1"
+                slashed = _re.sub(r'[/\-]', ' ', name).strip()
+                slashed = _re.sub(r'\s{2,}', ' ', slashed)
+                if slashed.lower() != name.lower():
+                    variants.append(slashed)
                 # Insert space before digit runs: "Code9" → "Code 9"
                 spaced = _re.sub(r'([A-Za-z])(\d)', r'\1 \2', name)
                 spaced = _re.sub(r'(\d)([A-Za-z])', r'\1 \2', spaced)
-                if spaced != name:
+                if spaced.lower() != name.lower():
                     variants.append(spaced)
                 # CamelCase split: "AlarmWatch" → "Alarm Watch"
                 camel = _re.sub(r'([a-z])([A-Z])', r'\1 \2', name)
-                if camel != name:
+                if camel.lower() != name.lower():
                     variants.append(camel)
                 # Strip legal suffixes for a broader search
                 stripped = _re.sub(
