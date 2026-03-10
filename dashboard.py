@@ -2829,11 +2829,11 @@ HTML_TEMPLATE = """
                     closeNzsaModal();
                 } else {
                     alert('Could not open browser: ' + (d.error || 'unknown error'));
-                    if (openBtn) { openBtn.innerHTML = '<i class=\'fa-solid fa-arrow-up-right-from-square\'></i>&nbsp;Open Report Form'; openBtn.disabled = false; }
+                    if (openBtn) { openBtn.textContent = 'Open Report Form'; openBtn.disabled = false; }
                 }
             }).catch(function(e) {
                 alert('Error: ' + e);
-                if (openBtn) { openBtn.innerHTML = '<i class=\'fa-solid fa-arrow-up-right-from-square\'></i>&nbsp;Open Report Form'; openBtn.disabled = false; }
+                if (openBtn) { openBtn.textContent = 'Open Report Form'; openBtn.disabled = false; }
             });
         }
 
