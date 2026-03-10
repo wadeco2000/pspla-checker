@@ -321,6 +321,7 @@ HTML_TEMPLATE = """
         html.dark .badge-expired { background:#3a2a1a; color:#f0a060; }
         html.dark .badge-unknown { background:#2a3040; color:#95a5a6; }
         html.dark .page-content { color:#d0d0d0; }
+        html.dark #nzsa-report-modal>div,
         html.dark #clear-db-modal>div,html.dark #recheck-modal>div,
         html.dark #export-modal>div,html.dark #search-conflict-modal>div
             { background:#1a2535 !important; color:#d0d0d0 !important; }
@@ -1778,6 +1779,22 @@ HTML_TEMPLATE = """
                                         style="padding:3px 12px; font-size:12px; background:#16a085; color:white; border:none; border-radius:3px; cursor:pointer;">
                                     📝 Corrections / notes
                                 </button>
+                                <button
+                                    data-nzsa-name="{{ (c.company_name or '') | e }}"
+                                    data-nzsa-address="{{ (c.address or '') | e }}"
+                                    data-nzsa-region="{{ (c.region or '') | e }}"
+                                    data-nzsa-website="{{ (c.website or '') | e }}"
+                                    data-nzsa-pspla-status="{{ (c.pspla_license_status or '') | e }}"
+                                    data-nzsa-pspla-name="{{ (c.pspla_name or '') | e }}"
+                                    data-nzsa-has-cctv="{{ 'yes' if c.has_cctv_cameras else 'no' }}"
+                                    data-nzsa-has-alarm="{{ 'yes' if c.has_alarm_systems else 'no' }}"
+                                    data-nzsa-fb-cctv="{{ 'yes' if c.fb_cctv_cameras else 'no' }}"
+                                    data-nzsa-fb-alarm="{{ 'yes' if c.fb_alarm_systems else 'no' }}"
+                                    data-nzsa-fb-url="{{ (c.facebook_url or '') | e }}"
+                                    onclick="openNzsaReport(this)"
+                                    style="padding:3px 12px; font-size:12px; background:#c0392b; color:white; border:none; border-radius:3px; cursor:pointer;">
+                                    🚩 Report to NZSA
+                                </button>
                                 <button data-cid="{{ c.id }}" data-cname="{{ (c.company_name or '') | e }}"
                                         onclick="deleteCompany(this.dataset.cid, this.dataset.cname)"
                                         style="padding:3px 12px; font-size:12px; background:#c0392b; color:white; border:none; border-radius:3px; cursor:pointer;">
@@ -2730,7 +2747,96 @@ HTML_TEMPLATE = """
             }).catch(function(){ status.style.color='#e74c3c'; status.textContent='Request failed.'; });
         }
 
-        function confirmRecheck(approved) {
+        // ── NZSA Report ─────────────────────────────────────────────────────────
+        var _nzsaFormData = {};
+
+        function openNzsaReport(btn) {
+            var d = btn.dataset;
+            _nzsaFormData = {
+                name:       d.nzsaName    || '',
+                address:    d.nzsaAddress || '',
+                region:     d.nzsaRegion  || '',
+                website:    d.nzsaWebsite || '',
+                psplaStatus:d.nzsaPsplaStatus || '',
+                psplaName:  d.nzsaPsplaName  || '',
+                hasCctv:    d.nzsaHasCctv  === 'yes',
+                hasAlarm:   d.nzsaHasAlarm === 'yes',
+                fbCctv:     d.nzsaFbCctv   === 'yes',
+                fbAlarm:    d.nzsaFbAlarm  === 'yes',
+                fbUrl:      d.nzsaFbUrl   || ''
+            };
+            // Restore saved reporter details
+            var ls = localStorage;
+            document.getElementById('nzsa-fname').value  = ls.getItem('nzsa-fname')  || '';
+            document.getElementById('nzsa-lname').value  = ls.getItem('nzsa-lname')  || '';
+            document.getElementById('nzsa-email').value  = ls.getItem('nzsa-email')  || '';
+            document.getElementById('nzsa-mobile').value = ls.getItem('nzsa-mobile') || '';
+            // Display company info
+            document.getElementById('nzsa-disp-name').textContent = _nzsaFormData.name || '-';
+            var loc = [_nzsaFormData.address, _nzsaFormData.region].filter(Boolean).join(', ');
+            document.getElementById('nzsa-disp-location').textContent = loc || '-';
+            document.getElementById('nzsa-disp-website').textContent  = _nzsaFormData.website || 'not recorded';
+            var psplaText = _nzsaFormData.psplaStatus
+                ? (_nzsaFormData.psplaName ? _nzsaFormData.psplaName + ' — ' : '') + _nzsaFormData.psplaStatus
+                : 'No licence found';
+            document.getElementById('nzsa-disp-pspla').textContent = psplaText;
+            // Build evidence text
+            var svcs = [];
+            if (_nzsaFormData.hasCctv || _nzsaFormData.fbCctv)   svcs.push('CCTV camera installation');
+            if (_nzsaFormData.hasAlarm || _nzsaFormData.fbAlarm)  svcs.push('alarm system installation');
+            if (!svcs.length) svcs.push('security services');
+            var svcStr = svcs.join(' and ');
+            var channels = [];
+            if (_nzsaFormData.website) channels.push('their website (' + _nzsaFormData.website + ')');
+            if (_nzsaFormData.fbUrl)   channels.push('Facebook (' + _nzsaFormData.fbUrl + ')');
+            var chanStr = channels.length ? ' on ' + channels.join(' and ') : '';
+            var locStr  = loc ? ' in ' + loc : '';
+            var evidence = _nzsaFormData.name + ' is advertising ' + svcStr + chanStr
+                + locStr + ' without holding a valid PSPLA licence.'
+                + ' A PSPLA licence check returned: ' + psplaText + '.'
+                + ' This report was identified through automated monitoring of NZ security companies'
+                + ' advertising camera and security installation services.';
+            document.getElementById('nzsa-evidence').value = evidence;
+            // Show modal
+            var modal = document.getElementById('nzsa-report-modal');
+            modal.style.display = 'flex';
+        }
+
+        function doOpenNzsaForm() {
+            // Save reporter details to localStorage
+            var ls = localStorage;
+            ls.setItem('nzsa-fname',  document.getElementById('nzsa-fname').value);
+            ls.setItem('nzsa-lname',  document.getElementById('nzsa-lname').value);
+            ls.setItem('nzsa-email',  document.getElementById('nzsa-email').value);
+            ls.setItem('nzsa-mobile', document.getElementById('nzsa-mobile').value);
+            // Build pre-fill URL
+            var loc = [_nzsaFormData.address, _nzsaFormData.region].filter(Boolean).join(', ');
+            var params = new URLSearchParams({
+                'input_2.3': document.getElementById('nzsa-fname').value,
+                'input_2.6': document.getElementById('nzsa-lname').value,
+                'input_3':   document.getElementById('nzsa-email').value,
+                'input_4':   document.getElementById('nzsa-mobile').value,
+                'input_6':   _nzsaFormData.name,
+                'input_7':   loc
+            });
+            var url = 'https://security.org.nz/public-info/report-unlicensed-operators/?' + params.toString();
+            window.open(url, '_blank');
+        }
+
+        function closeNzsaModal() {
+            document.getElementById('nzsa-report-modal').style.display = 'none';
+        }
+
+        function copyNzsaEvidence() {
+            var ta = document.getElementById('nzsa-evidence');
+            navigator.clipboard.writeText(ta.value).then(function() {
+                var btn = document.getElementById('nzsa-copy-btn');
+                btn.textContent = 'Copied!';
+                setTimeout(function() { btn.textContent = 'Copy'; }, 2000);
+            });
+        }
+
+                function confirmRecheck(approved) {
             document.getElementById('recheck-modal').style.display = 'none';
             if (!_recheckPending.id) return;
             fetch('/confirm-recheck', {
@@ -2847,6 +2953,50 @@ HTML_TEMPLATE = """
         }
         // ── End Running Search Conflict System ───────────────────────────────────────
     </script>
+
+<!-- NZSA Report Modal -->
+<div id="nzsa-report-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+     background:rgba(44,62,80,0.95); z-index:9999; align-items:center; justify-content:center; overflow-y:auto;">
+    <div style="background:white; padding:28px; border-radius:12px; max-width:560px; width:92%; margin:20px auto; font-size:13px;">
+        <h2 style="margin:0 0 4px; color:#c0392b; font-size:16px;"><i class="fa-solid fa-flag"></i> Report Unlicensed Operator to NZSA</h2>
+        <p style="color:#777; font-size:12px; margin:0 0 18px;">Opens the NZSA reporting form with fields pre-filled. Review everything before submitting.</p>
+        <div style="background:#f8f9fa; border:1px solid #dee2e6; border-radius:6px; padding:12px; margin-bottom:14px;">
+            <div style="font-weight:bold; font-size:11px; color:#555; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Your Details <span style="font-weight:normal; color:#888;">(saved for next time)</span></div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <div><label style="font-size:11px; color:#666; display:block; margin-bottom:2px;">First name</label>
+                    <input id="nzsa-fname" type="text" placeholder="First name" style="width:100%; padding:5px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px; box-sizing:border-box;"></div>
+                <div><label style="font-size:11px; color:#666; display:block; margin-bottom:2px;">Last name</label>
+                    <input id="nzsa-lname" type="text" placeholder="Last name" style="width:100%; padding:5px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px; box-sizing:border-box;"></div>
+                <div><label style="font-size:11px; color:#666; display:block; margin-bottom:2px;">Email</label>
+                    <input id="nzsa-email" type="email" placeholder="your@email.com" style="width:100%; padding:5px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px; box-sizing:border-box;"></div>
+                <div><label style="font-size:11px; color:#666; display:block; margin-bottom:2px;">Mobile</label>
+                    <input id="nzsa-mobile" type="text" placeholder="021 ..." style="width:100%; padding:5px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px; box-sizing:border-box;"></div>
+            </div>
+        </div>
+        <div style="background:#fff8f0; border:1px solid #fce4c3; border-radius:6px; padding:12px; margin-bottom:14px;">
+            <div style="font-weight:bold; font-size:11px; color:#555; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Company Being Reported</div>
+            <div style="margin-bottom:4px;"><span style="color:#888;">Name:</span> <strong id="nzsa-disp-name"></strong></div>
+            <div style="margin-bottom:4px;"><span style="color:#888;">Location:</span> <span id="nzsa-disp-location"></span></div>
+            <div style="margin-bottom:4px;"><span style="color:#888;">Website:</span> <span id="nzsa-disp-website"></span></div>
+            <div><span style="color:#888;">PSPLA status:</span> <span id="nzsa-disp-pspla"></span></div>
+        </div>
+        <div style="margin-bottom:16px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+                <label style="font-weight:bold; font-size:11px; color:#555; text-transform:uppercase; letter-spacing:0.5px;">Evidence / Description</label>
+                <button onclick="copyNzsaEvidence()" id="nzsa-copy-btn" style="padding:2px 10px; font-size:11px; background:#2980b9; color:white; border:none; border-radius:3px; cursor:pointer;">Copy</button>
+            </div>
+            <p style="font-size:11px; color:#888; margin:0 0 6px;"><i class="fa-solid fa-circle-info"></i>&nbsp;This field cannot be pre-filled via URL — copy it and paste it into the Evidence field after the form opens.</p>
+            <textarea id="nzsa-evidence" style="width:100%; height:90px; font-size:12px; padding:6px 8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box; resize:vertical; line-height:1.5;"></textarea>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button onclick="doOpenNzsaForm()" style="padding:8px 20px; background:#c0392b; color:white; border:none; border-radius:5px; font-size:13px; font-weight:bold; cursor:pointer; flex:1;">
+                <i class="fa-solid fa-arrow-up-right-from-square"></i>&nbsp;Open Report Form
+            </button>
+            <button onclick="closeNzsaModal()" style="padding:8px 16px; background:#95a5a6; color:white; border:none; border-radius:5px; font-size:13px; cursor:pointer;">Cancel</button>
+        </div>
+        <p style="font-size:11px; color:#aaa; margin:10px 0 0;">The form opens in a new tab with fields pre-filled. You must click Submit on the NZSA site yourself.</p>
+    </div>
+</div>
 
 <!-- Clear DB Modal -->
 <div id="clear-db-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%;
