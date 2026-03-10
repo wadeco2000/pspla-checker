@@ -6846,6 +6846,17 @@ html.dark .disclaimer{color:#556}
 .quick-btn:hover{background:#d6eaf8}
 html.dark .quick-btn{background:#1a2940;border-color:#2d4460;color:#5dade2}
 html.dark .quick-btn:hover{background:#1e3550}
+.kb-stats{background:#2c3e50;color:#bdc3c7;font-size:11px;display:flex;flex-wrap:wrap;gap:0;flex-shrink:0}
+.kb-stats span{padding:5px 14px;border-right:1px solid rgba(255,255,255,.1);display:flex;align-items:center;gap:5px}
+.kb-stats span strong{color:#fff}
+.kb-stats a{color:#85c1e9;text-decoration:none}
+.kb-stats a:hover{text-decoration:underline}
+html.dark .kb-stats{background:#0d1520;border-bottom:1px solid #1a2940}
+.thinking-status{font-size:11px;color:#888;margin-top:6px;padding:0 2px}
+html.dark .thinking-status{color:#5d6d7e}
+.thinking-status i{margin-right:3px;width:12px;text-align:center}
+.msg-bubble.streaming::after{content:"▍";display:inline-block;animation:blink 0.8s step-end infinite;margin-left:1px;opacity:.7}
+@keyframes blink{0%,100%{opacity:.7}50%{opacity:0}}
 </style>
 <script>(function(){if(localStorage.getItem("pspla-dark")==="1")document.documentElement.classList.add("dark");})()</script>
 </head>
@@ -6858,6 +6869,13 @@ html.dark .quick-btn:hover{background:#1e3550}
   </div>
   <a href="/" class="back-btn"><i class="fa-solid fa-arrow-left"></i> Dashboard</a>
 </header>
+<div class="kb-stats">
+  <span><i class="fa-solid fa-database"></i> <strong>482</strong> PSPLA decisions (2019–2026)</span>
+  <span><i class="fa-solid fa-file-lines"></i> Private Security Personnel &amp; Private Investigators Act 2010</span>
+  <span><i class="fa-solid fa-file-lines"></i> NZSA Position Statement (July 2025)</span>
+  <span><i class="fa-solid fa-file-lines"></i> Electrical Workers Registration Act</span>
+  <span><i class="fa-solid fa-arrow-up-right-from-square"></i> <a href="https://www.justice.govt.nz/tribunals/licences-certificates/pspla/decisions/" target="_blank">Full decisions register</a></span>
+</div>
 <div class="chat-wrap">
   <div id="chat-messages"></div>
   <div class="input-row">
@@ -6869,15 +6887,31 @@ html.dark .quick-btn:hover{background:#1e3550}
 <script>
 var _history = [];
 var _thinking = false;
+var _thinkingTimer = null;
+var _thinkingPhase = 0;
+var _thinkingPhases = [
+  '<i class="fa-solid fa-database"></i> Reading knowledge base (482 PSPLA cases)...',
+  '<i class="fa-solid fa-magnifying-glass"></i> Checking decisions register...',
+  '<i class="fa-solid fa-pen-to-square"></i> Composing answer...'
+];
 
 function escHtml(t){
   return t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
 function formatMsg(t){
-  // Bold **text**, links, newlines
   t = escHtml(t);
   t = t.replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>");
+  // Auto-link PSPLA case citations e.g. "2025 NZPSPLA 087"
+  t = t.replace(/(\d{4}) NZPSPLA (\d{3,4})/g, function(match, year, num){
+    var url = "https://www.justice.govt.nz/tribunals/licences-certificates/pspla/decisions/" + year + "-nzpspla-" + num + "/";
+    return "<a href=\"" + url + "\" target=\"_blank\">" + match + "</a>";
+  });
+  // Also handle shorthand like "2025/087"
+  t = t.replace(/(\d{4})\/(\d{3,4})(?=[^\d]|$)/g, function(match, year, num){
+    var url = "https://www.justice.govt.nz/tribunals/licences-certificates/pspla/decisions/" + year + "-nzpspla-" + num + "/";
+    return "<a href=\"" + url + "\" target=\"_blank\">" + year + " NZPSPLA " + num + "</a>";
+  });
   t = t.replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank">$1</a>');
   return t;
 }
@@ -6935,17 +6969,31 @@ function showTyping(){
   var av = document.createElement("div");
   av.className = "msg-avatar";
   av.innerHTML = '<i class="fa-solid fa-scale-balanced"></i>';
-  var t = document.createElement("div");
-  t.className = "typing";
-  t.innerHTML = "<span></span><span></span><span></span>";
+  var inner = document.createElement("div");
+  var dots = document.createElement("div");
+  dots.className = "typing";
+  dots.innerHTML = "<span></span><span></span><span></span>";
+  var status = document.createElement("div");
+  status.className = "thinking-status";
+  status.id = "thinking-status";
+  status.innerHTML = _thinkingPhases[0];
+  inner.appendChild(dots);
+  inner.appendChild(status);
   wrap.appendChild(av);
-  wrap.appendChild(t);
+  wrap.appendChild(inner);
   var msgs = document.getElementById("chat-messages");
   msgs.appendChild(wrap);
   msgs.scrollTop = msgs.scrollHeight;
+  _thinkingPhase = 0;
+  _thinkingTimer = setInterval(function(){
+    _thinkingPhase = Math.min(_thinkingPhase + 1, _thinkingPhases.length - 1);
+    var el = document.getElementById("thinking-status");
+    if(el) el.innerHTML = _thinkingPhases[_thinkingPhase];
+  }, 1800);
 }
 
 function removeTyping(){
+  if(_thinkingTimer){ clearInterval(_thinkingTimer); _thinkingTimer = null; }
   var t = document.getElementById("typing-indicator");
   if(t) t.remove();
 }
@@ -6958,17 +7006,79 @@ function send(text){
   _thinking = true;
   document.getElementById("send-btn").disabled = true;
   showTyping();
+
   fetch("/license-checker/chat", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({messages: _history})
-  }).then(function(r){ return r.json(); }).then(function(d){
-    removeTyping();
-    var reply = d.reply || "Sorry, something went wrong. Please try again.";
-    addBubble("ai", reply, false);
-    _history.push({role:"assistant", content: reply});
-    _thinking = false;
-    document.getElementById("send-btn").disabled = false;
+  }).then(function(r){
+    var reader = r.body.getReader();
+    var decoder = new TextDecoder();
+    var buf = "";
+    var rawText = "";
+    var bub = null;
+    var bubWrap = null;
+    var finalized = false;
+
+    function finalize(){
+      if(finalized) return;
+      finalized = true;
+      _thinking = false;
+      document.getElementById("send-btn").disabled = false;
+      if(bub){
+        bub.classList.remove("streaming");
+        bub.innerHTML = formatMsg(rawText);
+        _history.push({role:"assistant", content: rawText});
+        document.getElementById("chat-messages").scrollTop = document.getElementById("chat-messages").scrollHeight;
+      }
+    }
+
+    function pump(){
+      return reader.read().then(function(result){
+        if(result.done){ finalize(); return; }
+        buf += decoder.decode(result.value, {stream:true});
+        var lines = buf.split("\n");
+        buf = lines.pop();
+        for(var i=0; i<lines.length; i++){
+          var line = lines[i];
+          if(!line.startsWith("data: ")) continue;
+          var data = line.slice(6);
+          if(data === "[DONE]"){ finalize(); return; }
+          try{
+            var obj = JSON.parse(data);
+            if(obj.delta !== undefined){
+              if(!bub){
+                removeTyping();
+                bubWrap = document.createElement("div");
+                bubWrap.className = "msg ai";
+                var av2 = document.createElement("div");
+                av2.className = "msg-avatar";
+                av2.innerHTML = '<i class="fa-solid fa-scale-balanced"></i>';
+                var inner2 = document.createElement("div");
+                bub = document.createElement("div");
+                bub.className = "msg-bubble streaming";
+                inner2.appendChild(bub);
+                bubWrap.appendChild(av2);
+                bubWrap.appendChild(inner2);
+                document.getElementById("chat-messages").appendChild(bubWrap);
+              }
+              rawText += obj.delta;
+              bub.textContent = rawText;
+              document.getElementById("chat-messages").scrollTop = document.getElementById("chat-messages").scrollHeight;
+            } else if(obj.error){
+              removeTyping();
+              addBubble("ai", "Sorry, there was an error: " + obj.error, false);
+              _thinking = false;
+              document.getElementById("send-btn").disabled = false;
+              finalized = true;
+              return;
+            }
+          } catch(e){}
+        }
+        return pump();
+      });
+    }
+    return pump();
   }).catch(function(e){
     removeTyping();
     addBubble("ai", "Sorry, there was an error connecting to the AI. Please try again.", false);
@@ -7013,30 +7123,36 @@ def license_checker():
 
 @app.route("/license-checker/chat", methods=["POST"])
 def license_checker_chat():
-    from flask import jsonify
-    import anthropic as _ant
-    try:
-        data = request.get_json(force=True) or {}
-        messages = data.get("messages", [])
-        if not messages:
-            return jsonify({"reply": "Please describe what type of work you do."})
+    import anthropic as _ant, json as _json
+    data = request.get_json(force=True) or {}
+    messages = data.get("messages", [])[-20:]
+    if not messages:
+        def _empty():
+            yield "data: " + _json.dumps({"delta": "Please describe what type of work you do."}) + "\n\n"
+            yield "data: [DONE]\n\n"
+        return Response(_empty(), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-        # Cap history to last 20 exchanges to avoid token bloat
-        trimmed = messages[-20:]
+    client = _ant.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
 
-        client = _ant.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1024,
-            system=_LICENSE_KB,
-            messages=trimmed,
-        )
-        reply = resp.content[0].text if resp.content else "Sorry, I couldn't generate a response."
-        return jsonify({"reply": reply})
-    except Exception as _e:
-        import traceback as _tb
-        print("license-checker/chat error:", _tb.format_exc())
-        return jsonify({"reply": "Sorry, there was an error: " + str(_e)})
+    def generate():
+        try:
+            with client.messages.stream(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1024,
+                system=_LICENSE_KB,
+                messages=messages,
+            ) as stream:
+                for text in stream.text_stream:
+                    yield "data: " + _json.dumps({"delta": text}) + "\n\n"
+        except Exception as _e:
+            import traceback as _tb
+            print("license-checker/chat error:", _tb.format_exc())
+            yield "data: " + _json.dumps({"error": str(_e)}) + "\n\n"
+        yield "data: [DONE]\n\n"
+
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 if __name__ == "__main__":
