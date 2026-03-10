@@ -3106,6 +3106,9 @@ def _normalise_company_name(name):
     """Strip legal suffixes and punctuation for fuzzy matching."""
     import re as _re
     n = name.lower()
+    # Strip "trading as" abbreviations before anything else — t/a and t/as should
+    # never be treated as matching tokens.
+    n = _re.sub(r'\bt/as?\b', ' ', n)
     n = _re.sub(r'\b(limited|ltd|nz|new zealand|inc|llp|lp|co)\b', ' ', n)
     n = _re.sub(r'[^a-z0-9 ]', ' ', n)
     return _re.sub(r'\s+', ' ', n).strip()
@@ -3160,7 +3163,9 @@ def check_nzsa(company_name, website=None):
         d = _re.sub(r'^https?://(www\.)?', '', s).rstrip("/")
         return d.split("/")[0] if d else ""
 
-    sig_words = query_words - _GENERIC
+    # Require significant words to be at least 2 chars — single-letter fragments
+    # (e.g. "t" from "t/a" after slash stripping) must never drive a match.
+    sig_words = {w for w in (query_words - _GENERIC) if len(w) >= 2}
 
     best_score = 0
     best_member = None
