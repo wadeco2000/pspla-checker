@@ -268,13 +268,13 @@ def recheck_pspla(company, triggered_by="bulk-recheck"):
     pspla_name = result.get("matched_name")
 
     # Individual licence check if no company licence
-    individual_license_found = False
+    individual_license_found = None
     if not licensed:
         for director in directors:
             ind = check_pspla_individual(director)
-            if ind:
-                individual_license_found = True
-                print(f"  [PSPLA] Individual licence found for director: {director}")
+            if ind.get("found"):
+                individual_license_found = ind["name"] or director
+                print(f"  [PSPLA] Individual licence found for director: {individual_license_found}")
                 break
 
     updates = {
@@ -288,10 +288,10 @@ def recheck_pspla(company, triggered_by="bulk-recheck"):
         "pspla_permit_type":     result.get("permit_type"),
         "match_method":          result.get("match_method"),
         "match_reason":          result.get("match_reason"),
-        "individual_license":    individual_license_found,
         "last_checked":          datetime.now(timezone.utc).isoformat(),
     }
     updates = {k: v for k, v in updates.items() if v is not None}
+    updates["individual_license"] = individual_license_found  # always update (clears stale boolean values)
     patch_company(company_id, updates)
     write_audit("updated", str(company_id), company_name,
                 changes=f"PSPLA recheck: licensed={licensed} name={pspla_name} status={result.get('license_status')}",
