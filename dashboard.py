@@ -6630,64 +6630,157 @@ Enforcement is carried out by the CIPU (Criminal Investigation and Prosecution U
 Key point: Both the COMPANY and the INDIVIDUAL can be fined simultaneously. A company using unlicensed staff can also face prosecution, as can the unlicensed worker themselves.
 
 ---
-REAL PSPLA ENFORCEMENT CASES (from PSPLA decisions register)
+COMPLETE PSPLA DECISIONS REGISTER (2019-2026) - All 482 cases
+Source: justice.govt.nz/tribunals/licences-certificates/pspla/decisions/
 
-These are actual cases that show the types of conduct the Authority takes seriously:
+--- CATEGORY A: OPERATING WITHOUT A LICENCE / UNLICENSED SECURITY WORK ---
+2026 NZPSPLA 004 | Police & CIPU v Secpro and Tautali | Operated security business after licence declined; breached COA conditions | COA cancelled; referred to CIPU for criminal prosecution
+2025 NZPSPLA 087 | DBDS & Singh | Unlicensed security business; guards with expired/absent credentials | Reprimand; 5-year application bar; fine (ss23,44,45,78)
+2025 NZPSPLA 082 | Blackfern Protection Group Ltd | Private investigator work without licence; director uncooperative | Company licence declined; COA cancelled; conditions
+2025 NZPSPLA 074 | Police v Shaw | Operating security business without licence; permitting unlicensed guard | COAs cancelled; reprimanded; fined
+2025 NZPSPLA 051 | Legion Security | Operating without licence; employing unlicensed workers; improper records | Licence cancelled (stayed 4 months)
+2025 NZPSPLA 049 | Rooney | Working while suspended; unlicensed business; false information | COA cancelled
+2025 NZPSPLA 048 | (unnamed) | Operating unlicensed security company; employing non-COA holders | Reprimand and conditions
+2025 NZPSPLA 040 | CIPU investigation | Engaging workers without COAs; misleading application | Fine and reprimand
+2025 NZPSPLA 038 | (unnamed) | Operating business non-compliant with Act | Company licence application declined; business cease order
+2025 NZPSPLA 030 | S.E.A.L Security and Kumar | Unlicensed operation; inadequate migrant worker investigation | Misconduct; some complaints unproven
+2025 NZPSPLA 023 | (unnamed) | Working as security consultant without licence or COA | Misconduct; reprimand; condition on COA
+2024 NZPSPLA 094 | (unnamed) | Running security company without licence; employing workers without COAs | Company licence declined; COA cancelled; false information
+2024 NZPSPLA 078 | (unnamed) | Working as security consultant without licence or COA | Misconduct; condition on COA; reprimand
+2024 NZPSPLA 076 | (unnamed) | Providing security services without individual licence | Misconduct found
+2024 NZPSPLA 041 | Turner & Waihape | Operating a security business without the required licence | Reprimand and further training
+2024 NZPSPLA 022 | (unnamed) | Convictions for unlicensed security work; continued non-compliance | Individual licence application declined
+2023 NZPSPLA 067 | Ioane | Operating unlicensed business; working without required COA class; threatening behaviour | COA cancelled
+2023 NZPSPLA 055 | MOP complaint | Providing security services without the appropriate licence | Reprimand; individual licence issued; publication ordered
+2023 NZPSPLA 054 | Wood | Operating property guard business clamping vehicles without licence | Misconduct; penalty adjourned pending company licence application
+2023 NZPSPLA 042 | Nia Nia | Operating security business without a licence despite advisory notice | Certificate cancelled
+2023 NZPSPLA 030 | Legion Security Ltd; Pailate | Operating security business without licence; employing workers without certificates | Warning; conditions for renewal; company licence required
+2023 NZPSPLA 004 | (company) | Trading without licence; employing unlicensed guard; false info; lying to investigator | Licence declined; referred for prosecution
+2023 NZPSPLA 003 | (company) | Trading without licence; employing unlicensed guard; continued breaches | Licence declined; prosecution referral
+2022 NZPSPLA 049 | (PI) | Operating private investigation business without licence | Cancelled; reprimand; fine
+2022 NZPSPLA 028 | (company and director) | Working in security without licence/certificate | Warning; future breaches = prosecution
+2022 NZPSPLA 026 | (company) | Trading without company licence; alarm installation violations | Complaint upheld
+2022 NZPSPLA 011 | (employment investigator) | Working without licence/certificate | Complaint upheld; no punitive action
+2021 NZPSPLA 024 | (unnamed) | Trading without licence | Complaint upheld; no further action
+2021 NZPSPLA 003 | (company) | Company officer lacked required training and experience | Licence cancelled; COA application declined
+2020 NZPSPLA 026 | (security company) | Operating unlicensed; breach subsequently remedied | Warning given
+2020 NZPSPLA 021 | (individual) | Working without COA; recruiting without COA; lying to police | Reprimand; fine; conditions
+2025 NZPSPLA 052 | (employment investigator) | Working as employment investigator without licence | Warning issued
 
-**2026 NZPSPLA 007 — CIPU v Principle Protection Services Limited**
-Violation: Engaged a crowd controller who did not hold a Certificate of Approval (COA). Also failed to file annual returns.
-Penalty: **3-month suspension** of company licence, plus written warning that further breaches would result in cancellation.
-Note: The company had a prior similar finding of misconduct — the 3-month suspension reflected this repeat offending.
-Key lesson: Companies must verify every worker holds a valid COA before deploying them. "I didn't know" is not a defence.
+--- CATEGORY B: EMPLOYING UNCERTIFIED / UNLICENSED WORKERS ---
+2026 NZPSPLA 007 | CIPU v Principle Protection Services Ltd | Engaged crowd controller without COA; failed annual returns; repeat offender | 3-month suspension; warning further breaches = cancellation
+2025 NZPSPLA 118 | (licensed company) | Subcontracting with unlicensed security company | Unsatisfactory conduct; licensed company responsible for subcontractors
+2025 NZPSPLA 111 | GRM Consulting | Hiring workers without COAs; failing annual returns; false information | Reprimand and fine
+2025 NZPSPLA 107 | Legion Security | Employing workers without COAs; misconduct | Licence cancelled
+2025 NZPSPLA 098 | (unnamed) | Company trading without licence; failure to file annual returns | Formal reprimand and conditions
+2025 NZPSPLA 078 | Protekus Security Limited | Employing guards without credentials; non-compliance with record-keeping | Licence cancellation deferred 2 months
+2025 NZPSPLA 062 | (company supplying security to Health NZ) | PSPPA Act breaches partially established but remedied | No further penalty
+2025 NZPSPLA 046 | Marlborough Security Ltd | Missing annual returns; engaging guards without COAs | Final warning; systems rectified
+2025 NZPSPLA 045 | S.E.A.L Security and Kumar (penalty) | See 2025/030 | Reprimand; $1,000 fine; condition prohibiting migrant worker recruitment
+2024 NZPSPLA 123 | (security company and director) | Employing persons to work unlawfully | Company licence cancelled by consent; director COA with 2-year restriction on managing security business
+2024 NZPSPLA 119 | (unnamed) | Engaging a crowd controller without COA; obstruction of CIPU | Breach confirmed; volunteer guidelines established
+2024 NZPSPLA 103 | (unnamed) | Failure to keep business records; employment of uncertified guards | Certificate cancelled; company licence declined
+2024 NZPSPLA 077 | (unnamed) | Engaging workers without COAs | Reprimand and warning
+2024 NZPSPLA 031 | (unnamed) | Breach ss23,44,45 providing restricted security services without certification; employed crowd controllers without COAs | Complaint upheld
+2024 NZPSPLA 029 | Police v unnamed security company | Failure to adequately train and supervise employees | Reprimanded; ss43,74,78 breaches found
+2024 NZPSPLA 025 | MOP complaint | Working without COA; employing non-certified crowd controllers | Complaint upheld; warning
+2024 NZPSPLA 018 | (unnamed company) | Employing security technicians without COAs | Warning; complaint closed after company implemented new policies
+2024 NZPSPLA 007 | (shopping mall cleaning company) | Cleaners providing security services without COAs | Company now licensed; education provided; warning
+2023 NZPSPLA 033 | (unnamed) | Failure to hold company licence; employing uncertified staff | Formal reprimand; conditions on company licence
+2023 NZPSPLA 029 | Dubble H Security; Creelman | Continued Act breaches | Company application declined; suspension extended; final warning
+2023 NZPSPLA 011 | Watchmen Security; Hunt | Employing workers without COA; running business after licence expired | Warning and reprimand
+2023 NZPSPLA 008 | (unnamed) | Company engaged crowd controller without COA; continued after licence expired | Reprimand and warning
 
-**2026 NZPSPLA 004 — Police & CIPU v Secpro and Tautali**
-Violation: Continued operating a security business after their licence had been declined. Also failed to comply with conditions attached to a COA.
-Penalty: COA cancelled. Matter **referred back to CIPU to pursue criminal prosecution** (i.e., potential $40,000–$60,000 fine in court).
-Key lesson: Operating after being declined a licence is treated very seriously — it results in prosecution referral, not just a warning.
+--- CATEGORY C: SCOPE OF THE ACT - WHAT IS AND IS NOT COVERED ---
+OUTSIDE the Act (complaints dismissed):
+- Process servers: 2026 NZPSPLA 001
+- Debt collectors: 2025 NZPSPLA 103, 2025 NZPSPLA 109
+- Insurance assessors: 2025 NZPSPLA 068
+- Government/Crown employees acting within employment scope: 2021 NZPSPLA 007
+- Health & Safety investigators who are HASANZ members: EXEMPT (2022 NZPSPLA 030)
+- Forensic accountants who are CAANZ members: EXEMPT (2022 NZPSPLA 031); non-CAANZ members need PSPLA licence
 
-**2025 NZPSPLA 118 — Licensed company using unlicensed subcontractor**
-Violation: A licensed security company subcontracted work to an unlicensed security company.
-Finding: While there is no explicit statutory prohibition on this, it was found to constitute **unsatisfactory conduct** under s78(1B). The licensed company was responsible for ensuring its subcontractors were properly licensed.
-Key lesson: You cannot outsource your way around licensing. Using an unlicensed subcontractor exposes the licensed company to disciplinary action.
+INSIDE the Act (require licensing):
+- Employment investigators: Inside Act (2022 NZPSPLA 011) - low enforcement when no harm
+- Non-CAANZ forensic accountants: Need PSPLA licence (2022 NZPSPLA 031)
+- Cleaners who also perform security duties: Need COA (2024 NZPSPLA 007)
+- Volunteers acting as crowd controllers: Can still breach Act (2024 NZPSPLA 119)
+- IT/tech companies doing security system work: Can be licensed; related industry experience accepted (2023 NZPSPLA 058 Centive Technologies Limited)
 
-**2025 NZPSPLA 139 — Police v Faasisila**
-Violation: Failed to provide information to police on request (s67).
-Penalty: Fine, reprimand, and mandatory further training required.
-Key lesson: Licence holders have ongoing obligations — including cooperating with police. Failure to comply results in fines and conditions.
+NOTABLE SCOPE CASES:
+2023 NZPSPLA 058 | Mulock-Houwer & Centive Technologies Ltd | IT/tech company security licence application; insufficient 12-month experience claimed | ACCEPTED related industry experience; licence granted with 12-month review - KEY CASE for tech companies
+2022 NZPSPLA 031 | (forensic accountants) | Forensic accountants as PIs | CAANZ members exempt; non-members need PSPLA licence
+2022 NZPSPLA 030 | (H&S investigators) | H&S investigators as PIs | HASANZ members exempt from PSPLA
+2024 NZPSPLA 119 | (unnamed) | Volunteers as crowd controllers | No volunteer exemption for crowd control work
 
-**2025 NZPSPLA 125 — Property theft while on duty**
-Violation: Stole goods from the property being guarded. Dealt with by alternative dispute resolution (no criminal conviction).
-Penalty: Fine, reprimand, and conditions imposed on licence.
-Key lesson: Misconduct while performing security work results in disciplinary action even without a criminal conviction.
+--- CATEGORY D: CONDUCT AND MISCONDUCT WHILE LICENSED ---
+2026 NZPSPLA 002 | Stewart | Posted gang/drug video in security uniform | COA cancelled; conditions for reapplication
+2025 NZPSPLA 139 | Police v Faasisila | Failed to provide information to police (s67) | Fine; reprimand; mandatory training
+2025 NZPSPLA 125 | Police v Taufa | Took goods from guarded property (ADR, no conviction) | Fine; reprimand; COA conditions
+2025 NZPSPLA 124 | CIPU v Taloaina Mulitalo | Wearing altered security ID belonging to someone else; false information | Fine and reprimand
+2025 NZPSPLA 121 | Sullivan complaint | Unlawful repossession without contract or court order | Fine; reprimand; conditions
+2025 NZPSPLA 115 | Police complaint | Failure to display COA ID; obstructive to police | Formal reprimand
+2025 NZPSPLA 102 | (complaint) | Theft whilst guarding | Formal reprimand; conditions on COA
+2025 NZPSPLA 090 | (unnamed) | Unauthorised CCTV footage sharing - privacy violation | COA cancelled by consent
+2025 NZPSPLA 083 | Police v Tumata | Fraudulent security ID alteration; failure to display ID | Short suspension and reprimand
+2024 NZPSPLA 116 | Police v Rayilla | Stealing money from bags during security work | COA cancelled
+2024 NZPSPLA 042 | Police v Adeosun | Failure to wear security ID | Reprimand and further training
+2024 NZPSPLA 037 | Police v Talagi | Assaulted a youth while working as a security guard | COA cancelled
+2024 NZPSPLA 036 | Police v Tanevesi | Unprovoked attack on two 15-year-olds while working | COA cancelled
+2024 NZPSPLA 002 | Miranalasekula | Stealing goods from security work site | COA cancelled
+2023 NZPSPLA 076 | (unnamed) | Improper CCTV access; disclosure failures; MOJ logo misuse | Reprimand; written apology; training
+2023 NZPSPLA 019 | Galuega | Security technician convicted of making intimate recording | Security technician certificate cancelled
+2023 NZPSPLA 038 | Signal | Working with incorrect certificate classes; misleading timesheets | Certificate cancelled
+2022 NZPSPLA 027 | (unnamed) | Breach of security and privacy requirements | Fine and reprimand
+2020 NZPSPLA 009 | (PI) | Private investigator misconduct (penalty decision) | Fine and reprimand
+2020 NZPSPLA 020 | (unnamed) | Theft from guarded premises | COA cancelled
 
-**2026 NZPSPLA 002 — Stewart**
-Violation: While wearing a security uniform, posted a video to social media showing gang and drug associations.
-Penalty: COA cancelled. Conditions imposed on any future reapplication.
-Key lesson: Conduct outside work hours that undermines public confidence in the security industry can cost you your licence.
+--- CATEGORY E: ID BADGE REQUIREMENTS (s67) ---
+Section 67 requires security workers to wear their ID badge visibly at all times while working. Failure = misconduct.
+2025 NZPSPLA 072 | Police v Naea | Failing to wear security ID | Reprimand and warning
+2025 NZPSPLA 050 | Police v Taufa | Breach of s67 ID requirements | Reprimand and warning
+2025 NZPSPLA 027 | Police v Capewell-Marsters | Not wearing ID visibly | Warning given
+2024 NZPSPLA 122 | Police v Brunell | Failure to wear security ID badge visibly | Misconduct finding
+2023 NZPSPLA 007 | (unnamed) | Failing to wear ID; failing to produce COA on request | Training requirement and reprimand
+
+--- CATEGORY F: DISQUALIFYING CONVICTIONS ---
+The most common case type. Convictions in these categories typically = COA cancelled:
+VIOLENCE: assault, wounding, GBH, kidnapping, family harm, male assault female
+DISHONESTY: theft, fraud, obtaining by deception, money laundering, burglary
+DRUGS: possession for supply, supply, importation (Class A/B), methamphetamine
+FIREARMS offences
+GANG MEMBERSHIP: Mongrel Mob, Head Hunters, Highway 61 MC, Tribesman - consistently disqualifying
+SERIOUS TRAFFIC: multiple drink driving, driving while disqualified
+SEXUAL offences
+
+WAIVER (s64): Approved for single older offence + demonstrated rehabilitation. Rarely granted for serious violence, dishonesty, gang membership, or recent offending.
+
+Notable cases:
+2026 NZPSPLA 009 | Police v Sula | Assault (discharge without conviction) | COA cancelled - still unsuitable
+2025 NZPSPLA 134 | Police v Roberts | Four excess alcohol driving convictions | COA cancelled
+2025 NZPSPLA 100 | Police v Richmond | Gang membership with photographic evidence | COA cancelled
+2025 NZPSPLA 042 | Police v Hape | Mongrel Mob prospect status | COA cancelled
+2024 NZPSPLA 010 | Timoti | Disqualifying convictions and prison sentence | Barred for SIX YEARS
+2023 NZPSPLA 049 | Singh | Murder conviction; 17-year non-parole | COA cancelled
+2023 NZPSPLA 089 | Magele & Blade Group Ltd | Tax fraud; imprisonment | Certificate and company licence both cancelled
+2020 NZPSPLA 011 | (unnamed) | Forged competency document | Certificate/licence cancelled; 5-year bar on reapplication
 
 ---
-FITNESS TO HOLD A LICENCE — DISQUALIFYING FACTORS
+PRACTICAL TAKEAWAYS FROM THE FULL DECISIONS REGISTER
 
-Certain criminal convictions automatically disqualify a person from holding a PSPLA licence:
-- Convictions for violence offences (assault, serious violence)
-- Convictions for dishonesty offences (theft, fraud, money laundering)
-- Sentences of imprisonment
-- Active warrants for arrest
-
-Many recent cases (2025-2026) involve COA cancellations for holders who acquired disqualifying convictions after being granted their licence. The Authority monitors licence holders and cancels on this basis.
-
-A person with a disqualifying conviction CAN apply for a waiver, but these are rarely granted for serious violence or dishonesty offences.
-
----
-PRACTICAL TAKEAWAYS FROM THE CASES
-
-1. Deploying a worker without checking their COA is misconduct — even once.
-2. Operating after your application is declined triggers prosecution referral.
-3. Using unlicensed subcontractors is unsatisfactory conduct for the licensed company.
-4. Annual returns must be filed — failure is a separate breach.
-5. The fines are substantial: up to $40k (individual) and $60k (company).
-6. Criminal convictions, even for conduct outside work, can result in COA cancellation.
-7. The PSPLA decisions register is public — all outcomes are visible.
+1. Deploying a worker without a valid COA is misconduct even once. Escalates with repeat offending (2026/007 = 3-month suspension for repeat).
+2. Operating after your application is declined = prosecution referral, not just a warning (2026/004, 2023/004, 2023/003).
+3. Using unlicensed subcontractors = unsatisfactory conduct for the licensed company (2025/118).
+4. Annual returns must be filed - failure is a standalone breach that can trigger suspension.
+5. Maximum penalties: $40,000 individual / $60,000 company operating without licence (s23). General offences: $5,000 (s107).
+6. Gang membership = disqualifying in virtually all cases.
+7. Criminal convictions for violence and dishonesty are the most common COA cancellation reason.
+8. Wearing your ID badge is a legal requirement (s67) - failure = reprimand even for otherwise compliant workers.
+9. Conduct outside work hours counts: gang associations, social media posts, domestic violence = cancellation.
+10. The decisions register is entirely public - every outcome is on the Ministry of Justice website.
+11. Waivers occasionally granted for single older offences with demonstrated rehabilitation; rarely for serious violence or gang membership.
+12. Related industry experience can satisfy licensing requirements - an IT/tech company was granted a security licence based on related experience (2023/058 Centive Technologies).
+13. Cleaners, IT workers, and others who incidentally provide security services require a COA regardless of job title.
 
 ---
 USEFUL REFERENCES
