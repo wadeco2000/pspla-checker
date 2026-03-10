@@ -51,14 +51,22 @@ class _TeeWriter:
         self._real = real
         self._f = f
     def write(self, data):
-        self._real.write(data)
+        if self._real is not None:
+            try:
+                self._real.write(data)
+            except Exception:
+                pass
         try:
             self._f.write(data)
             self._f.flush()
         except Exception:
             pass
     def flush(self):
-        self._real.flush()
+        if self._real is not None:
+            try:
+                self._real.flush()
+            except Exception:
+                pass
         try:
             self._f.flush()
         except Exception:
