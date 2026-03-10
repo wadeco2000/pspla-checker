@@ -6463,7 +6463,13 @@ def open_nzsa_report():
         )
         return jsonify({"ok": True})
     except Exception as _e:
-        print("open-nzsa-report ERROR:", _tb.format_exc())
+        _err_text = _tb.format_exc()
+        print("open-nzsa-report ERROR:", _err_text)
+        try:
+            with open("nzsa_error.txt", "w", encoding="utf-8") as _f:
+                _f.write(_err_text)
+        except Exception:
+            pass
         return jsonify({"ok": False, "error": str(_e)})
 
 
