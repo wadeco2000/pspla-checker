@@ -328,6 +328,16 @@ HTML_TEMPLATE = """
         html.dark #recheck-terminal { background:#0a0f15 !important; border-color:#2c3e50 !important; }
         html.dark #recheck-terminal pre { color:#a8d8a8 !important; }
         html.dark #flash-msg { filter:brightness(0.85); }
+        /* ── Drill-down detail area ── */
+        html.dark .detail-row div[style*="background:#e"],
+        html.dark .detail-row div[style*="background:#f"] { background:#1e2d40 !important; border-color:#3d5166 !important; }
+        html.dark .detail-row div[style*="border-left:4px solid #2980b9"] { border-left-color:#2980b9 !important; }
+        html.dark .detail-row [style*="border-top:1px solid"],
+        html.dark .detail-row [style*="border-bottom:1px solid"] { border-color:#3d5166 !important; }
+        html.dark .detail-row input[type="text"] { background:#1e2d40 !important; border-color:#3d5166 !important; color:#d0d0d0 !important; }
+        html.dark .detail-row [style*="color:#555"],html.dark .detail-row [style*="color:#444"],
+        html.dark .detail-row [style*="color:#2c3e50"] { color:#8898aa !important; }
+        html.dark .detail-row [style*="color:#1a5276"],html.dark .detail-row [style*="color:#2471a3"] { color:#5dade2 !important; }
         /* ── Panels ── */
         .panel-wrap { margin-bottom:16px; }
     </style>
