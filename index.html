@@ -211,7 +211,7 @@
         <div class="refresh-badge" onclick="loadData()" title="Click to refresh now">
             <i class="fa-solid fa-rotate"></i> Refreshing in <span id="countdown">5:00</span>
         </div>
-        <div class="updated-badge" title="When this page was last published"><i class="fa-solid fa-code-branch"></i> Published: 11 Mar 2026 03:07 UTC</div>
+        <div class="updated-badge" title="When this page was last published"><i class="fa-solid fa-code-branch"></i> Published: 11 Mar 2026 03:12 UTC</div>
     </div>
 </div>
 
@@ -724,11 +724,11 @@ async function handleGoogleSession(session) {
         allowed = !!(res.data && !res.error);
     } catch(e) { allowed = false; }
     // Fire-and-forget audit log — never block access on this
-    _sb.from('login_audit').insert({
+    Promise.resolve(_sb.from('login_audit').insert({
         email: email, provider: 'google',
         result: allowed ? 'allowed' : 'denied',
         user_agent: navigator.userAgent
-    }).catch(function(){});
+    })).catch(function(){});
     if (allowed) {
         showApp('google');
     } else {
