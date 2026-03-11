@@ -210,7 +210,7 @@
         <div class="refresh-badge" onclick="loadData()" title="Click to refresh now">
             <i class="fa-solid fa-rotate"></i> Refreshing in <span id="countdown">5:00</span>
         </div>
-        <div class="updated-badge" title="When this page was last published"><i class="fa-solid fa-code-branch"></i> Published: 11 Mar 2026 02:03 UTC</div>
+        <div class="updated-badge" title="When this page was last published"><i class="fa-solid fa-code-branch"></i> Published: 11 Mar 2026 02:06 UTC</div>
     </div>
 </div>
 
@@ -331,6 +331,7 @@
 const SUPABASE_URL = 'https://qcxdqycxnfcyfraznmrx.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_cEtO1E_vKwHAN73XA_J75Q_h37hQ-OP';
 const _PW_HASH = '4a103d86016c05ab4d1cc9b8e08ddd7448bafb5d93f48fa12fa792c67192f2bb';
+const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 initAuth();
 
@@ -680,8 +681,6 @@ setInterval(loadSearchStatus, 10000);
 loadSearchStatus();
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
-const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
 async function initAuth() {
     // Password-based auth check (instant — no network)
     if (_PW_HASH && localStorage.getItem('pspla-auth') === _PW_HASH) {
