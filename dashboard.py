@@ -6815,6 +6815,63 @@ Summary: NZSA partnered with ETCO (The Electrical Training Company) to launch a 
 URL: https://www.stuff.co.nz/national/crime/300775133/sex-offender-keeps-security-guard-licence-after-lying-on-application-form
 Summary: Illustrates that PSPLA can impose conditions rather than cancel — even when an applicant lied on their application. The man was permitted to keep his COA but was prohibited from working around children. Shows the PSPLA has discretion to impose targeted conditions rather than always cancelling outright. Lying on an application (false information) is itself a ground for cancellation but can be mitigated by other factors.
 
+[NZSA, official] Security Licence Types — all 8 categories explained
+URL: https://security.org.nz/public-info/security-licences/
+Summary: Official NZSA descriptions of all eight certificate types:
+- Security Technician: installs, removes, or repairs burglar alarms, warning devices, special locks and cameras
+- Security Consultant: sells or gives advice on burglar alarms, warning devices, special locks, cameras and guarding services
+- Property Guard: guards property and/or monitors burglar alarms, warning devices and cameras
+- Personal Guard: guards a specific person (bodyguard/close protection)
+- Crowd Controller: screens entry, keeps order and removes people if necessary
+- Repossession Agent: repossesses consumer goods on behalf of a creditor
+- Private Investigator: obtains and supplies information about another person (financial position, occupation, identity, whereabouts, personal character, actions or behaviour)
+- Confidential Document Destruction Agent: collects and destroys confidential documents
+Key point: A Security Consultant COA is needed for SELLING or ADVISING about security products — even if you do not install anything. Alarm sales people who enter premises to advise may need this.
+
+[Newstalk ZB, 5 February 2015] Unlicensed security consultant fined $10,000
+URL: https://www.newstalkzb.co.nz/news/crime/unlicensed-security-consultant-fined-10k/
+Summary: John Tuhoro, 53, of Hamilton was fined over $10,000 for operating as a security consultant without a COA. Enforced by the Department of Internal Affairs (now CIPU). DIA stated that "security licensing is taken very seriously" as a public safety matter. Direct precedent that selling or advising on security systems without a Security Consultant COA leads to prosecution and substantial fines.
+
+[DIA Press Release, 3 July 2014] Unlicensed security company fined $12,600
+URL: https://www.dia.govt.nz/press.nsf/d77da9b523f12931cc256ac5000d19b6/66e4c101328c0b47cc257d0a0011dcc3!OpenDocument
+Summary: Corporate Protection and Security International Limited (CPSI), Auckland, was fined $12,600 (7 charges at $1,500 + $300 costs each) for providing security and crowd control services without a company licence at multiple venues (Wellington Fashion Week, Auckland Showgrounds, hostel, bar) between April-August 2013. The company's principal had a COA that was suspended in May 2013 but CPSI continued operating. Court stated: "licensed private security personnel help New Zealanders to be safer." Important: continuing to operate after a suspension or cancellation = criminal prosecution.
+
+[NZ Law Society, 10 March 2020] Fine for unlicensed security work — repeat offender convicted in District Court
+URL: https://www.lawsociety.org.nz/news/newsroom/fine-for-unlicensed-security-work/
+Summary: Sean Micheals (also known as Seu Ilai Taleni), 56, was convicted and fined in Manukau District Court for running security services without a licence across three separate companies: Corporate Group International Ltd, Corporate Protection and Security International Ltd, and HD Security Services Ltd. This was a repeat offence — CPSI had been prosecuted in 2014 for the same thing. Shows that PSPLA violations can result in criminal prosecution in the District Court (not just PSPLA proceedings), and that serial offenders face escalating consequences.
+
+[1News, 2 February 2026] Security guard filmed uploading 'cocaine' selling video in uniform
+URL: https://www.1news.co.nz/2026/02/02/security-guard-filmed-uploaded-cocaine-selling-video-in-uniform/
+Summary: Chavez Stewart had his COA cancelled after posting a social media video while wearing his security uniform showing a white substance and gang hand signals, and saying he planned to "jump back on board with the Mongrel Mob." He claimed the substance was flour/Panadol. PSPLA found conduct "disgraceful, wilful and reckless." To reapply, he must provide: medical confirmation of mental/emotional wellness, evidence of being drug-free, no gang associations, and a letter from a prospective employer. Key principle: off-duty conduct on social media while in uniform can lead to immediate cancellation. Gang association, even stated casually online, is disqualifying.
+
+[NZ Herald, 13 May 2025] Lamborghini-driving security boss fined $1,000, banned from hiring migrants
+URL: https://www.nzherald.co.nz/nz/seal-security-director-chetan-kumar-fined-and-banned-from-hiring-overseas-workers/O6JL5LUFYVC6NBZW72KCE7TBBA/
+Summary: Chetan Kumar and S.E.A.L Security Solutions Ltd were found guilty of: operating the security business without a proper licence for three years, intentional misconduct, failing to investigate migrant worker exploitation (workers paid $10,000–$50,000 to Indian agents for NZ security jobs that evaporated on arrival), and misrepresenting employment arrangements to Immigration NZ. Fine: only $1,000 — publicly criticised as "small change" relative to the conduct. Restriction: S.E.A.L Security permanently banned from recruiting overseas workers. PSPLA head McConnell signalled licence suitability would be revisited after Immigration NZ investigation concludes.
+
+[Stuff, 13 November 2024] SPS Security Limited ordered to close after operating without licence
+URL: https://www.stuff.co.nz/nz-news/360480495/sps-security-limited-ordered-close-after-operating-without-licence
+Summary: One of the largest security firms in the South Island was found to be operating without a licence and was involved in a cover-up. The company was ordered to close — a stark reminder that even large, established businesses can be ordered to cease operations if they fail to maintain proper licensing.
+
+[Stuff, 10 October 2023] Unlicensed property guard clamped cars, charged $100 per release
+URL: https://www.stuff.co.nz/business/133092387/unlicensed-security-guard-charged-100-to-unclamp-cars
+Summary: A person operating as a property guard (clamping vehicles on private property) was found to be unlicensed. The PSPLA noted they were charging the maximum legal fee of $100 cash to unclamp vehicles. Clamping vehicles on private property is "property guard" work under the Act and requires a PSPLA company licence and individual COA.
+
+[RNZ, 25 August 2024] Security guard Leah Grayling has licence revoked after fake police calls
+URL: https://www.rnz.co.nz/news/national/526134/security-guard-leah-grayling-has-licence-revoked-after-fake-police-calls
+Summary: A newly certified security guard had her COA cancelled after making false reports to police, including reporting a man was shooting at people (untrue). Conduct entirely outside of work duties that demonstrates poor character or dishonesty can lead to licence cancellation. PSPLA considers suitability holistically — a new COA can be cancelled based on off-duty behaviour.
+
+[NZ Herald, 26 October 2025] PI cleared after client used AI to challenge investigation report
+URL: https://www.nzherald.co.nz/nz/private-investigator-cleared-after-client-used-ai-to-challenge-his-report/FHVEF32FBRAZHNCCUJKMJ2CR5U/
+Summary: Licensed private investigator James Kelly was cleared after a client used AI to generate a counter-argument to his investigation report and filed a complaint. PSPLA found "the evidence is overwhelming" in favour of the PI. Noteworthy: AI-generated complaints are now appearing at the PSPLA; they are assessed on evidence, not persuasive writing quality.
+
+[Stuff, 25 June 2020] Christchurch men forged letter to get private investigator certificates
+URL: https://www.stuff.co.nz/national/121914144/christchurch-men-used-forged-bunnings-letter-to-become-private-investigators
+Summary: Two Christchurch men used a forged letter claiming to be from Bunnings to satisfy the "relevant work experience" requirement for a PI certificate. One then allegedly used the PI status to intimidate creditors. Shows two things: (1) PSPLA requires genuine evidence of relevant experience for PI applications; (2) forging documents to obtain a licence leads to criminal prosecution, not just licence loss.
+
+[Stuff, 22 November 2022] Security guard licence granted to man with 57 criminal convictions
+URL: https://www.stuff.co.nz/national/crime/300746728/security-guard-licence-granted-to-man-with-57-criminal-convictions
+Summary: Illustrates PSPLA discretion — a COA was granted despite 57 prior convictions, depending on nature and age of offences. The guard later lost his COA after a conviction for driving while disqualified. Even relatively minor traffic offences (driving while disqualified) can be grounds for cancellation if they show a pattern of disregarding law.
+
 ---
 USEFUL REFERENCES
 - The Act: legislation.govt.nz/act/public/2010/0115/latest/DLM1594432.html
@@ -6904,7 +6961,7 @@ html.dark .thinking-status{color:#5d6d7e}
 </header>
 <div class="kb-stats">
   <span><i class="fa-solid fa-database"></i> <strong>482</strong> PSPLA decisions (2019–2026)</span>
-  <span><i class="fa-solid fa-newspaper"></i> <strong>7</strong> news articles</span>
+  <span><i class="fa-solid fa-newspaper"></i> <strong>19</strong> news &amp; media sources</span>
   <span><i class="fa-solid fa-file-lines"></i> PSPLA Act 2010</span>
   <span><i class="fa-solid fa-file-lines"></i> NZSA Position Statement (July 2025)</span>
   <span><i class="fa-solid fa-file-lines"></i> Electrical Workers Registration Act</span>
