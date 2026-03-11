@@ -3397,7 +3397,7 @@ def _find_and_enrich_existing(company_name, region, fb_url, website_domain, snip
         for keyword in keywords[:2]:  # try at most 2 keywords
             search_url = (f"{SUPABASE_URL}/rest/v1/Companies"
                           f"?company_name=ilike.{requests.utils.quote('%' + keyword + '%')}"
-                          f"&select=id,company_name,region,website_url&limit=3")
+                          f"&select=id,company_name,region,website&limit=3")
             headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
             try:
                 r = requests.get(search_url, headers=headers)
@@ -3410,7 +3410,7 @@ def _find_and_enrich_existing(company_name, region, fb_url, website_domain, snip
                 if cname.lower() == company_name.lower():
                     continue  # exact match already handled above
                 llm_result = _llm_confirm_same_company(
-                    cname, candidate.get("region", ""), candidate.get("website_url", ""),
+                    cname, candidate.get("region", ""), candidate.get("website", ""),
                     company_name, region, fb_url, snippet
                 )
                 if llm_result.get("same_company") and llm_result.get("confidence") in ("high", "medium"):
