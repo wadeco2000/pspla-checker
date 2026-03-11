@@ -157,11 +157,51 @@ STATIC_TEMPLATE = """<!DOCTYPE html>
         html.dark .meta-strip strong {{ color:#8898aa; }}
         html.dark .badge-unknown {{ background:#2d3748; color:#a0aec0; }}
         html.dark a {{ color:#5dade2; }}
+        /* Auth overlay */
+        #auth-overlay { position:fixed;top:0;left:0;width:100%;height:100%;background:#1a2233;z-index:9999;display:flex;align-items:center;justify-content:center; }
+        .auth-card { background:#2c3e50;border-radius:12px;padding:40px;max-width:380px;width:90%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.5); }
+        .auth-card h2 { color:white;margin:0 0 8px; }
+        .auth-card p.auth-sub { color:#aac;font-size:13px;margin:0 0 24px; }
+        .btn-google { display:inline-flex;align-items:center;gap:10px;background:#4285f4;color:white;border:none;border-radius:6px;padding:12px 24px;font-size:14px;cursor:pointer;width:100%;justify-content:center; }
+        .btn-google:hover { background:#357abd; }
+        .auth-divider { margin:18px 0;color:#555;font-size:12px; }
+        .auth-pw-input { width:100%;padding:10px 12px;border-radius:6px;border:1px solid #4a6080;background:#1a2d42;color:white;font-size:14px;margin-bottom:10px;box-sizing:border-box; }
+        .btn-unlock { width:100%;padding:10px;border:none;border-radius:6px;background:#27ae60;color:white;font-size:14px;cursor:pointer; }
+        .btn-unlock:hover { background:#219a52; }
+        .auth-error { color:#e74c3c;font-size:12px;margin-top:8px; }
+        .btn-logout { background:rgba(231,76,60,0.15);border:1px solid rgba(231,76,60,0.4);border-radius:6px;padding:5px 12px;font-size:12px;color:#e98;cursor:pointer;white-space:nowrap; }
+        .btn-logout:hover { background:rgba(231,76,60,0.3); }
     </style>
 <script>(function(){if(localStorage.getItem("pspla-dark")==="1")document.documentElement.classList.add("dark");})()</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
 
+<!-- Auth Overlay -->
+<div id="auth-overlay">
+  <div id="auth-loading" style="text-align:center;color:#cde;">
+    <i class="fa-solid fa-spinner fa-spin fa-2x"></i><br><br>
+    <span style="font-size:14px;">Checking access...</span>
+  </div>
+  <div id="auth-login" class="auth-card" style="display:none;">
+    <i class="fa-solid fa-shield-halved" style="font-size:36px;color:#5dade2;margin-bottom:16px;"></i>
+    <h2>PSPLA Checker</h2>
+    <p class="auth-sub">Restricted access — authorised users only</p>
+    <button class="btn-google" onclick="signInWithGoogle()">
+      <i class="fa-brands fa-google"></i> Sign in with Google
+    </button>
+    <div class="auth-divider">— or use password —</div>
+    <input type="password" id="pw-input" class="auth-pw-input" placeholder="Enter password" onkeydown="if(event.key==='Enter')checkPassword()">
+    <button class="btn-unlock" onclick="checkPassword()">Unlock</button>
+    <div id="pw-error" class="auth-error" style="display:none;">Incorrect password. Try again.</div>
+  </div>
+  <div id="auth-denied" style="display:none;text-align:center;color:#cde;max-width:340px;">
+    <i class="fa-solid fa-ban fa-2x" style="color:#e74c3c;"></i>
+    <h3 style="color:white;">Access Denied</h3>
+    <p>Your Google account is not on the authorised list. Contact Wade to request access.</p>
+    <button class="btn-logout" onclick="signOut()" style="margin-top:12px;">Try a different account</button>
+  </div>
+</div>
 
 <!-- Header -->
 <div class="page-header">
@@ -174,6 +214,7 @@ STATIC_TEMPLATE = """<!DOCTYPE html>
     </div>
     <div class="header-right">
         <button id="dark-toggle" onclick="(function(){var d=document.documentElement.classList.toggle('dark');localStorage.setItem('pspla-dark',d?'1':'0');})()"></button>
+        <button id="logout-btn" class="btn-logout" onclick="signOut()" style="display:none;"><i class="fa-solid fa-right-from-bracket"></i> Sign out</button>
         <div class="updated-badge"><i class="fa-regular fa-clock"></i> Updated: <span id="last-updated">loading...</span></div>
         <div class="refresh-badge" onclick="loadData()" title="Click to refresh now">
             <i class="fa-solid fa-rotate"></i> Refreshing in <span id="countdown">5:00</span>
@@ -298,8 +339,9 @@ STATIC_TEMPLATE = """<!DOCTYPE html>
 // ── Config ────────────────────────────────────────────────────────────────────
 const SUPABASE_URL = '{supabase_url}';
 const SUPABASE_KEY = '{supabase_key}';
+const _PW_HASH = '{password_hash}';
 
-loadData();
+initAuth();
 
 // ── Countdown + auto-refresh ──────────────────────────────────────────────────
 var secondsLeft = 300;
@@ -645,74 +687,112 @@ function loadSearchStatus() {{
 }}
 setInterval(loadSearchStatus, 10000);
 loadSearchStatus();
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+async function initAuth() {{
+    // Password-based auth check (instant — no network)
+    if (_PW_HASH && localStorage.getItem('pspla-auth') === _PW_HASH) {{
+        showApp('password'); return;
+    }}
+    // Supabase auth state listener handles both existing sessions and new logins
+    _sb.auth.onAuthStateChange(async function(event, session) {{
+        if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {{
+            await handleGoogleSession(session);
+        }} else if (event === 'INITIAL_SESSION' && !session) {{
+            document.getElementById('auth-loading').style.display = 'none';
+            document.getElementById('auth-login').style.display = 'block';
+        }}
+    }});
+}}
+
+async function handleGoogleSession(session) {{
+    var email = session.user.email;
+    var allowed = false;
+    try {{
+        var res = await _sb.from('allowed_users').select('id,active').eq('email', email).eq('active', true).maybeSingle();
+        allowed = !!(res.data && !res.error);
+        await _sb.from('login_audit').insert({{
+            email: email, provider: 'google',
+            result: allowed ? 'allowed' : 'denied',
+            user_agent: navigator.userAgent
+        }});
+    }} catch(e) {{ allowed = false; }}
+    if (allowed) {{
+        showApp('google');
+    }} else {{
+        document.getElementById('auth-loading').style.display = 'none';
+        document.getElementById('auth-login').style.display = 'none';
+        document.getElementById('auth-denied').style.display = 'block';
+        document.getElementById('auth-overlay').style.display = 'flex';
+    }}
+}}
+
+function signInWithGoogle() {{
+    _sb.auth.signInWithOAuth({{
+        provider: 'google',
+        options: {{ redirectTo: window.location.href.split('?')[0].split('#')[0] }}
+    }});
+}}
+
+function checkPassword() {{
+    var pw = document.getElementById('pw-input').value;
+    crypto.subtle.digest('SHA-256', new TextEncoder().encode(pw)).then(function(buf) {{
+        var hash = Array.from(new Uint8Array(buf)).map(function(b) {{ return b.toString(16).padStart(2,'0'); }}).join('');
+        if (hash === _PW_HASH) {{
+            localStorage.setItem('pspla-auth', hash);
+            showApp('password');
+        }} else {{
+            document.getElementById('pw-error').style.display = 'block';
+        }}
+    }});
+}}
+
+function showApp(method) {{
+    document.getElementById('auth-overlay').style.display = 'none';
+    if (method === 'google') {{
+        document.getElementById('logout-btn').style.display = '';
+    }}
+    loadData();
+}}
+
+function signOut() {{
+    localStorage.removeItem('pspla-auth');
+    _sb.auth.signOut().then(function() {{
+        document.getElementById('auth-overlay').style.display = 'flex';
+        document.getElementById('auth-loading').style.display = 'none';
+        document.getElementById('auth-login').style.display = 'block';
+        document.getElementById('auth-denied').style.display = 'none';
+        document.getElementById('logout-btn').style.display = 'none';
+    }});
+}}
 </script>
 </body>
 </html>"""
 
 
 def generate():
-    import subprocess
-    print("Generating public page (live Supabase JS fetch)...")
+    import hashlib
+    print("Generating public page (Supabase JS auth gate)...")
     from datetime import datetime
     published_date = datetime.utcnow().strftime("%d %b %Y %H:%M UTC")
+
+    # Compute SHA-256 of PAGES_PASSWORD so the JS can verify it client-side
+    password_hash = hashlib.sha256(PAGES_PASSWORD.encode()).hexdigest() if PAGES_PASSWORD else ""
 
     html = STATIC_TEMPLATE
     html = html.replace("{supabase_url}", SUPABASE_URL or "")
     html = html.replace("{supabase_key}", SUPABASE_KEY or "")
     html = html.replace("{published_date}", published_date)
-    # Template uses {{ }} for JS braces (leftover from .format() style) — collapse to single braces
+    html = html.replace("{password_hash}", password_hash)
+    # Template uses {{ }} for JS braces — collapse to single braces
     html = html.replace("{{", "{").replace("}}", "}")
     os.makedirs("docs", exist_ok=True)
-    # Write unencrypted version first (will be replaced by StatiCrypt below)
     with open("docs/index.html", "w", encoding="utf-8") as f:
         f.write(html)
 
-    # Encrypt with StatiCrypt (AES-256) — replaces the plain HTML with an encrypted version
-    if not PAGES_PASSWORD:
-        print("WARNING: PAGES_PASSWORD not set — skipping encryption. Site will be unprotected.")
-        print("Generated docs/index.html — data loads live from Supabase in the browser.")
-        return
-
-    print("Encrypting with StatiCrypt...")
-    import shutil, sys
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-
-    # Find node — check PATH first, then common Windows location
-    node = shutil.which("node") or r"C:\Program Files\nodejs\node.exe"
-
-    # Find staticrypt script — check npm global locations across platforms
-    staticrypt_candidates = [
-        # Unix/Linux (npm -g)
-        "/usr/local/lib/node_modules/staticrypt/cli/index.js",
-        "/usr/lib/node_modules/staticrypt/cli/index.js",
-        # macOS (homebrew npm)
-        os.path.expanduser("~/.npm-global/lib/node_modules/staticrypt/cli/index.js"),
-        # Windows
-        os.path.expanduser(r"~\AppData\Roaming\npm\node_modules\staticrypt\cli\index.js"),
-        r"C:\Users\WadeAdmin\AppData\Roaming\npm\node_modules\staticrypt\cli\index.js",
-    ]
-    staticrypt = next((p for p in staticrypt_candidates if os.path.exists(p)), None)
-
-    if not staticrypt:
-        print("StatiCrypt not found — skipping encryption. Run: npm install -g staticrypt")
-        print("Generated docs/index.html — WARNING: unencrypted.")
-        return
-
-    r = subprocess.run(
-        [node, staticrypt,
-         "docs/index.html",
-         "--password", PAGES_PASSWORD,
-         "--directory", "docs",
-         "--short",
-         "--remember", "0",
-         "--config", "false"],
-        capture_output=True, text=True, cwd=base_dir
-    )
-    if r.returncode != 0:
-        print(f"StatiCrypt error: {r.stderr or r.stdout}")
-    else:
-        print("Encrypted successfully — password is not visible in the published HTML.")
-    print("Generated docs/index.html — data loads live from Supabase in the browser.")
+    print("Generated docs/index.html — protected by Google OAuth + password gate (no StatiCrypt).")
 
 
 if __name__ == "__main__":
