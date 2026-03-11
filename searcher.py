@@ -4234,11 +4234,15 @@ def append_history(run_type, started_iso, total_found, total_new, status="comple
             json.dump(history, f, indent=2)
     except Exception as e:
         print(f"  [History write error] {e}")
-    # Update the search_runs row (match by started timestamp and run_type)
+    # Update the most recent "running" search_runs row for this run_type
     try:
+        _patch_h = {
+            "apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json", "Prefer": "return=minimal",
+        }
         requests.patch(
-            f"{SUPABASE_URL}/rest/v1/search_runs?started=eq.{started_iso}&run_type=eq.{run_type}",
-            headers={**_SUPABASE_HEADERS, "Prefer": "return=minimal"},
+            f"{SUPABASE_URL}/rest/v1/search_runs?run_type=eq.{run_type}&status=eq.running",
+            headers=_patch_h,
             json={"finished": finished.isoformat(), "duration_minutes": duration_minutes,
                   "total_found": total_found, "total_new": total_new, "status": status},
             timeout=8
