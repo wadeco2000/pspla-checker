@@ -106,17 +106,20 @@ def _accumulate_tokens(model: str, input_tokens: int, output_tokens: int):
         data["by_model"][key]["output"] += output_tokens
         with open(TOKEN_USAGE_FILE, "w") as f:
             json.dump(data, f)
+        _upsert_search_state({"token_usage": data})
     except Exception:
         pass
 
 
 def reset_token_usage():
     """Reset token counters — clears the file at the start of each search run."""
+    empty = {"input": 0, "output": 0, "by_model": {}}
     try:
         with open(TOKEN_USAGE_FILE, "w") as f:
-            json.dump({"input": 0, "output": 0, "by_model": {}}, f)
+            json.dump(empty, f)
     except Exception:
         pass
+    _upsert_search_state({"token_usage": empty})
 
 
 def get_token_usage():
@@ -171,6 +174,98 @@ _session_new_companies = []
 
 _LAST_SUPABASE_STATUS_PUSH = 0.0  # module-level throttle
 
+# ── Cloud migration: Supabase state layer ─────────────────────────────────────
+# Parallel writes to SearchStatus table alongside local files.
+# STATE_BACKEND env var controls reads: "file" (default/laptop) or "supabase" (cloud).
+STATE_BACKEND = os.getenv("STATE_BACKEND", "file").lower()
+
+_SUPABASE_HEADERS = {
+    "apikey": SUPABASE_KEY or "",
+    "Authorization": f"Bearer {SUPABASE_KEY or ''}",
+    "Content-Type": "application/json",
+    "Prefer": "resolution=merge-duplicates",
+}
+
+
+def _upsert_search_state(updates):
+    """UPSERT fields into the single-row SearchStatus table (id=1).
+    Always includes updated_at. Never raises — safe to call from hot paths."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return
+    try:
+        payload = {"id": 1}
+        payload.update(updates)
+        if "updated_at" not in payload:
+            payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/SearchStatus",
+            headers=_SUPABASE_HEADERS, json=payload, timeout=8
+        )
+    except Exception:
+        pass  # never let state push break a search
+
+
+def _read_search_state(columns="*"):
+    """Read fields from the SearchStatus row. Returns dict or empty dict on error."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return {}
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/SearchStatus?id=eq.1&select={columns}",
+            headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+            timeout=8
+        )
+        data = r.json()
+        return data[0] if data else {}
+    except Exception:
+        return {}
+
+
+def _sync_config_store(key, value):
+    """UPSERT a config entry to config_store table. Never raises."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return
+    try:
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/config_store",
+            headers=_SUPABASE_HEADERS,
+            json={"key": key, "value": value,
+                  "updated_at": datetime.now(timezone.utc).isoformat()},
+            timeout=10
+        )
+    except Exception:
+        pass
+
+
+def _read_config_store(key):
+    """Read a config entry from config_store. Returns parsed value or None."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return None
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/config_store?key=eq.{key}&select=value",
+            headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+            timeout=8
+        )
+        data = r.json()
+        return data[0]["value"] if data else None
+    except Exception:
+        return None
+
+
+def _insert_search_run(record):
+    """Insert a row into search_runs table. Never raises."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return
+    try:
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/search_runs",
+            headers={**_SUPABASE_HEADERS, "Prefer": "return=minimal"},
+            json=record, timeout=8
+        )
+    except Exception:
+        pass
+
 
 def _push_search_status(is_running, search_type="", progress="", log_lines=""):
     """Push current search status to Supabase SearchStatus table (throttled to once per 15s)."""
@@ -180,28 +275,12 @@ def _push_search_status(is_running, search_type="", progress="", log_lines=""):
     if now - _LAST_SUPABASE_STATUS_PUSH < 15 and is_running:
         return  # throttle during active searches; always push on stop
     _LAST_SUPABASE_STATUS_PUSH = now
-    try:
-        import requests as _req
-        _h = {
-            "apikey": SUPABASE_KEY,
-            "Authorization": f"Bearer {SUPABASE_KEY}",
-            "Content-Type": "application/json",
-            "Prefer": "resolution=merge-duplicates",
-        }
-        _payload = {
-            "id": 1,
-            "updated_at": __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),
-            "is_running": is_running,
-            "search_type": search_type or "",
-            "progress": progress or "",
-            "log_lines": log_lines or "",
-        }
-        _req.post(
-            f"{SUPABASE_URL}/rest/v1/SearchStatus",
-            headers=_h, json=_payload, timeout=8
-        )
-    except Exception:
-        pass  # never let status push break a search
+    _upsert_search_state({
+        "is_running": is_running,
+        "search_type": search_type or "",
+        "progress": progress or "",
+        "log_lines": log_lines or "",
+    })
 
 
 def reset_session_log():
@@ -1872,6 +1951,7 @@ Return JSON only:
     existing.append(lesson)
     with open(LESSONS_JSON, "w", encoding="utf-8") as f:
         json.dump(existing, f, indent=2)
+    _sync_config_store("lessons", existing)
 
     _invalidate_lessons_cache()
     print(f"  [Lesson saved] {lesson['pattern_name']}: {lesson['rule_to_apply'][:80]}...")
@@ -2213,6 +2293,7 @@ Respond with a single JSON object, nothing else."""
     existing.append(parsed)
     with open(CORRECTIONS_JSON, "w", encoding="utf-8") as f:
         json.dump(existing, f, indent=2)
+    _sync_config_store("corrections", existing)
 
     invalidate_corrections_cache()
     return parsed
@@ -3924,13 +4005,16 @@ def load_progress():
 
 
 def save_progress(completed_regions, total_found, total_new):
+    data = {"completed_regions": completed_regions, "total_found": total_found, "total_new": total_new}
     with open(PROGRESS_FILE, "w") as f:
-        json.dump({"completed_regions": completed_regions, "total_found": total_found, "total_new": total_new}, f)
+        json.dump(data, f)
+    _upsert_search_state({"progress_json": {"type": "full", **data}})
 
 
 def clear_progress():
     if os.path.exists(PROGRESS_FILE):
         os.remove(PROGRESS_FILE)
+    _upsert_search_state({"progress_json": {}})
 
 
 # ── Facebook progress ──────────────────────────────────────────────────────────
@@ -3941,13 +4025,16 @@ def load_fb_progress():
     return {"completed_regions": [], "nationwide_done": False, "total_found": 0, "total_new": 0}
 
 def save_fb_progress(completed_regions, nationwide_done, total_found, total_new):
+    data = {"completed_regions": completed_regions, "nationwide_done": nationwide_done,
+            "total_found": total_found, "total_new": total_new}
     with open(FB_PROGRESS_FILE, "w") as f:
-        json.dump({"completed_regions": completed_regions, "nationwide_done": nationwide_done,
-                   "total_found": total_found, "total_new": total_new}, f)
+        json.dump(data, f)
+    _upsert_search_state({"progress_json": {"type": "facebook", **data}})
 
 def clear_fb_progress():
     if os.path.exists(FB_PROGRESS_FILE):
         os.remove(FB_PROGRESS_FILE)
+    _upsert_search_state({"progress_json": {}})
 
 
 # ── Directory progress ─────────────────────────────────────────────────────────
@@ -3960,10 +4047,12 @@ def load_dir_progress():
 def save_dir_progress(data):
     with open(DIR_PROGRESS_FILE, "w") as f:
         json.dump(data, f)
+    _upsert_search_state({"progress_json": {"type": "directory", **data}})
 
 def clear_dir_progress():
     if os.path.exists(DIR_PROGRESS_FILE):
         os.remove(DIR_PROGRESS_FILE)
+    _upsert_search_state({"progress_json": {}})
 
 
 # ── Partial progress ───────────────────────────────────────────────────────────
@@ -3976,6 +4065,7 @@ def load_partial_progress():
 def save_partial_progress(data):
     with open(PARTIAL_PROGRESS_FILE, "w") as f:
         json.dump(data, f)
+    _upsert_search_state({"progress_json": {"type": "partial", **data}})
 
 def clear_partial_progress():
     if os.path.exists(PARTIAL_PROGRESS_FILE):
@@ -4033,7 +4123,7 @@ def write_status(phase, region, term, region_idx, term_idx, total_regions, total
             json.dump(data, f)
     except Exception:
         pass
-    # Push to Supabase for public site
+    # Push to Supabase (status_json for cloud reads + legacy fields for public site)
     try:
         _stype = ""
         _sf = os.path.join(BASE_DIR, "search_start.json")
@@ -4044,7 +4134,14 @@ def write_status(phase, region, term, region_idx, term_idx, total_regions, total
         _prog = f"{data.get('total_found', 0)} companies found"
         if data.get('region'):
             _prog += f" — {data['region']}"
-        _push_search_status(True, search_type=_stype, progress=_prog, log_lines=_log)
+        _upsert_search_state({
+            "is_running": True,
+            "search_type": _stype,
+            "progress": _prog,
+            "log_lines": _log,
+            "status_json": data,
+            "last_heartbeat": datetime.now(timezone.utc).isoformat(),
+        })
     except Exception:
         pass
 
@@ -4052,7 +4149,10 @@ def write_status(phase, region, term, region_idx, term_idx, total_regions, total
 def clear_status():
     if os.path.exists(STATUS_FILE):
         os.remove(STATUS_FILE)
-    _push_search_status(False, search_type="", progress="", log_lines="")
+    _upsert_search_state({
+        "is_running": False, "search_type": "", "progress": "", "log_lines": "",
+        "status_json": {}, "last_heartbeat": None, "paused": False, "stop_requested": False,
+    })
 
 
 def record_search_start(run_type, started_iso, triggered_by):
@@ -4086,6 +4186,15 @@ def record_search_start(run_type, started_iso, triggered_by):
             json.dump(history, f, indent=2)
     except Exception as e:
         print(f"  [History start write error] {e}")
+    # Sync to Supabase
+    _upsert_search_state({
+        "is_running": True, "search_type": run_type, "triggered_by": triggered_by,
+        "started_at": started_iso, "paused": False, "stop_requested": False,
+    })
+    _insert_search_run({
+        "run_type": run_type, "started": started_iso, "status": "running",
+        "triggered_by": triggered_by,
+    })
     _push_search_status(True, search_type=run_type, progress="Starting...", log_lines="")
 
 
@@ -4125,6 +4234,17 @@ def append_history(run_type, started_iso, total_found, total_new, status="comple
             json.dump(history, f, indent=2)
     except Exception as e:
         print(f"  [History write error] {e}")
+    # Update the search_runs row (match by started timestamp and run_type)
+    try:
+        requests.patch(
+            f"{SUPABASE_URL}/rest/v1/search_runs?started=eq.{started_iso}&run_type=eq.{run_type}",
+            headers={**_SUPABASE_HEADERS, "Prefer": "return=minimal"},
+            json={"finished": finished.isoformat(), "duration_minutes": duration_minutes,
+                  "total_found": total_found, "total_new": total_new, "status": status},
+            timeout=8
+        )
+    except Exception:
+        pass
 
 
 _DEFAULT_FACEBOOK_TERMS = [
@@ -5819,6 +5939,7 @@ def run_search(triggered_by="manual"):
         for flag in [RUNNING_FLAG, PAUSE_FLAG]:
             if os.path.exists(flag):
                 os.remove(flag)
+        _upsert_search_state({"is_running": False, "paused": False, "stop_requested": False})
 
     print("\n" + "=" * 60)
     print(f"  Search complete!")

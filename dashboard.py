@@ -4240,6 +4240,9 @@ def save_terms():
             existing["facebook"] = [t.strip() for t in data["facebook"] if t.strip()]
         with open(TERMS_FILE, "w") as f:
             json.dump(existing, f, indent=2)
+        # Sync to Supabase config_store
+        from searcher import _sync_config_store
+        _sync_config_store("search_terms", existing)
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -5166,25 +5169,32 @@ KEY PATTERNS:
 
 @app.route("/toggle-schedule", methods=["POST"])
 def toggle_schedule():
+    from searcher import _upsert_search_state
     if os.path.exists(SCHEDULE_FLAG):
         os.remove(SCHEDULE_FLAG)
+        _upsert_search_state({"schedule_enabled": False})
         msg = "Scheduled searches disabled."
     else:
         open(SCHEDULE_FLAG, "w").close()
+        _upsert_search_state({"schedule_enabled": True})
         msg = "Scheduled searches enabled."
     return redirect(url_for("index", message=msg, type="success"))
 
 
 @app.route("/pause-search", methods=["POST"])
 def pause_search():
+    from searcher import _upsert_search_state
     open(PAUSE_FLAG, "w").close()
+    _upsert_search_state({"paused": True})
     return redirect(url_for("index", message="Search paused — it will stop after the current company.", type="success"))
 
 
 @app.route("/resume-search", methods=["POST"])
 def resume_search():
+    from searcher import _upsert_search_state
     if os.path.exists(PAUSE_FLAG):
         os.remove(PAUSE_FLAG)
+    _upsert_search_state({"paused": False})
     return redirect(url_for("index", message="Search resumed.", type="success"))
 
 
@@ -5273,6 +5283,9 @@ def _kill_search_processes():
 
 @app.route("/stop-search", methods=["POST"])
 def stop_search():
+    from searcher import _upsert_search_state
+    # Set stop_requested so remote/cloud searches can stop gracefully
+    _upsert_search_state({"stop_requested": True})
     _write_stopped_history()
     _kill_search_processes()
     # Clean up all flags and status so the UI resets immediately
@@ -5281,6 +5294,10 @@ def stop_search():
             os.remove(path)
         except FileNotFoundError:
             pass
+    _upsert_search_state({
+        "is_running": False, "paused": False, "stop_requested": False,
+        "status_json": {}, "progress": "", "log_lines": "",
+    })
     return redirect(url_for("index", message="Search stopped.", type="success"))
 
 
@@ -6887,6 +6904,13 @@ def _launch(script, args=None, triggered_by="manual"):
             f.write(str(_search_proc.pid))
     except Exception:
         pass
+    # Sync launch state to Supabase SearchStatus
+    from searcher import _upsert_search_state
+    _upsert_search_state({
+        "is_running": True, "search_type": _type_map.get(script, script),
+        "triggered_by": triggered_by, "started_at": started_iso,
+        "pid": _search_proc.pid, "paused": False, "stop_requested": False,
+    })
 
 
 def _scheduled_full():
