@@ -22,6 +22,11 @@ SUPABASE_ANON_KEY = os.getenv("SUPABASE_KEY") or SUPABASE_SERVICE_KEY
 SUPABASE_KEY = SUPABASE_SERVICE_KEY  # keep existing code working
 PAGES_PASSWORD = os.getenv("PAGES_PASSWORD", "")
 SERPAPI_KEY  = os.getenv("SERPAPI_KEY")
+SMTP_HOST    = os.getenv("SMTP_HOST", "")
+SMTP_PORT    = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER    = os.getenv("SMTP_USER", "")
+SMTP_PASS    = os.getenv("SMTP_PASS", "")
+NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL", "")
 GITHUB_PAT = os.getenv("GITHUB_PAT")
 EXPORT_PASSWORD = os.getenv("EXPORT_PASSWORD") or os.getenv("PAGES_PASSWORD", "")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "wadeco2000/pspla-checker")
@@ -4510,6 +4515,102 @@ def audit_log_page():
     return Response(AUDIT_LOG_TEMPLATE, mimetype='text/html')
 
 
+def _send_welcome_email(to_email, to_name, added_by):
+    """Send a welcome email to a newly added allowed user."""
+    if not SMTP_HOST or not SMTP_USER or not SMTP_PASS:
+        return
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    site_url = "https://wadeco2000.github.io/pspla-checker/"
+    display_name = to_name or to_email.split("@")[0].title()
+    html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#f0f4f8;font-family:Arial,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f8;padding:40px 20px">
+  <tr><td align="center">
+    <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08)">
+
+      <!-- Header -->
+      <tr>
+        <td style="background:linear-gradient(135deg,#1a2e4a 0%,#2c5282 100%);padding:36px 40px;text-align:center">
+          <div style="font-size:28px;margin-bottom:8px">🔐</div>
+          <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;letter-spacing:-0.3px">You're in.</h1>
+          <p style="margin:8px 0 0;color:#90cdf4;font-size:14px">PSPLA Licence Checker — Access Granted</p>
+        </td>
+      </tr>
+
+      <!-- Body -->
+      <tr>
+        <td style="padding:36px 40px">
+          <p style="margin:0 0 16px;font-size:16px;color:#2d3748">Hi {display_name},</p>
+          <p style="margin:0 0 24px;font-size:15px;color:#4a5568;line-height:1.6">
+            You've been granted access to the <strong>PSPLA Licence Checker</strong> — a live database tracking NZ private security companies and their licensing status.
+          </p>
+
+          <!-- Access box -->
+          <table width="100%" cellpadding="0" cellspacing="0" style="background:#ebf8ff;border:1px solid #bee3f8;border-radius:8px;margin-bottom:28px">
+            <tr>
+              <td style="padding:20px 24px">
+                <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:#2b6cb0;text-transform:uppercase;letter-spacing:0.5px">Access the site</p>
+                <a href="{site_url}" style="font-size:15px;color:#2b6cb0;font-weight:600;word-break:break-all">{site_url}</a>
+                <p style="margin:12px 0 0;font-size:13px;color:#2c5282">
+                  Sign in with the Google account this email was sent to.<br>
+                  No password needed — just click <strong>Sign in with Google</strong>.
+                </p>
+              </td>
+            </tr>
+          </table>
+
+          <p style="margin:0 0 8px;font-size:14px;color:#718096;font-weight:600">What you'll find inside:</p>
+          <table cellpadding="0" cellspacing="0" style="margin-bottom:28px">
+            <tr><td style="padding:4px 0;font-size:14px;color:#4a5568">✅ &nbsp;PSPLA licence status for hundreds of NZ security companies</td></tr>
+            <tr><td style="padding:4px 0;font-size:14px;color:#4a5568">🏢 &nbsp;Companies Office registrations, directors, NZBN numbers</td></tr>
+            <tr><td style="padding:4px 0;font-size:14px;color:#4a5568">⭐ &nbsp;Google ratings and Facebook presence</td></tr>
+            <tr><td style="padding:4px 0;font-size:14px;color:#4a5568">🤖 &nbsp;"Do I Need a Licence?" AI assistant</td></tr>
+          </table>
+
+          <p style="margin:0;font-size:14px;color:#718096;line-height:1.6">
+            Access was set up by <strong>{added_by}</strong>. If you think this was sent in error, you can ignore it — nothing has been shared and no action is required.
+          </p>
+        </td>
+      </tr>
+
+      <!-- Footer -->
+      <tr>
+        <td style="background:#f7fafc;border-top:1px solid #e2e8f0;padding:20px 40px;text-align:center">
+          <p style="margin:0;font-size:12px;color:#a0aec0">PSPLA Licence Checker &nbsp;·&nbsp; New Zealand &nbsp;·&nbsp; For authorised users only</p>
+        </td>
+      </tr>
+
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>"""
+    plain = (f"Hi {display_name},\n\n"
+             f"You've been granted access to the PSPLA Licence Checker.\n\n"
+             f"Sign in at: {site_url}\n"
+             f"Use the Google account this email was sent to.\n\n"
+             f"Access was set up by {added_by}.\n\n"
+             f"If this was sent in error, you can ignore it.")
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = "You've been granted access — PSPLA Licence Checker"
+        msg["From"] = SMTP_USER
+        msg["To"] = to_email
+        msg.attach(MIMEText(plain, "plain"))
+        msg.attach(MIMEText(html, "html"))
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_USER, to_email, msg.as_string())
+    except Exception as e:
+        print(f"[welcome email] failed to send to {to_email}: {e}")
+
+
 # ── User Access page ───────────────────────────────────────────────────────────
 @app.route("/user-access")
 def user_access_page():
@@ -4534,12 +4635,16 @@ def api_allowed_users_add():
     name = data.get("name", "").strip()
     if not email:
         return jsonify({"error": "email required"}), 400
+    added_by = session.get("email", "admin")
     r = requests.post(f"{SUPABASE_URL}/rest/v1/allowed_users",
-                      json={"email": email, "name": name, "added_by": session.get("email", "admin"),
+                      json={"email": email, "name": name, "added_by": added_by,
                             "active": True},
                       headers={"apikey": SUPABASE_SERVICE_KEY,
                                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                                "Prefer": "return=representation"})
+    if r.ok:
+        import threading
+        threading.Thread(target=_send_welcome_email, args=(email, name, added_by), daemon=True).start()
     return jsonify({"ok": r.ok, "status": r.status_code})
 
 @app.route("/api/allowed-users/<uid>", methods=["DELETE"])
