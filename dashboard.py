@@ -11,13 +11,16 @@ from datetime import datetime, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import requests
-from flask import Flask, render_template_string, redirect, url_for, request, Response
+from flask import Flask, render_template_string, redirect, url_for, request, Response, session, jsonify as _jsonify_auth
 from dotenv import load_dotenv
 
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_KEY") or SUPABASE_SERVICE_KEY
+SUPABASE_KEY = SUPABASE_SERVICE_KEY  # keep existing code working
+PAGES_PASSWORD = os.getenv("PAGES_PASSWORD", "")
 SERPAPI_KEY  = os.getenv("SERPAPI_KEY")
 GITHUB_PAT = os.getenv("GITHUB_PAT")
 EXPORT_PASSWORD = os.getenv("EXPORT_PASSWORD") or os.getenv("PAGES_PASSWORD", "")
@@ -171,6 +174,188 @@ def _load_terms():
     return dict(_DEFAULT_TERMS)
 
 app = Flask(__name__)
+
+# ── Dashboard auth ─────────────────────────────────────────────────────────────
+import hashlib as _hashlib
+app.secret_key = _hashlib.sha256(
+    (PAGES_PASSWORD + (SUPABASE_SERVICE_KEY or "")).encode()
+).hexdigest()
+
+_AUTH_SKIP = {
+    'login_page', 'login_password', 'auth_callback', 'auth_verify', 'auth_logout'
+}
+
+@app.before_request
+def _require_dashboard_auth():
+    if request.endpoint in _AUTH_SKIP or (request.endpoint or '').startswith('static'):
+        return
+    if not session.get('authenticated'):
+        return redirect(url_for('login_page'))
+
+_DASH_LOGIN_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PSPLA Dashboard — Login</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer"/>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+*{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:0;background:#1a2233;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{background:#2c3e50;border-radius:12px;padding:40px;max-width:380px;width:90%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.5)}
+h2{color:white;margin:0 0 6px}p.sub{color:#aac;font-size:13px;margin:0 0 26px}
+.btn-google{display:inline-flex;align-items:center;gap:10px;background:#4285f4;color:white;border:none;border-radius:6px;padding:12px 24px;font-size:14px;cursor:pointer;width:100%;justify-content:center}
+.btn-google:hover{background:#357abd}
+.divider{margin:18px 0;color:#555;font-size:12px}
+.pw-input{width:100%;padding:10px 12px;border-radius:6px;border:1px solid #4a6080;background:#1a2d42;color:white;font-size:14px;margin-bottom:10px}
+.btn-unlock{width:100%;padding:10px;border:none;border-radius:6px;background:#27ae60;color:white;font-size:14px;cursor:pointer}
+.btn-unlock:hover{background:#219a52}
+.msg{font-size:12px;margin-top:12px;min-height:18px}
+.msg.error{color:#e74c3c}.msg.info{color:#aac}
+</style>
+</head>
+<body><div class="card">
+<i class="fa-solid fa-shield-halved" style="font-size:36px;color:#5dade2;margin-bottom:14px;"></i>
+<h2>PSPLA Dashboard</h2>
+<p class="sub">Authorised access only</p>
+<button class="btn-google" onclick="signInWithGoogle()"><i class="fa-brands fa-google"></i> Sign in with Google</button>
+__LOCAL_PW__
+<div id="msg" class="msg __MSG_CLASS__">__MSG__</div>
+</div>
+<script>
+const _sb = window.supabase.createClient('__SB_URL__', '__SB_ANON__');
+function signInWithGoogle(){
+    document.getElementById('msg').textContent='Redirecting to Google...';
+    document.getElementById('msg').className='msg info';
+    _sb.auth.signInWithOAuth({provider:'google',options:{redirectTo:window.location.origin+'/auth/callback'}});
+}
+function checkPassword(){
+    var pw=document.getElementById('pw-input').value;
+    fetch('/login/password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})})
+    .then(function(r){return r.json();}).then(function(d){
+        if(d.ok){window.location.href='/';}
+        else{var m=document.getElementById('msg');m.textContent='Incorrect password.';m.className='msg error';}
+    });
+}
+</script></body></html>"""
+
+_DASH_CALLBACK_HTML = """<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>body{font-family:Arial,sans-serif;background:#1a2233;color:#aac;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;font-size:15px;}</style>
+</head><body><span>Completing sign-in&hellip;</span>
+<script>
+const _sb = window.supabase.createClient('__SB_URL__', '__SB_ANON__');
+_sb.auth.getSession().then(function(result){
+    var s=result.data&&result.data.session;
+    if(!s){window.location.href='/login?e=no_session';return;}
+    fetch('/auth/verify',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({access_token:s.access_token,email:s.user.email})
+    }).then(function(r){return r.json();}).then(function(d){
+        window.location.href=d.ok?'/':('/login?e='+encodeURIComponent(d.error||'denied'));
+    });
+});
+</script></body></html>"""
+
+@app.route('/login')
+def login_page():
+    is_local = request.remote_addr in ('127.0.0.1', '::1', '0.0.0.0', '::ffff:127.0.0.1')
+    local_pw = (
+        '<div class="divider">\u2014 or local password \u2014</div>'
+        '<input type="password" id="pw-input" class="pw-input" placeholder="Dashboard password"'
+        ' onkeydown="if(event.key===\'Enter\')checkPassword()">'
+        '<button class="btn-unlock" onclick="checkPassword()">Unlock</button>'
+    ) if is_local else ''
+    err = request.args.get('e', '')
+    msg = 'Your Google account is not on the authorised list.' if err == 'denied' else (
+          'Sign-in error — please try again.' if err else '')
+    msg_class = 'error' if err else ''
+    html = (_DASH_LOGIN_HTML
+            .replace('__SB_URL__', SUPABASE_URL or '')
+            .replace('__SB_ANON__', SUPABASE_ANON_KEY or '')
+            .replace('__LOCAL_PW__', local_pw)
+            .replace('__MSG__', msg)
+            .replace('__MSG_CLASS__', msg_class))
+    return html
+
+@app.route('/login/password', methods=['POST'])
+def login_password():
+    if request.remote_addr not in ('127.0.0.1', '::1', '0.0.0.0', '::ffff:127.0.0.1'):
+        return _jsonify_auth({'ok': False, 'error': 'localhost only'}), 403
+    pw = (request.json or {}).get('password', '')
+    if _hashlib.sha256(pw.encode()).hexdigest() == _hashlib.sha256(PAGES_PASSWORD.encode()).hexdigest():
+        session['authenticated'] = True
+        session['email'] = 'wade (local)'
+        session['auth_method'] = 'password'
+        return _jsonify_auth({'ok': True})
+    return _jsonify_auth({'ok': False}), 401
+
+@app.route('/auth/callback')
+def auth_callback():
+    return (_DASH_CALLBACK_HTML
+            .replace('__SB_URL__', SUPABASE_URL or '')
+            .replace('__SB_ANON__', SUPABASE_ANON_KEY or ''))
+
+@app.route('/auth/verify', methods=['POST'])
+def auth_verify():
+    data = request.json or {}
+    access_token = data.get('access_token', '')
+    email = data.get('email', '').lower().strip()
+    if not access_token or not email:
+        return _jsonify_auth({'ok': False, 'error': 'missing_token'})
+    # Validate the token by fetching the user from Supabase Auth
+    try:
+        r = requests.get(f"{SUPABASE_URL}/auth/v1/user",
+                         headers={'Authorization': f'Bearer {access_token}',
+                                  'apikey': SUPABASE_ANON_KEY},
+                         timeout=10)
+        if r.status_code != 200:
+            return _jsonify_auth({'ok': False, 'error': 'invalid_token'})
+        if r.json().get('email', '').lower().strip() != email:
+            return _jsonify_auth({'ok': False, 'error': 'email_mismatch'})
+    except Exception:
+        return _jsonify_auth({'ok': False, 'error': 'auth_error'})
+    # Check allowed_users table using service key (bypasses RLS)
+    try:
+        r2 = requests.get(f"{SUPABASE_URL}/rest/v1/allowed_users",
+                          params={'email': f'eq.{email}', 'active': 'eq.true', 'select': 'id'},
+                          headers={'apikey': SUPABASE_SERVICE_KEY,
+                                   'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}'},
+                          timeout=10)
+        if r2.status_code == 200 and r2.json():
+            session['authenticated'] = True
+            session['email'] = email
+            session['auth_method'] = 'google'
+            # Audit log (fire and forget)
+            try:
+                requests.post(f"{SUPABASE_URL}/rest/v1/login_audit",
+                              json={'email': email, 'provider': 'google', 'result': 'allowed',
+                                    'user_agent': request.headers.get('User-Agent', '')},
+                              headers={'apikey': SUPABASE_SERVICE_KEY,
+                                       'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}'},
+                              timeout=5)
+            except Exception:
+                pass
+            return _jsonify_auth({'ok': True})
+        # Not in allowed list
+        try:
+            requests.post(f"{SUPABASE_URL}/rest/v1/login_audit",
+                          json={'email': email, 'provider': 'google', 'result': 'denied',
+                                'user_agent': request.headers.get('User-Agent', '')},
+                          headers={'apikey': SUPABASE_SERVICE_KEY,
+                                   'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}'},
+                          timeout=5)
+        except Exception:
+            pass
+        return _jsonify_auth({'ok': False, 'error': 'denied'})
+    except Exception:
+        return _jsonify_auth({'ok': False, 'error': 'db_error'})
+
+@app.route('/logout')
+def auth_logout():
+    session.clear()
+    return redirect(url_for('login_page'))
+
+# ── End dashboard auth ─────────────────────────────────────────────────────────
 
 # On startup, clear any stale flag files left over from a previous session that
 # was killed mid-search.  If the app just started, no search can be running.
@@ -570,6 +755,7 @@ HTML_TEMPLATE = """
   <!-- Right: credits + running state -->
   <div class="navbar-right">
     <button id="dark-toggle" onclick="(function(){var d=document.documentElement.classList.toggle('dark');localStorage.setItem('pspla-dark',d?'1':'0');})()"></button>
+    <a href="/logout" style="background:rgba(231,76,60,0.15);border:1px solid rgba(231,76,60,0.4);border-radius:6px;padding:5px 12px;font-size:12px;color:#e98;text-decoration:none;white-space:nowrap;" title="Signed in as {{ session.get('email','') }}"><i class="fa-solid fa-right-from-bracket"></i> Sign out</a>
     <div class="credits-bar" id="api-credits-bar">
       <span id="credit-serp"><i class="fa-solid fa-magnifying-glass"></i> SerpAPI: <b>loading…</b></span>
       <span id="credit-tokens"><i class="fa-solid fa-robot"></i> Claude: <b>–</b></span>
