@@ -777,14 +777,20 @@ function showApp(method) {{
 }}
 
 function signOut() {{
+    // Clear everything from localStorage immediately — don't wait for network
     localStorage.removeItem('pspla-auth');
-    _sb.auth.signOut().then(function() {{
-        document.getElementById('auth-overlay').style.display = 'flex';
-        document.getElementById('auth-loading').style.display = 'none';
-        document.getElementById('auth-login').style.display = 'block';
-        document.getElementById('auth-denied').style.display = 'none';
-        document.getElementById('logout-btn').style.display = 'none';
+    Object.keys(localStorage).forEach(function(k) {{
+        if (k.startsWith('sb-')) localStorage.removeItem(k);
     }});
+    // Fire-and-forget the Supabase signOut network request
+    _sb.auth.signOut().catch(function(){{}});
+    // Show login form right away
+    document.getElementById('auth-overlay').style.display = 'flex';
+    document.getElementById('auth-loading').style.display = 'none';
+    document.getElementById('auth-login').style.display = 'block';
+    document.getElementById('auth-denied').style.display = 'none';
+    document.getElementById('logout-btn').style.display = 'none';
+    _authHandled = false;
 }}
 </script>
 </body>
