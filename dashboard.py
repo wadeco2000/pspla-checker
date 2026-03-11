@@ -4652,7 +4652,7 @@ function loadUsers() {
                 '<td>' + fmt(u.added_at) + '</td>' +
                 '<td>' + (u.last_login ? fmt(u.last_login) + (u.last_provider ? ' <span class="badge badge-' + u.last_provider + '">' + u.last_provider + '</span>' : '') : '—') + '</td>' +
                 '<td><span class="badge ' + (u.active ? 'badge-active">Active' : 'badge-inactive">Inactive') + '</span></td>' +
-                '<td><button class="btn-del" onclick="removeUser(\'' + u.id + '\', \'' + u.email + '\')">Remove</button></td>';
+                '<td><button class="btn-del" onclick="removeUser(\\'' + u.id + '\\', \\'' + u.email + '\\')">Remove</button></td>';
             b.appendChild(tr);
         });
         t.style.display = rows.length ? '' : 'none';
