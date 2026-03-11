@@ -733,11 +733,11 @@ async function handleGoogleSession(session) {{
         allowed = !!(res.data && !res.error);
     }} catch(e) {{ allowed = false; }}
     // Fire-and-forget audit log — never block access on this
-    _sb.from('login_audit').insert({{
+    Promise.resolve(_sb.from('login_audit').insert({{
         email: email, provider: 'google',
         result: allowed ? 'allowed' : 'denied',
         user_agent: navigator.userAgent
-    }}).catch(function(){{}});
+    }})).catch(function(){{}});
     if (allowed) {{
         showApp('google');
     }} else {{
