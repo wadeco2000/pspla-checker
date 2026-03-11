@@ -6872,6 +6872,299 @@ Summary: Two Christchurch men used a forged letter claiming to be from Bunnings 
 URL: https://www.stuff.co.nz/national/crime/300746728/security-guard-licence-granted-to-man-with-57-criminal-convictions
 Summary: Illustrates PSPLA discretion — a COA was granted despite 57 prior convictions, depending on nature and age of offences. The guard later lost his COA after a conviction for driving while disqualified. Even relatively minor traffic offences (driving while disqualified) can be grounds for cancellation if they show a pattern of disregarding law.
 
+
+[Stuff, 6 Jul 2022] Simple lies let convicted criminals flout rules and work as security guards
+URL: https://www.stuff.co.nz/national/crime/300619379/simple-lies-let-convicted-criminals-flout-rules-and-work-as-security-guards
+Summary: Article reveals how convicted criminals bypass NZ security guard licensing requirements by providing false information about their criminal histories to the Ministry of Justice. It highlights enforcement gaps in the system meant to prevent ineligible individuals from obtaining security guard licenses. This directly relates to PSPLA licensing eligibility criteria and the importance of vetting procedures to ensure only suitable persons are licensed.
+
+[Critic Te Ārohi, 8 Jul 2022] Guard who Dispensed "Sauce Fines" Apparently Unlicenced
+URL: https://www.critic.co.nz/news/article/10200/guard-who-dispensed-sauce-fines-apparently-unlicen
+Summary: A security guard in New Zealand was found to be working without a valid PSPLA licence despite being a registered sex offender ineligible for a Certificate of Approval. The guard, employed by LPS Security at various retail locations, allegedly issued fines to customers without proper authorization. This case highlights the importance of proper licensing checks and enforcement, as the guard's criminal background should have prevented him from obtaining security credentials in the first place.
+
+[Otago Daily Times, 22 Dec 2022] Wannabe private eye fined, sanctioned
+URL: https://www.odt.co.nz/star-news/star-christchurch/wannabe-private-eye-fined-sanctioned
+Summary: Shane Casbolt, a wannabe private investigator, was fined and sanctioned by the Private Security Personnel Licensing Authority (PSPLA) for misconduct that bordered on fraudulent behavior. He was ordered to hand in his identity badge after attempting to enter a courthouse wearing a stab-proof vest, extendable baton, and fake uniform resembling police. The case highlights PSPLA enforcement powers and the importance of Certificate of Authority (COA) compliance, as the authority proceeded with sanctions despite the judge discharging him without conviction on the weapons charge.
+
+[Stuff, 23 Apr 2019] Rogue security guard fined $18,000 for unlicensed security work in Auckland
+URL: https://www.stuff.co.nz/business/112222129/rogue-security-guard-fined-18000-for-unlicensed-security-work-in-auckland
+Summary: An Auckland man was fined $18,000 after being convicted of repeatedly providing security services without the required licence under NZ law. This case directly demonstrates enforcement action and penalties for unlicensed security work in breach of PSPLA licensing requirements. The article illustrates the serious financial consequences (substantial fines) that apply when individuals operate security services without proper licencing and regulatory compliance.
+
+[Stuff NZ, 9 Mar 2021] Bouncer filmed stomping on head of man has worked for years without appropriate licence, despite a warning and police objections
+URL: https://www.stuff.co.nz/national/124470037/bouncer-filmed-stomping-on-head-of-man-has-worked-for-years-without-appropriate-licence-despite-a-warning-and-police-objections
+Summary: A Wellington bouncer who assaulted a man was found to have worked without the required PSPLA licence for years, despite receiving a formal warning in 2014 and police objections to his licensing. This case highlights enforcement failures in NZ security licensing and the consequences when unlicensed individuals work in security roles. The article demonstrates gaps in compliance monitoring and the importance of proper licensing requirements for personal security providers.
+
+[Stuff, 10 Sept 2023] Wellington bar and manager fined for employing unlicensed bouncer
+URL: https://www.stuff.co.nz/national/wellington/132915795/wellington-bar-and-manager-fined-for-employing-unlicensed-bouncer
+Summary: A Wellington bar and its manager were fined for employing an unlicensed bouncer named Pavali Logovae at the now-closed Boston on Blair venue. The prosecution arose after the employee was filmed allegedly engaging in serious misconduct involving physical violence. This case demonstrates enforcement action against venues that fail to comply with PSPLA licensing requirements for security personnel.
+
+[RNZ, 25 Aug 2024] Security guard Leah Grayling has licence revoked after ...
+URL: https://www.rnz.co.nz/news/top/526134/security-guard-leah-grayling-has-licence-revoked-after-fake-police-calls
+Summary: A New Zealand security guard's licence was revoked after police requested cancellation of her certificate of approval following convictions for making fake police calls. This case demonstrates the enforcement mechanisms available to authorities for removing individuals from the security industry when they commit serious offences. The incident highlights how the PSPLA licensing system can be used to protect public safety by revoking credentials of security personnel who engage in criminal conduct.
+
+[RNZ, 3 Aug 2024] Security worker with links to Mongols loses licence after ...
+URL: https://www.rnz.co.nz/news/national/524032/security-worker-with-links-to-mongols-loses-licence-after-offering-to-be-on-pm-s-guard-detail
+Summary: A New Zealand security worker with links to the Mongols Motorcycle Club lost their PSPLA security licence after offering to join the Prime Minister's security detail. The case demonstrates enforcement action by licensing authorities against security personnel with criminal associations or gang links. This illustrates the criteria used to refuse or revoke security licences based on character and suitability assessments under NZ security licensing regulations.
+
+[Stuff, 26 Oct 2022] Security boss's licence stripped after supplying half the ...
+URL: https://www.stuff.co.nz/business/300719966/security-bosss-licence-stripped-after-supplying-half-the-guards-to-nye-festival
+Summary: A security company boss had his PSPLA licence cancelled and was officially reprimanded after supplying guards to a New Year's Eve festival event. As part of his defence against enforcement action, the boss submitted a false document containing 140 names to the PSPLA. This case demonstrates PSPLA enforcement powers regarding licence cancellation and the consequences of providing false documentation to regulators.
+
+[NZ Herald, 23 Feb 2024] Patched Head Hunter denied Certificate of Approval for ...
+URL: https://www.nzherald.co.nz/nz/patched-head-hunter-denied-certificate-of-approval-for-security-work/R65BQMCNSVGRDPMCKO4J4HQVWY/
+Summary: A patched gang member (Head Hunter) was denied a Certificate of Approval (COA) for security work in New Zealand. The article discusses how security guards who commit serious offences may have their licences revoked or denied. This directly relates to PSPLA licensing requirements, COA eligibility criteria, and enforcement actions taken against applicants with serious criminal histories.
+
+[NZ Herald, 19 Feb 2025] Security guard's licence revoked for gang ties, firearms ...
+URL: https://www.nzherald.co.nz/nz/security-guards-licence-revoked-for-gang-ties-firearms-charges/3RZSFO6YS5HOZEVK27SEUBX3CY/
+Summary: A security guard's PSPLA licence has been revoked due to gang affiliations and firearms charges. This case demonstrates enforcement action by NZ authorities against security personnel who fail to meet fit-and-proper-person requirements under PSPLA licensing rules. The article illustrates how criminal conduct and gang ties can result in licence revocation and removal from the security industry.
+
+[Otago Daily Times, 16 Jul 2025] Security guard who assaulted Uber driver keeps licence
+URL: https://www.odt.co.nz/star-news/star-christchurch/security-guard-who-assaulted-uber-driver-keeps-licence
+Summary: A security guard convicted of assault with intent to injure and wilful damage was allowed to retain his PSPLA security licence despite police opposition. The Private Security Personnel Licensing Authority (PSPLA) head determined that while the assault conviction was a mandatory ground for disqualification, a waiver was granted after finding the behaviour was out of character and the guard had taken responsibility. The decision illustrates how PSPLA applies disqualification grounds and waiver provisions when security licence holders commit criminal offences.
+
+[Ministry of Justice | New Zealand] PSPLA decisions | New Zealand Ministry of Justice
+URL: https://www.justice.govt.nz/tribunals/licences-certificates/pspla/pspla-decisions/?Filter_Jurisdiction=745
+Summary: This is the official New Zealand Ministry of Justice page hosting PSPLA (Private Security Personnel Licensing Authority) decisions. The page provides access to tribunal decisions related to private security personnel licensing in New Zealand. This is a primary government resource for PSPLA licensing outcomes and regulatory determinations.
+
+[Ministry of Justice | New Zealand] PSPLA decisions | New Zealand Ministry of Justice
+URL: https://www.justice.govt.nz/tribunals/licences-certificates/pspla/pspla-decisions/?Filter_Jurisdiction=745&Keywords=no+licence
+Summary: This is the official New Zealand Ministry of Justice page hosting PSPLA (Private Security Personnel Licensing Authority) decisions and tribunal rulings. The page contains published decisions from the licensing authority, including enforcement actions such as fines and licence cancellations. This is a primary source for understanding PSPLA licensing decisions, regulatory outcomes, and how the authority applies the licensing framework.
+
+[Close Up New Zealand] PSPLA cancels Kanwarpal Singh's licence after money ...
+URL: https://www.closeup.co.nz/pspla-cancels-kanwarpal-singh-licence-after-money-laundering-charges-and-arrest
+Summary: The PSPLA cancelled Kanwarpal Singh's security licence effective 6 October 2025 after Police reported he faced four money laundering charges and failed to appear in court before leaving New Zealand. The Authority exercised its discretion under section 80(1)(aa) of the Private Security Personnel and Private Investigators Act 2010 to cancel his Certificate of Approval on the grounds that he was no longer suitable to hold a security licence. Singh was given an opportunity to respond to the complaint and request a hearing but did not do so, and the Authority proceeded with cancellation based on the papers alone.
+
+[New Zealand Legislation] Private Security Personnel and Private Investigators Act 2010
+URL: https://www.legislation.govt.nz/act/public/2010/0115/latest/whole.html
+Summary: The Private Security Personnel and Private Investigators Act 2010 is the primary NZ legislation governing private security licensing. It establishes the Private Security Personnel Licensing Authority and sets out offences and liabilities for contraventions of licensing requirements. This is core legislation directly relevant to PSPLA security licensing, COA requirements, and enforcement mechanisms in New Zealand.
+
+[Ministry of Justice | New Zealand] PSPLA decisions | New Zealand Ministry of Justice
+URL: https://www.justice.govt.nz/tribunals/licences-certificates/pspla/pspla-decisions/?Filter_Jurisdiction=745&Year=2022
+Summary: This is an official New Zealand Ministry of Justice page displaying PSPLA (Private Security Personnel Licensing Authority) decisions from 2022. It provides access to tribunal decisions regarding private security personnel licences, including cases involving certificate cancellations due to convictions. This is a primary source for PSPLA enforcement actions and licensing decisions that are directly relevant to NZ security licensing policy.
+
+[Ministry of Justice | New Zealand] Work you need a licence or certificate for
+URL: https://www.justice.govt.nz/tribunals/licences-certificates/pspla/apply-or-renew/who-needs-a-licence-or-certificate/work-you-need-a-licence-or-certificate-for/
+Summary: This official Ministry of Justice page lists types of work that require PSPLA licences or certificates in New Zealand, including security technicians, security consultants, and document destruction agents. It clarifies which security and related professions must be licensed under the Private Security Personnel and Private Investigators Act. This is a primary government resource for understanding PSPLA licensing requirements.
+
+[Pop Training] How to Get Your COA in New Zealand (Step-by-Step Guide)
+URL: https://www.pop.ac.nz/how-to-get-your-coa-in-new-zealand-step-by-step-guide/
+Summary: This guide explains how to obtain a Certificate of Approval (COA) in New Zealand, the mandatory licence required to work in private security roles such as security guard, crowd controller, and property guard. It outlines the eligibility requirements (age 18+, NZ citizenship/residency/work visa, clean criminal record) and the process including completion of NZQA-accredited mandatory training. The COA is issued by the Private Security Personnel Licensing Authority (PSPLA) and is essential for starting a career in frontline security positions.
+
+[NZ Herald, 23 Mar 2012] Heat on stadium security firms over licensing - Auckland
+URL: https://www.nzherald.co.nz/nz/heat-on-stadium-security-firms-over-licensing/SFZJM4RBRFPOJHS25D25374VY4/
+Summary: An inquiry into stadium security firms in Auckland is examining allegations that Platform 4 Group and Harrison (another security firm) operated without proper licensing. This article is directly relevant to NZ private security licensing enforcement and regulatory compliance, as it involves investigations into potential breaches of PSPLA licensing requirements by commercial security operators providing venue security services.
+
+[NZ Security Association] Security Services in New Zealand
+URL: https://security.org.nz/wp-content/uploads/2020/06/NZSA-Security-Services-in-NZ-Good-Practice-Guidelines_compressed.pdf
+Summary: NZSA Good Practice Guidelines document for security services in New Zealand that addresses licensing and certificate of approval requirements. The document establishes standards for security operators and explicitly mentions compliance with licensing and COA obligations. This is directly relevant to PSPLA security licensing frameworks and regulatory requirements for security service providers in New Zealand.
+
+[Ministry of Justice | New Zealand] PSPLA decisions | New Zealand Ministry of Justice
+URL: https://www.justice.govt.nz/tribunals/licences-certificates/pspla/pspla-decisions/?Filter_Jurisdiction=745&start=150
+Summary: This is an official Ministry of Justice page containing PSPLA licensing decisions and tribunal outcomes. The snippet references a case where SPS Security Limited's company licence application was declined due to misconduct, including operating without a licence and attempting to cover it up. This directly demonstrates enforcement of PSPLA licensing requirements and consequences for non-compliance.
+
+[New Zealand Legislation] Private Security Personnel and Private Investigators Act 2010
+URL: https://www.legislation.govt.nz/act/public/2010/0115/latest/DLM1594602.html
+Summary: The Private Security Personnel and Private Investigators Act 2010 is the primary NZ legislation governing PSPLA licensing. This page outlines key provisions including certificate of approval suspension procedures, whereby suspended certificates have no effect and cannot be renewed during the suspension period. The Act is administered by the Ministry of Justice and forms the legal foundation for all PSPLA security licensing requirements, enforcement actions, and regulatory compliance in New Zealand.
+
+[Close Up New Zealand, 26 Sept 2025] Jason Hunter Pspla Security Licence Cancelled 2025
+URL: https://www.closeup.co.nz/jason-hunter-pspla-security-licence-cancelled-2025
+Summary: The PSPLA cancelled Jason Hunter's security licence in September 2025 after he accumulated 22 convictions since receiving his Certificate of Approval in October 2021. Hunter's criminal history included dishonesty offences, violence, and breaches of court orders, with his most recent conviction for theft in June 2025. Under section 62 of the Private Security Personnel and Private Investigators Act 2010, certain convictions are automatic grounds for disqualification, and Hunter's theft and violent offences met these thresholds. Hunter did not attend the remote hearing or provide a written response to the Police complaint.
+
+[Ministry of Justice | New Zealand] PSPLA decisions | New Zealand Ministry of Justice
+URL: https://www.justice.govt.nz/tribunals/licences-certificates/pspla/pspla-decisions/?Filter_Jurisdiction=745&start=25
+Summary: This is an official New Zealand Ministry of Justice page listing PSPLA (Private Security Personnel Licensing Act) tribunal decisions. The snippet references a Certificate of Approval (COA) cancellation case involving grounds for disqualification under sections 80 & 81(1)(aa), directly addressing licensing enforcement and COA requirements. This is a primary source for PSPLA licensing decisions and regulatory outcomes.
+
+[hcamag.com, 5 Feb 2026] Security guard loses licence over 'cocaine' video in uniform
+URL: https://www.hcamag.com/nz/specialisation/employment-law/security-guard-loses-licence-over-cocaine-video-in-uniform/564294
+Summary: An Auckland security guard had his certificate of approval cancelled by the Private Security Personnel Licensing Authority (PSPLA) after posting an Instagram video in uniform advertising cocaine. The PSPLA ruled the guard's behaviour was 'disgraceful, wilful and reckless' serious misconduct that made him unsuitable to work in the security sector. This case demonstrates PSPLA enforcement action and the grounds for cancelling security certificates based on conduct standards and fitness to hold a licence.
+
+[New Zealand Legislation] Private Security Personnel and Private Investigators Act 2010
+URL: https://www.legislation.govt.nz/act/public/2010/0115/55.0/DLM1594615.html
+Summary: The Private Security Personnel and Private Investigators Act 2010 is the primary legislation governing NZ security licensing. This excerpt specifies that persons whose licence or certificate of approval is cancelled or suspended must return it to a Licensing Authority within 5 working days. This is core legislation relevant to PSPLA licensing requirements, enforcement, and compliance obligations.
+
+[Close Up New Zealand] Security Guard's License Cancelled After ...
+URL: https://www.closeup.co.nz/page/revoked-the-Certificate-of-Approval-for-security-guard-Taiupu-Poasa
+Summary: The PSPLA revoked the Certificate of Approval for security guard Taiupu Poasa following his conviction for possession of methamphetamine for supply. Under section 62(f)(v) of the Private Security Personnel and Private Investigators Act 2010, drug convictions constitute mandatory grounds for COA disqualification unless a waiver is granted. Poasa did not appear at the hearing or submit a waiver application, and the PSPLA determined he was unsuitable to work as a security employee due to the serious nature of his offending and involvement in organised criminal activity.
+
+[Ministry of Justice | New Zealand] Disqualifying Criteria
+URL: https://www.justice.govt.nz/tribunals/licences-certificates/pspla/disqualifying-criteria/
+Summary: This official New Zealand Ministry of Justice page outlines disqualifying criteria for PSPLA (Private Security Personnel Licensing Act) licences and certificates of approval. Key disqualifying factors include having a licence or certificate of approval cancelled within the last seven years, and currently holding a suspended licence or certificate. This is core regulatory information directly relevant to understanding PSPLA licensing eligibility requirements.
+
+[NZ Security Association] The Private Security Personnel and ...
+URL: https://security.org.nz/wp-content/uploads/2018/04/PSPLA-fact-sheet.pdf
+Summary: Official PSPLA fact sheet from security.org.nz covering key licensing requirements. Mentions that operating without a valid licence can result in fines up to $40,000, and describes temporary Certificates of Approval (COA) that last three months to allow staff to work while awaiting full licensing.
+
+[NZ Security Association] [2022] nzpspla 008
+URL: https://security.org.nz/wp-content/uploads/2022/04/2022_NZPSPLA_008.pdf
+Summary: This is an official PSPLA decision document [2022] NZPSPLA 008 dated 24 March 2022, published by the NZ Licensing Authority. The document contains a formal determination regarding PSPLA licensing matters. While the PDF text is corrupted/unreadable, the document reference and publication by the official licensing authority indicates this is directly relevant to PSPLA security licensing decisions and enforcement.
+
+[NZ Security Association] Security Industry Implications and Actions from the PSPLA ...
+URL: https://security.org.nz/wp-content/uploads/2026/02/NZSA_PSPLA_PSSG_Report_Dec-2025.pdf
+Summary: This NZ Security Association report directly addresses PSPLA (Private Security Personnel and Lock Smith Act) implications and industry actions. The document identifies key compliance issues including training completion, correct licensing, and visible Certificate of Authority (CoA) display across the security industry. It discusses upcoming legislative changes affecting PSPLA requirements, making it highly relevant to understanding current enforcement concerns and industry compliance standards in New Zealand's security licensing framework.
+
+[NZ Security Association] Security licensing requirements for the install, servicing ...
+URL: https://security.org.nz/wp-content/uploads/2023/01/Joint_Statement_Master_Electricians_and_NZSA.01.pdf
+Summary: This is a joint statement from Master Electricians and NZSA regarding security licensing requirements for the installation and servicing of security systems in New Zealand. The document directly addresses PSPLA (Private Security Personnel Licensing Act) licensing requirements and provides guidance on how to apply and renew PSPLA licences through the Justice Department. It appears to be an official resource clarifying licensing obligations for security professionals in NZ.
+
+[ThePost.co.nz, 10 Jun 2025] Security boss convicted of assaults against women keeps licence
+URL: https://www.thepost.co.nz/nz-news/360720112/security-boss-convicted-assaults-against-women-keeps-licence
+Summary: A security industry boss convicted of assaults against women retained his security licence despite opposition from police and his industry body. The case highlights decisions made by the licensing authority regarding whether security personnel with criminal convictions should maintain their licences. This directly relates to PSPLA licensing standards, fitness-to-hold-a-licence criteria, and enforcement decisions in NZ.
+
+[ThePost.co.nz, 19 Oct 2025] Security firm fined after hiring serial fraudster
+URL: https://www.thepost.co.nz/nz-news/360858266/security-firm-fined-after-hiring-serial-fraudster
+Summary: A security firm was fined and reprimanded by the private security watchdog for employing a person without a valid security licence. The employee, Hayden James, was a serial fraudster. This case demonstrates enforcement action taken against security companies that fail to ensure proper licensing requirements are met, relevant to PSPLA compliance and security licence regulations in New Zealand.
+
+[Stuff NZ, 16 Feb 2025] Security guard loses licence after conviction for smuggling contraband into jail
+URL: https://www.stuff.co.nz/nz-news/360584301/security-guard-loses-licence-after-conviction-smuggling-contraband-jail
+Summary: A security guard's licence was revoked following a conviction for attempting to smuggle contraband into a prison. The case demonstrates enforcement action against licensed security personnel who breach their professional obligations. This is relevant to understanding how NZ security licensing bodies take disciplinary action against licence holders who commit serious breaches of conduct.
+
+[Stuff, 31 May 2022] Gang-linked security guard loses licence after 'threatening to kill' payroll officer
+URL: https://www.stuff.co.nz/national/crime/300602091/ganglinked-security-guard-loses-licence-after-threatening-to-kill-payroll-officer
+Summary: A gang-linked security guard in New Zealand had their security licence revoked after threatening to kill a payroll officer and engaging in intimidating behaviour at work. The incident involved the guard attempting to coerce additional payment through threats and menacing conduct. This case demonstrates enforcement action taken by licensing authorities against security personnel who violate professional conduct standards and pose a threat to public safety.
+
+[Stuff NZ, 6 Feb 2020] Security guard reprimanded but keeps licence after Christchurch assault
+URL: https://www.stuff.co.nz/national/crime/119346756/security-guard-reprimanded-but-keeps-licence-after-christchurch-assault
+Summary: A security guard in Christchurch received disciplinary action for assaulting a patron at a strip club, resulting in a one-month suspension of his security licence. The case demonstrates how the licensing authority enforces conduct standards for security professionals and the consequences for misconduct. This is relevant to understanding PSPLA licence enforcement and disciplinary processes in New Zealand.
+
+[Stuff, 31 Aug 2025] Security contractor loses licence after sharing CCTV clip which went viral
+URL: https://www.stuff.co.nz/nz-news/360808538/security-contractor-loses-licence-after-sharing-cctv-clip-which-went-viral
+Summary: A security contractor lost their licence after sharing a CCTV clip from a workplace incident that went viral. The incident highlights licensing enforcement and disciplinary action by the regulator against security professionals for breaching protocols around recorded material and privacy. This case demonstrates real-world consequences for security licence holders who violate their conditions of authorisation.
+
+[RNZ, 2 weeks ago] Private Security Personnel Licensing Authority: Guard punched elderly man who looked at him
+URL: https://www.rnz.co.nz/news/national/587552/private-security-personnel-licensing-authority-guard-punched-elderly-man-who-looked-at-him
+Summary: A licensed security guard was found to have punched an elderly man and as a result can no longer work as a licensed member of the security industry in New Zealand. This case demonstrates enforcement action by the Private Security Personnel Licensing Authority (PSPLA) against licensed security personnel who commit violent offences. The incident illustrates how breaches of conduct standards can result in loss of security licensing.
+
+[NZ Herald, 6 Oct 2025] Security guard accused of money laundering has certificate cancelled
+URL: https://www.nzherald.co.nz/business/security-guard-kanwarpal-singh-has-fled-the-country-after-money-laundering-accusation/JT5NNXRPSFDRRKGTOK4PG3F5E4/
+Summary: A security guard's PSPLA certificate was cancelled following accusations of money laundering and after he fled the country. The article discusses enforcement action taken against a licensed security professional in New Zealand, demonstrating how regulatory authorities can cancel security licenses when certificate holders are involved in criminal allegations or misconduct.
+
+[NZ Herald, 30 Apr 2024] 'Money mule': Security guard who worked in loss prevention involved in scam
+URL: https://www.nzherald.co.nz/nz/security-guards-licence-cancelled-after-he-became-middleman-in-financial-scam/EWTR35EJY5A6TNTLMLRG4IOF2Y/
+Summary: A security guard's licence was cancelled after he became involved in financial scams as a 'money mule'. This case demonstrates enforcement action by the licensing authority against a security professional who engaged in criminal activity while holding a security licence. The article is relevant to understanding licence cancellation and disciplinary consequences under NZ security licensing regulations.
+
+[1News, 2 Sept 2025] Security tech loses licence for sharing CCTV of workplace accident
+URL: https://www.1news.co.nz/2025/09/02/security-tech-loses-licence-for-sharing-cctv-of-workplace-accident/
+Summary: A security technician in New Zealand lost their security licence after sharing CCTV footage of a workplace accident on social media. The incident caused reputational damage to the employer, client, and contractor involved. This case demonstrates enforcement action by NZ security licensing authorities regarding licence breaches related to misuse of CCTV and professional conduct violations.
+
+[defsec.net.nz, 24 Mar 2020] COVID-19: Is private security an essential service?
+URL: https://defsec.net.nz/2020/03/24/covid-19-alert-levels/
+Summary: This article discusses whether private security is classified as an essential service during COVID-19 lockdowns in New Zealand. The New Zealand Security Association (NZSA) confirms that workers holding a current security licence (Certificate of Approval/CoA) are covered under the essential service designation, including security guards, technicians, consultants, PIs, and monitoring operators. The article clarifies the status of licensed security professionals during the pandemic response.
+
+[The Press, 11 Nov 2024] Security guards with the right training should have greater powers than mere observation
+URL: https://www.thepress.co.nz/nz-news/360482823/security-guards-right-training-should-have-greater-powers-mere-observation
+Summary: Opinion piece advocating for expanded powers for security guards who complete advanced licensing requirements in New Zealand. The article argues that highly trained officers should have authority beyond observation, including the ability to request and record identification details and recover property. This is directly relevant to PSPLA licensing frameworks and discussions about what powers should be granted to different security license tiers based on training and qualifications.
+
+[NZ Herald, 13 Jun 2025] 'You've been a naughty girl': Bird rehab founder keeps security licence, despite convictions
+URL: https://www.nzherald.co.nz/nz/wellington-bird-rehab-founder-craig-shepherd-to-keep-security-licence-despite-assault-convictions/KDU6QG77ZNASNJLD563Y6QVSDA/
+Summary: A Wellington security company owner and bird rehabilitation trust founder was convicted of multiple assault charges but was allowed to retain his security licence. The case examines whether serious criminal convictions should result in security licence cancellation under NZ regulations. This decision is directly relevant to PSPLA enforcement discretion and the criteria authorities use when deciding whether to revoke or suspend security licences for licence holders with criminal convictions.
+
+[NZ Herald, 15 Jul 2025] 'I was going through a lot': Security guard who assaulted Uber driver keeps licence
+URL: https://www.nzherald.co.nz/nz/security-guard-leon-saufoi-who-badly-assaulted-uber-driver-allowed-to-keep-licence/NVOMOPGP2ZE2ZJTWX5TLMEB2QQ/
+Summary: A security guard in New Zealand who assaulted an Uber driver was permitted to retain his security licence despite the serious misconduct. This case is relevant to PSPLA licensing decisions and how enforcement authorities assess fitness to hold a security licence. It demonstrates the standards and conditions applied when considering disciplinary action against licensed security personnel.
+
+[NZ Herald, 28 Jun 2025] Auckland gun shop owner caught in undercover police sting
+URL: https://www.nzherald.co.nz/nz/auckland-gun-shop-owner-illegally-sold-ammunition-and-a-rifle-to-unlicensed-customers-in-undercover-police-sting/XMLJYVNDDVG67NGXUUNRFZMOAU/
+Summary: An Auckland gun shop owner was caught illegally selling ammunition and a rifle to unlicensed customers during an undercover police operation. This case directly relates to NZ firearms licensing requirements and enforcement actions against illegal sales to persons without proper licenses. The incident demonstrates police efforts to prevent unauthorized firearm distribution and highlights violations of NZ firearms regulations.
+
+[Stuff, 1 month ago] Convicted sex offender lied to become security guard
+URL: https://www.stuff.co.nz/nz-news/360926358/convicted-sex-offender-lied-become-security-guard
+Summary: A convicted sex offender lied on security guard application documents to hide his criminal history and obtain a security license in New Zealand. This case demonstrates a serious breach of PSPLA licensing controls and highlights the importance of background vetting procedures to prevent unsuitable individuals from obtaining security credentials. The incident underscores how applicants with disqualifying convictions attempt to circumvent licensing requirements.
+
+[NZ Herald, 22 May 2022] Rape, assault, theft: Eight security guards lose jobs for crimes
+URL: https://www.nzherald.co.nz/nz/security-guards-who-commit-serious-offences-have-licences-cancelled/A4KQZQUA3SPIJXZXAFTHU33VNI/
+Summary: Eight security guards in New Zealand had their operating licences cancelled in a single year for committing serious offences including rape, assault, and theft. The article discusses how PSPLA (Private Security Personnel Licensing Authority) enforcement operates, with licence cancellations being a key enforcement mechanism for security workers who commit criminal offences. This demonstrates the regulatory framework's approach to removing unsuitable individuals from the security industry.
+
+[NZ Herald, 23 May 2024] Police claim security worker is a Tribesmen, he says 'he surrendered his patch'
+URL: https://www.nzherald.co.nz/nz/former-tribesmen-member-verner-saimasi-retains-security-license-amid-police-protest/2QHLVRLMKZEFNFFK6HP4PXD4XE/
+Summary: A former Tribesmen Motorcycle Club member working in the security industry retained his NZ security licence despite police objections and claims of continued gang affiliation. The case involves disputes over gang membership status and whether such associations should disqualify individuals from holding security licenses. This directly relates to PSPLA licensing criteria and the discretionary authority of licensing bodies to refuse or revoke licenses based on character and suitability assessments.
+
+[ThePost.co.nz, 31 Oct 2023] High profile Wellington pub owner, company charged with $390k fraud
+URL: https://www.thepost.co.nz/nz-news/350101620/high-profile-wellington-pub-owner-company-charged-390k-fraud
+Summary: A high-profile Wellington pub owner and his company have been charged in connection with $390k fraud, with accusations that they provided crowd control (security) services without holding a required licence. This case directly relates to PSPLA licensing requirements, as security personnel and crowd control operators must be properly licensed in New Zealand. The case illustrates enforcement action taken against unlicensed security service providers.
+
+[Stuff NZ, 11 Apr 2022] Black Power members allowed to work as security guards, tribunal rules
+URL: https://www.stuff.co.nz/national/128314758/black-power-members-allowed-to-work-as-security-guards-tribunal-rules
+Summary: A tribunal ruled that two patched Black Power members are suitable to hold security guard licences in NZ, despite objections from police and an employer. This decision relates to PSPLA licensing eligibility and Character, Offences and Activities (COA) assessment requirements. The ruling clarifies that gang affiliation alone does not automatically disqualify someone from obtaining a security licence, and demonstrates how the licensing authority applies COA criteria to licensing decisions.
+
+[NZ Herald, 22 May 2023] ‘Open, remorseful and frank’: Former gang member approved to work in security industry
+URL: https://www.nzherald.co.nz/nz/former-mongrel-mob-member-gains-security-guard-licence/J63MS7BL7JDATESYQXH2TO4GI4/
+Summary: A former Mongrel Mob member has been approved to work as a security guard and crowd controller in New Zealand after renouncing gang life three years ago. The article demonstrates how the security licensing approval process evaluates applicants' backgrounds, character, and rehabilitation. This case is relevant to understanding PSPLA licensing criteria and decision-making, particularly regarding character assessment and approval standards for individuals with criminal or gang affiliations.
+
+[Stuff, 4 Dec 2012] Red carpet bodyguard failed security check
+URL: https://www.stuff.co.nz/entertainment/8036132/Red-carpet-bodyguard-failed-security-check
+Summary: A bodyguard providing security at a high-profile event failed a criminal history check and was not properly vetted before being granted security clearance. This case demonstrates the importance of background checks and vetting procedures in the security licensing process. The incident highlights enforcement concerns regarding who should and should not be permitted to work in security roles under NZ regulations.
+
+[RNZ, 5 Nov 2025] John Doherty once offered to guard Jacinda Ardern, now ...
+URL: https://www.rnz.co.nz/news/national/577930/john-doherty-once-offered-to-guard-jacinda-ardern-now-he-s-guilty-of-sending-lewd-emails-to-a-woman
+Summary: John Doherty, who operated a professional security firm and once offered to guard Jacinda Ardern, was found guilty of sending lewd emails to a woman. His Private Security licence was cancelled by the relevant authority as a result of this conduct. This case illustrates enforcement action taken against security licence holders for misconduct, demonstrating the disciplinary mechanisms available to regulators.
+
+[NZ Herald, 5 Apr 2023] Security guard keeps his licence despite dishonesty ...
+URL: https://www.nzherald.co.nz/nz/security-guard-keeps-his-licence-despite-dishonesty-charges-and-mental-health-concerns/3GU3WYD2QBHDXGB3EHJIZWNJPY/
+Summary: A security guard facing dishonesty charges and mental health concerns was allowed to retain his NZ security licence after a judge found police acted wrongly in blocking it. The case highlights judicial review of licensing decisions and the criteria authorities must consider when determining fitness to hold a security guard licence under PSPLA regulations. This precedent is relevant to understanding how NZ courts evaluate dishonesty allegations and mental health issues in security licensing determinations.
+
+[NZ Herald, 12 Jun 2020] Rotorua Filthy Few member who claims gang does good ...
+URL: https://www.nzherald.co.nz/rotorua-daily-post/news/rotorua-filthy-few-member-who-claims-gang-does-good-work-loses-security-licence/E3AWQRVQIKBYMRTSNSFVUJF4TM/
+Summary: A Rotorua Filthy Few gang member lost their security licence, indicating enforcement action taken against individuals with gang affiliations in the NZ security licensing system. This article is relevant to understanding how security licence authorities assess suitability of applicants and holders, particularly regarding gang membership as a disqualifying factor under PSPLA requirements.
+
+[ThePost.co.nz, 21 Dec 2025] Bail declined for man who stole MIQ funds as he heads ...
+URL: https://www.thepost.co.nz/nz-news/360921288/bail-declined-man-who-stole-miq-funds-he-heads-towards-appeal
+Summary: A man convicted of stealing MIQ funds had his security licence cancelled by the Private Security Personnel Licensing Authority (PSPLA) following conviction. This case demonstrates PSPLA's enforcement action and licence cancellation powers in response to criminal convictions by licence holders. The article illustrates consequences security personnel face when convicted of serious offences.
+
+[ThePost.co.nz, 20 Feb 2025] Serial fraudster's identity revealed after latest escapade
+URL: https://www.thepost.co.nz/nz-news/360575267/serial-fraudsters-identity-revealed-after-latest-escapade
+Summary: A serial fraudster's identity was revealed following enforcement action by authorities. The individual had previously held a PSPLA (Private Security Personnel Licensing Act) individual private security licence and certificates of approval, but these were revoked due to inappropriate behaviour. This case demonstrates PSPLA enforcement and the regulator's ability to remove licensing from security personnel who engage in misconduct.
+
+[Otago Daily Times, 8 Aug 2022] Security guard cleared of impersonating cop fights to keep ...
+URL: https://www.odt.co.nz/star-news/star-christchurch/security-guard-cleared-impersonating-cop-fights-keep-licence
+Summary: A Christchurch security guard is fighting to retain his security licence after being cleared of impersonating a police officer but found to have worn police-style gear including a stab-proof vest, pepper spray, and baton while entering court. The case highlights licence enforcement and conduct standards for NZ security workers. While Casbolt was acquitted of the criminal charge, regulatory action regarding his security licence remains ongoing, demonstrating how professional conduct violations can trigger separate licensing consequences beyond criminal proceedings.
+
+[NZ Herald, 8 May 2023] Man caught secretly filming woman in public toilet loses ...
+URL: https://www.nzherald.co.nz/nz/man-caught-secretly-filming-woman-in-public-toilet-loses-security-licence/4DX2RT55JVGMXCGKP272YAVQSY/
+Summary: A man licensed under the Private Security Personnel and Private Investigators Act (PSPLA) to work as a security technician was caught secretly filming a woman in a public toilet and subsequently lost his security licence. This case demonstrates enforcement action taken against PSPLA licensees for serious misconduct and violations of licensing requirements. The incident illustrates how the licensing authority can revoke security licences when individuals breach their professional obligations and legal responsibilities.
+
+[Stratcom Security] Security Consultant Certificate of Competence (Micro ...
+URL: https://www.stratcomsecurity.com/security-consultant-certificate-of-competence-sccc/
+Summary: This page describes a Security Consultant Certificate of Competence (SCCC) micro-credential at Level 4 offered by Stratcom Security in New Zealand. The training provider also offers other PSPLA-relevant courses including Certificate of Approval (COA) mandatory training, License Controller Certificate (LCQ), and the New Zealand Certificate in Security (Foundation). This is relevant to NZ security licensing requirements and COA training pathways.
+
+[Beehive.govt.nz, 26 Jun 2009] Speech to New Zealand Security Conference
+URL: https://www.beehive.govt.nz/speech/speech-new-zealand-security-conference
+Summary: A government speech addressing the New Zealand Security Conference discusses penalties for operating unlicensed security businesses. The speech indicates planned increases to penalties for operating without a licence or certificate of approval, with fines rising from $2,000. This is directly relevant to PSPLA licensing enforcement and regulatory compliance requirements.
+
+[fyi.org.nz] Tom Williams - FYI
+URL: https://fyi.org.nz/request/3216/response/10269/attach/4/OIA%2054969%20Tom%20Williams%20Response.pdf
+Summary: This OIA response document discusses how complaints about individuals or companies operating without a PSPLA licence are handled. It indicates that the PSPLA authority refers unlicensed operator complaints to Police or CIPU for investigation, as the PSPLA itself lacks enforcement authority for these matters. This is directly relevant to understanding PSPLA licensing requirements and enforcement mechanisms in New Zealand.
+
+[NZ Security Association, 22 Mar 2021] PSPLA and Workplace Investigations
+URL: https://security.org.nz/nzsa-security-update-pspla-and-workplace-investigations/
+Summary: A legal decision has determined that consultants providing workplace investigation services must hold a private investigator license under the PSPLA. This ruling clarifies licensing requirements for a specific service category within the security industry, affecting who must comply with PSPLA regulations. The decision has significant implications for security professionals and consultants offering these services in New Zealand.
+
+[NZ Security Association] Complaints/Disputes
+URL: https://security.org.nz/public-info/complaintsdisputes/
+Summary: This page provides information on how to make complaints with the PSPLA (Private Security Personnel Licensing Authority) against individuals and companies in the security industry. It is a resource from the NZ Security Association that directs people to the complaints and disputes process for PSPLA licensing matters. This is directly relevant to understanding enforcement and regulatory oversight of NZ private security personnel licensing.
+
+[NZ Security Association] Licensing for Electrical and IT Companies
+URL: https://security.org.nz/wp-content/uploads/2021/06/Licensing-for-Electrical-and-IT-Companies-.pdf
+Summary: This document provides guidance on licensing requirements for electrical and IT companies that install security systems or cameras in New Zealand. It clarifies when a security licence is required and when no licence is needed, helping companies understand their obligations under NZ security licensing regulations. This is directly relevant to PSPLA licensing requirements and who must be licensed to perform security work.
+
+[NZ Security Association] Guidelines, Codes of Practice and Standards
+URL: https://security.org.nz/security-industry-good-practice-guideline/
+Summary: The NZ Security Association provides Guidelines, Codes of Practice, and Standards for the security industry. These documents establish good practice requirements and professional standards for security operators. The materials are available to NZSA members and cover areas including the accreditation process, crowded places security, and protective security requirements relevant to licensed security professionals.
+
+[Newstalk ZB, 22 Sept 2025] Security guard loses licence over King Cobras gang links
+URL: https://www.newstalkzb.co.nz/news/national/security-guard-callum-richmond-loses-licence-over-king-cobras-gang-links/
+Summary: A New Zealand security guard had his licence revoked after being photographed wearing King Cobras gang regalia and participating in a protest against gang patch bans. This case directly demonstrates PSPLA licensing enforcement and the grounds for licence cancellation based on conduct and association. The decision reflects how licensing authorities assess suitability of individuals to hold security licences in NZ.
+
+[Newstalk ZB, 3 Jul 2024] 'Inappropriately pushy:' Woman followed by security guard ...
+URL: https://www.newstalkzb.co.nz/news/national/security-guard-reprimanded-for-following-woman-to-beach-pressuring-her-for-phone-number/
+Summary: A security guard in New Zealand was reprimanded for inappropriately following a woman to a beach and pressuring her for her phone number. While his security licence was not cancelled, this case illustrates enforcement action and professional conduct standards expected of licensed security personnel in NZ. The incident demonstrates how the regulatory system addresses misconduct by security licence holders, relevant to PSPLA licensing oversight and disciplinary processes.
+
+[Newstalk ZB, 3 Aug 2024] Security worker with links to Mongols offered to be on ...
+URL: https://www.newstalkzb.co.nz/news/national/security-worker-with-links-to-mongols-loses-licence-after-offering-to-be-on-pm-s-guard-detail/
+Summary: A security worker with links to the Mongols gang lost his PSPLA licence after offering to be on the Prime Minister's guard detail. Despite being reminded by the licensing authority that he needed a separate licence to operate a security business, he continued to advertise security services on Facebook. The case demonstrates enforcement action taken by the licensing authority against unlicensed or improperly licensed security operators.
+
+[defsec.net.nz, 1 Dec 2017] Covert CCTV and the Private Investigators’ Code of Conduct
+URL: https://defsec.net.nz/2017/12/01/covert-cctv-pi-code-conduct/
+Summary: This article examines covert CCTV use by private investigators under New Zealand's Private Investigators' Code of Conduct established in 2011. It discusses the legal restrictions and best practices for surveillance device installation, drawing on statutes and case law. The article is relevant to security licensing as it covers regulatory requirements and conduct standards that apply to licensed security professionals conducting investigations in NZ.
+
 ---
 USEFUL REFERENCES
 - The Act: legislation.govt.nz/act/public/2010/0115/latest/DLM1594432.html
@@ -6961,7 +7254,7 @@ html.dark .thinking-status{color:#5d6d7e}
 </header>
 <div class="kb-stats">
   <span><i class="fa-solid fa-database"></i> <strong>482</strong> PSPLA decisions (2019–2026)</span>
-  <span><i class="fa-solid fa-newspaper"></i> <strong>19</strong> news &amp; media sources</span>
+  <span><i class="fa-solid fa-newspaper"></i> <strong>92</strong> news &amp; media sources</span>
   <span><i class="fa-solid fa-file-lines"></i> PSPLA Act 2010</span>
   <span><i class="fa-solid fa-file-lines"></i> NZSA Position Statement (July 2025)</span>
   <span><i class="fa-solid fa-file-lines"></i> Electrical Workers Registration Act</span>
