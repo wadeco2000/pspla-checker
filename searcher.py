@@ -1863,10 +1863,19 @@ _lessons_cache = None
 
 
 def _load_lessons():
-    """Load lessons from lessons.json. Cached per process."""
+    """Load lessons from lessons.json (or Supabase config_store). Cached per process."""
     global _lessons_cache
     if _lessons_cache is not None:
         return _lessons_cache
+    # Supabase backend: try config_store first
+    if STATE_BACKEND == "supabase":
+        try:
+            val = _read_config_store("lessons")
+            if val is not None:
+                _lessons_cache = val if isinstance(val, list) else []
+                return _lessons_cache
+        except Exception:
+            pass  # fall through to file
     if not os.path.exists(LESSONS_JSON):
         _lessons_cache = []
         return _lessons_cache
@@ -2204,10 +2213,19 @@ _corrections_cache = None
 
 
 def _load_corrections():
-    """Load structured corrections from corrections.json. Cached per process."""
+    """Load structured corrections from corrections.json (or Supabase config_store). Cached per process."""
     global _corrections_cache
     if _corrections_cache is not None:
         return _corrections_cache
+    # Supabase backend: try config_store first
+    if STATE_BACKEND == "supabase":
+        try:
+            val = _read_config_store("corrections")
+            if val is not None:
+                _corrections_cache = val if isinstance(val, list) else []
+                return _corrections_cache
+        except Exception:
+            pass  # fall through to file
     if not os.path.exists(CORRECTIONS_JSON):
         _corrections_cache = []
         return _corrections_cache
@@ -3988,8 +4006,38 @@ def check_schema():
         return False
 
 
+class _StopRequested(SystemExit):
+    """Raised when stop_requested flag is detected. Inherits SystemExit so
+    it propagates through the existing finally blocks for cleanup."""
+    pass
+
+
 def check_pause():
-    """Block here if pause.flag exists, until it's removed."""
+    """Block if paused, exit if stop requested. Checks both local files and Supabase."""
+    # Check stop_requested first (Supabase, then file fallback)
+    if STATE_BACKEND == "supabase":
+        try:
+            state = _read_search_state("stop_requested,paused")
+            if state.get("stop_requested"):
+                print("  [STOP REQUESTED] Exiting gracefully...")
+                raise _StopRequested("Stop requested via Supabase")
+            if state.get("paused"):
+                print("  [PAUSED] Waiting for resume...")
+                while True:
+                    time.sleep(2)
+                    s = _read_search_state("paused,stop_requested")
+                    if s.get("stop_requested"):
+                        print("  [STOP REQUESTED] Exiting gracefully...")
+                        raise _StopRequested("Stop requested via Supabase")
+                    if not s.get("paused"):
+                        break
+                print("  [RESUMED]")
+                return
+        except _StopRequested:
+            raise
+        except Exception:
+            pass  # fall through to file-based check
+    # File-based pause (always checked as fallback)
     if os.path.exists(PAUSE_FLAG):
         print("  [PAUSED] Waiting for resume...")
         while os.path.exists(PAUSE_FLAG):
@@ -4262,7 +4310,16 @@ _DEFAULT_FACEBOOK_TERMS = [
 
 
 def _load_search_terms():
-    """Load search terms from JSON file, writing defaults if file is missing."""
+    """Load search terms from JSON file or Supabase config_store, writing defaults if missing."""
+    # Supabase backend: try config_store first
+    if STATE_BACKEND == "supabase":
+        try:
+            val = _read_config_store("search_terms")
+            if val and isinstance(val, dict):
+                return (val.get("google") or _DEFAULT_GOOGLE_TERMS,
+                        val.get("facebook") or _DEFAULT_FACEBOOK_TERMS)
+        except Exception:
+            pass  # fall through to file
     try:
         if os.path.exists(TERMS_FILE):
             with open(TERMS_FILE) as f:

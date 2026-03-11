@@ -159,11 +159,22 @@ _DEFAULT_TERMS = {
 
 
 def _load_terms():
+    from searcher import STATE_BACKEND, _read_config_store
+    # Supabase backend: try config_store first
+    if STATE_BACKEND == "supabase":
+        try:
+            val = _read_config_store("search_terms")
+            if val and isinstance(val, dict):
+                return {
+                    "google": val.get("google") or _DEFAULT_TERMS["google"],
+                    "facebook": val.get("facebook") or _DEFAULT_TERMS["facebook"],
+                }
+        except Exception:
+            pass  # fall through to file
     try:
         if os.path.exists(TERMS_FILE):
             with open(TERMS_FILE) as f:
                 data = json.load(f)
-            # Return defaults for any missing key
             return {
                 "google": data.get("google") or _DEFAULT_TERMS["google"],
                 "facebook": data.get("facebook") or _DEFAULT_TERMS["facebook"],
@@ -4079,6 +4090,7 @@ def publish():
 def search_running_info():
     """Lightweight endpoint: is a search running, what type, for how long?"""
     from flask import jsonify
+    from searcher import STATE_BACKEND, _read_search_state
     running = _search_process_alive()
     if not running:
         return jsonify({"running": False})
@@ -4090,18 +4102,31 @@ def search_running_info():
     search_type = "search"
     started_iso = None
     minutes = 0
-    if os.path.exists(START_FILE):
+    # Supabase backend: read from SearchStatus table
+    if STATE_BACKEND == "supabase":
         try:
-            with open(START_FILE) as f:
-                start_data = json.load(f)
-            search_type = start_data.get("type", "search")
-            started_iso = start_data.get("started")
+            state = _read_search_state("search_type,started_at")
+            search_type = state.get("search_type") or "search"
+            started_iso = state.get("started_at")
             if started_iso:
                 started = datetime.fromisoformat(started_iso)
                 elapsed = datetime.now(timezone.utc) - started
                 minutes = int(elapsed.total_seconds() / 60)
         except Exception:
             pass
+    else:
+        if os.path.exists(START_FILE):
+            try:
+                with open(START_FILE) as f:
+                    start_data = json.load(f)
+                search_type = start_data.get("type", "search")
+                started_iso = start_data.get("started")
+                if started_iso:
+                    started = datetime.fromisoformat(started_iso)
+                    elapsed = datetime.now(timezone.utc) - started
+                    minutes = int(elapsed.total_seconds() / 60)
+            except Exception:
+                pass
     return jsonify({
         "running": True,
         "type": search_type,
@@ -4114,12 +4139,40 @@ def search_running_info():
 @app.route("/search-status")
 def search_status():
     global _was_running
+    from flask import jsonify
+    from searcher import STATE_BACKEND, _read_search_state
     running = _search_process_alive()
-    paused = running and os.path.exists(PAUSE_FLAG)
     # Crash detection: if we were running last poll but not any more, mark stale "running" entries
     if _was_running and not running:
         _detect_and_mark_crashes()
     _was_running = running
+
+    if STATE_BACKEND == "supabase" and running:
+        # Read all state from Supabase
+        state = _read_search_state("status_json,log_tail,token_usage,is_running,paused")
+        paused = state.get("paused", False)
+        status = {"running": running, "paused": paused}
+        status_json = state.get("status_json")
+        if status_json and isinstance(status_json, dict):
+            status.update(status_json)
+        log_tail = state.get("log_tail", "")
+        if log_tail:
+            status["log_lines"] = log_tail.split("\n")[-200:]
+        token_usage = state.get("token_usage")
+        if token_usage and isinstance(token_usage, dict):
+            status["tokens"] = token_usage
+        # LLM warning still from local (only relevant when search runs locally)
+        try:
+            from searcher import get_llm_status
+            llm_errors = get_llm_status()
+            if llm_errors >= 3:
+                status["llm_warning"] = f"LLM API appears unavailable ({llm_errors} consecutive failures). Matches are being saved as low-confidence. Check Anthropic API key / credit balance."
+        except Exception:
+            pass
+        return jsonify(status)
+
+    # File backend (default / laptop mode)
+    paused = running and os.path.exists(PAUSE_FLAG)
     status = {"running": running, "paused": paused}
     if running and os.path.exists(STATUS_FILE):
         try:
@@ -4142,7 +4195,6 @@ def search_status():
         status["tokens"] = get_token_usage()
     except Exception:
         pass
-    from flask import jsonify
     return jsonify(status)
 
 
@@ -4291,6 +4343,29 @@ def start_bulk_recheck():
 @app.route("/search-history-data")
 def search_history_data():
     from flask import jsonify
+    from searcher import STATE_BACKEND
+    # Supabase backend: read from search_runs table
+    if STATE_BACKEND == "supabase":
+        try:
+            import requests as _req
+            from searcher import SUPABASE_URL, SUPABASE_KEY
+            r = _req.get(
+                f"{SUPABASE_URL}/rest/v1/search_runs?select=*&order=started.desc&limit=50",
+                headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+                timeout=8
+            )
+            history = r.json() if r.ok else []
+            # Mark stale "running" entries as crashed
+            if not _search_process_alive():
+                for entry in history:
+                    if entry.get("status") == "running":
+                        entry["status"] = "crashed"
+                        entry["finished"] = entry.get("finished") or datetime.now(timezone.utc).isoformat()
+                        if not entry.get("notes"):
+                            entry["notes"] = "Process exited without writing a completion record."
+            return jsonify(history)
+        except Exception:
+            pass  # fall through to file
     history = []
     if os.path.exists(HISTORY_FILE):
         try:
@@ -6851,6 +6926,26 @@ def _search_process_alive():
     if _search_proc is not None and _search_proc.poll() is None:
         return True
     _search_proc = None
+    # Supabase backend: check is_running + heartbeat
+    from searcher import STATE_BACKEND
+    if STATE_BACKEND == "supabase":
+        try:
+            from searcher import _read_search_state
+            state = _read_search_state("is_running,last_heartbeat")
+            if state.get("is_running"):
+                hb = state.get("last_heartbeat")
+                if hb:
+                    hb_dt = datetime.fromisoformat(hb)
+                    age = (datetime.now(timezone.utc) - hb_dt).total_seconds()
+                    if age < 300:  # heartbeat within 5 minutes
+                        return True
+                    # Heartbeat stale — auto-reset running state
+                    from searcher import _upsert_search_state
+                    _upsert_search_state({"is_running": False, "stop_requested": False})
+                    return False
+                return True  # running but no heartbeat yet (just started)
+        except Exception:
+            pass  # fall through to file checks
     # Fallback 1: RUNNING_FLAG exists and is less than 8 hours old
     if os.path.exists(RUNNING_FLAG):
         age = _time.time() - os.path.getmtime(RUNNING_FLAG)
