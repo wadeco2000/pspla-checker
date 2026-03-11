@@ -690,20 +690,38 @@ setInterval(loadSearchStatus, 10000);
 loadSearchStatus();
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
+var _authHandled = false;
+
 async function initAuth() {{
     // Password-based auth check (instant — no network)
     if (_PW_HASH && localStorage.getItem('pspla-auth') === _PW_HASH) {{
         showApp('password'); return;
     }}
-    // Supabase auth state listener handles both existing sessions and new logins
+    // Listen for new Google logins (fired after OAuth redirect completes)
     _sb.auth.onAuthStateChange(async function(event, session) {{
-        if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session) {{
+        if (event === 'SIGNED_IN' && session && !_authHandled) {{
+            _authHandled = true;
             await handleGoogleSession(session);
-        }} else if (event === 'INITIAL_SESSION' && !session) {{
-            document.getElementById('auth-loading').style.display = 'none';
-            document.getElementById('auth-login').style.display = 'block';
         }}
     }});
+    // Explicitly check for an existing stored session (page reload after prior login)
+    try {{
+        var res = await _sb.auth.getSession();
+        var session = res.data && res.data.session;
+        if (session && !_authHandled) {{
+            _authHandled = true;
+            await handleGoogleSession(session);
+        }} else if (!_authHandled) {{
+            showLoginForm();
+        }}
+    }} catch(e) {{
+        if (!_authHandled) showLoginForm();
+    }}
+}}
+
+function showLoginForm() {{
+    document.getElementById('auth-loading').style.display = 'none';
+    document.getElementById('auth-login').style.display = 'block';
 }}
 
 async function handleGoogleSession(session) {{
