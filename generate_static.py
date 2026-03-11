@@ -340,6 +340,7 @@ STATIC_TEMPLATE = """<!DOCTYPE html>
 const SUPABASE_URL = '{supabase_url}';
 const SUPABASE_KEY = '{supabase_key}';
 const _PW_HASH = '{password_hash}';
+const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 initAuth();
 
@@ -689,8 +690,6 @@ setInterval(loadSearchStatus, 10000);
 loadSearchStatus();
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
-const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
 async function initAuth() {{
     // Password-based auth check (instant — no network)
     if (_PW_HASH && localStorage.getItem('pspla-auth') === _PW_HASH) {{
