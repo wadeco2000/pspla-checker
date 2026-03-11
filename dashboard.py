@@ -711,6 +711,10 @@ HTML_TEMPLATE = """
           <i class="fa-solid fa-robot dd-icon" style="color:#27ae60;"></i>
           <span>LLM Log<span class="dd-sub">Every AI prompt and response</span></span>
         </a>
+        <a href="/user-access" class="dd-item">
+          <i class="fa-solid fa-users dd-icon" style="color:#2980b9;"></i>
+          <span>User Access<span class="dd-sub">Allowed users &amp; login audit log</span></span>
+        </a>
         <div class="dd-divider"></div>
         <a href="/history" class="dd-item">
           <i class="fa-solid fa-code-branch dd-icon" style="color:#7f8c8d;"></i>
@@ -4504,6 +4508,196 @@ def company_ai_decisions():
 def audit_log_page():
     from flask import Response
     return Response(AUDIT_LOG_TEMPLATE, mimetype='text/html')
+
+
+# ── User Access page ───────────────────────────────────────────────────────────
+@app.route("/user-access")
+def user_access_page():
+    from flask import Response as _R
+    return _R(_USER_ACCESS_HTML, mimetype='text/html')
+
+@app.route("/api/allowed-users", methods=["GET"])
+def api_allowed_users_get():
+    from flask import jsonify
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/allowed_users",
+                     params={"select": "id,email,name,added_by,added_at,active,last_login,last_provider",
+                             "order": "added_at.desc"},
+                     headers={"apikey": SUPABASE_SERVICE_KEY,
+                              "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
+    return jsonify(r.json() if r.ok else [])
+
+@app.route("/api/allowed-users", methods=["POST"])
+def api_allowed_users_add():
+    from flask import jsonify
+    data = request.json or {}
+    email = data.get("email", "").lower().strip()
+    name = data.get("name", "").strip()
+    if not email:
+        return jsonify({"error": "email required"}), 400
+    r = requests.post(f"{SUPABASE_URL}/rest/v1/allowed_users",
+                      json={"email": email, "name": name, "added_by": session.get("email", "admin"),
+                            "active": True},
+                      headers={"apikey": SUPABASE_SERVICE_KEY,
+                               "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                               "Prefer": "return=representation"})
+    return jsonify({"ok": r.ok, "status": r.status_code})
+
+@app.route("/api/allowed-users/<uid>", methods=["DELETE"])
+def api_allowed_users_delete(uid):
+    from flask import jsonify
+    r = requests.delete(f"{SUPABASE_URL}/rest/v1/allowed_users",
+                        params={"id": f"eq.{uid}"},
+                        headers={"apikey": SUPABASE_SERVICE_KEY,
+                                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
+    return jsonify({"ok": r.ok})
+
+@app.route("/api/login-audit")
+def api_login_audit():
+    from flask import jsonify
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/login_audit",
+                     params={"select": "id,email,provider,result,attempted_at,user_agent",
+                             "order": "attempted_at.desc", "limit": "200"},
+                     headers={"apikey": SUPABASE_SERVICE_KEY,
+                              "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
+    return jsonify(r.json() if r.ok else [])
+
+
+_USER_ACCESS_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>User Access — PSPLA Dashboard</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer"/>
+<style>
+*{box-sizing:border-box}
+body{font-family:Arial,sans-serif;margin:0;background:#f4f4f4;color:#333}
+.page-header{background:#2c3e50;color:white;padding:14px 24px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.page-header h1{margin:0;font-size:18px}
+.back-link{color:#aac;font-size:13px;text-decoration:none;display:flex;align-items:center;gap:6px}
+.back-link:hover{color:white}
+.content{padding:24px;max-width:960px;margin:0 auto}
+h2{font-size:15px;font-weight:600;color:#2c3e50;margin:0 0 12px;display:flex;align-items:center;gap:8px}
+.card{background:white;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.1);padding:20px;margin-bottom:28px}
+.add-row{display:flex;gap:8px;margin-bottom:16px}
+.add-row input{flex:1;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px}
+.btn{padding:8px 16px;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600}
+.btn-add{background:#27ae60;color:white}.btn-add:hover{background:#219a52}
+.btn-del{background:none;border:1px solid #e74c3c;color:#e74c3c;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer}
+.btn-del:hover{background:#e74c3c;color:white}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:8px 10px;border-bottom:2px solid #eee;color:#666;font-weight:600;font-size:12px;text-transform:uppercase}
+td{padding:8px 10px;border-bottom:1px solid #f0f0f0;vertical-align:middle}
+tr:last-child td{border-bottom:none}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600}
+.badge-active{background:#d5f5e3;color:#1e8449}
+.badge-inactive{background:#fde8e8;color:#c0392b}
+.badge-allowed{background:#d5f5e3;color:#1e8449}
+.badge-denied{background:#fde8e8;color:#c0392b}
+.badge-google{background:#e8f0fe;color:#1a73e8}
+.badge-password{background:#fef9e7;color:#d68910}
+.ua-cell{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#888;font-size:11px}
+.loading{color:#999;font-size:13px;padding:20px 0}
+</style>
+</head>
+<body>
+<div class="page-header">
+  <h1><i class="fa-solid fa-users"></i> User Access</h1>
+  <a href="/" class="back-link"><i class="fa-solid fa-arrow-left"></i> Back to Dashboard</a>
+</div>
+<div class="content">
+
+  <!-- Allowed Users -->
+  <div class="card">
+    <h2><i class="fa-solid fa-user-check" style="color:#27ae60"></i> Allowed Users</h2>
+    <div class="add-row">
+      <input type="email" id="new-email" placeholder="Email address" onkeydown="if(event.key==='Enter')addUser()">
+      <input type="text" id="new-name" placeholder="Name (optional)" onkeydown="if(event.key==='Enter')addUser()">
+      <button class="btn btn-add" onclick="addUser()"><i class="fa-solid fa-plus"></i> Add User</button>
+    </div>
+    <div id="users-loading" class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</div>
+    <table id="users-table" style="display:none">
+      <thead><tr><th>Email</th><th>Name</th><th>Added by</th><th>Added</th><th>Last login</th><th>Status</th><th></th></tr></thead>
+      <tbody id="users-body"></tbody>
+    </table>
+  </div>
+
+  <!-- Login Audit -->
+  <div class="card">
+    <h2><i class="fa-solid fa-clock-rotate-left" style="color:#8e44ad"></i> Login Audit Log <span style="font-size:12px;font-weight:400;color:#999">(last 200)</span></h2>
+    <div id="audit-loading" class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</div>
+    <table id="audit-table" style="display:none">
+      <thead><tr><th>Email</th><th>When</th><th>Provider</th><th>Result</th><th>User Agent</th></tr></thead>
+      <tbody id="audit-body"></tbody>
+    </table>
+  </div>
+
+</div>
+<script>
+function fmt(ts) {
+    if (!ts) return '—';
+    var d = new Date(ts);
+    return d.toLocaleDateString('en-NZ') + ' ' + d.toLocaleTimeString('en-NZ', {hour:'2-digit',minute:'2-digit'});
+}
+function loadUsers() {
+    fetch('/api/allowed-users').then(function(r){return r.json();}).then(function(rows){
+        document.getElementById('users-loading').style.display = 'none';
+        var t = document.getElementById('users-table');
+        var b = document.getElementById('users-body');
+        b.innerHTML = '';
+        rows.forEach(function(u) {
+            var tr = document.createElement('tr');
+            tr.innerHTML = '<td><strong>' + u.email + '</strong></td>' +
+                '<td>' + (u.name || '—') + '</td>' +
+                '<td>' + (u.added_by || '—') + '</td>' +
+                '<td>' + fmt(u.added_at) + '</td>' +
+                '<td>' + (u.last_login ? fmt(u.last_login) + (u.last_provider ? ' <span class="badge badge-' + u.last_provider + '">' + u.last_provider + '</span>' : '') : '—') + '</td>' +
+                '<td><span class="badge ' + (u.active ? 'badge-active">Active' : 'badge-inactive">Inactive') + '</span></td>' +
+                '<td><button class="btn-del" onclick="removeUser(\'' + u.id + '\', \'' + u.email + '\')">Remove</button></td>';
+            b.appendChild(tr);
+        });
+        t.style.display = rows.length ? '' : 'none';
+        if (!rows.length) document.getElementById('users-loading').textContent = 'No allowed users yet.';
+    });
+}
+function addUser() {
+    var email = document.getElementById('new-email').value.trim();
+    var name = document.getElementById('new-name').value.trim();
+    if (!email) { alert('Enter an email address.'); return; }
+    fetch('/api/allowed-users', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({email: email, name: name})
+    }).then(function(r){return r.json();}).then(function(d){
+        if (d.ok) { document.getElementById('new-email').value=''; document.getElementById('new-name').value=''; loadUsers(); }
+        else alert('Failed to add user (may already exist).');
+    });
+}
+function removeUser(id, email) {
+    if (!confirm('Remove ' + email + ' from allowed users?')) return;
+    fetch('/api/allowed-users/' + id, {method:'DELETE'}).then(function(){loadUsers();});
+}
+function loadAudit() {
+    fetch('/api/login-audit').then(function(r){return r.json();}).then(function(rows){
+        document.getElementById('audit-loading').style.display = 'none';
+        var t = document.getElementById('audit-table');
+        var b = document.getElementById('audit-body');
+        b.innerHTML = '';
+        rows.forEach(function(a) {
+            var tr = document.createElement('tr');
+            tr.innerHTML = '<td>' + a.email + '</td>' +
+                '<td style="white-space:nowrap">' + fmt(a.attempted_at) + '</td>' +
+                '<td><span class="badge badge-' + a.provider + '">' + a.provider + '</span></td>' +
+                '<td><span class="badge badge-' + a.result + '">' + a.result + '</span></td>' +
+                '<td class="ua-cell" title="' + (a.user_agent||'').replace(/"/g,'') + '">' + (a.user_agent || '—') + '</td>';
+            b.appendChild(tr);
+        });
+        t.style.display = rows.length ? '' : 'none';
+        if (!rows.length) document.getElementById('audit-loading').textContent = 'No logins recorded yet.';
+    });
+}
+loadUsers();
+loadAudit();
+</script>
+</body>
+</html>"""
 
 
 @app.route("/llm-log")
