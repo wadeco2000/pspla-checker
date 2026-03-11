@@ -181,7 +181,8 @@ STATIC_TEMPLATE = """<!DOCTYPE html>
 <div id="auth-overlay">
   <div id="auth-loading" style="text-align:center;color:#cde;">
     <i class="fa-solid fa-spinner fa-spin fa-2x"></i><br><br>
-    <span style="font-size:14px;">Checking access...</span>
+    <span style="font-size:14px;">Checking access...</span><br><br>
+    <a href="#" onclick="signOut();return false;" style="font-size:11px;color:#667;text-decoration:none;">Sign out and try again</a>
   </div>
   <div id="auth-login" class="auth-card" style="display:none;">
     <i class="fa-solid fa-shield-halved" style="font-size:36px;color:#5dade2;margin-bottom:16px;"></i>
@@ -730,12 +731,13 @@ async function handleGoogleSession(session) {{
     try {{
         var res = await _sb.from('allowed_users').select('id,active').eq('email', email).eq('active', true).maybeSingle();
         allowed = !!(res.data && !res.error);
-        await _sb.from('login_audit').insert({{
-            email: email, provider: 'google',
-            result: allowed ? 'allowed' : 'denied',
-            user_agent: navigator.userAgent
-        }});
     }} catch(e) {{ allowed = false; }}
+    // Fire-and-forget audit log — never block access on this
+    _sb.from('login_audit').insert({{
+        email: email, provider: 'google',
+        result: allowed ? 'allowed' : 'denied',
+        user_agent: navigator.userAgent
+    }}).catch(function(){{}});
     if (allowed) {{
         showApp('google');
     }} else {{
