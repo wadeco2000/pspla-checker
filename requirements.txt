@@ -1,0 +1,8 @@
+flask
+requests
+beautifulsoup4
+python-dotenv
+anthropic
+apscheduler
+psutil
+gunicorn; sys_platform != 'win32'

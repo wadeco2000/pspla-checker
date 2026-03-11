@@ -281,7 +281,8 @@ _sb.auth.getSession().then(function(result){
 
 @app.route('/login')
 def login_page():
-    is_local = request.remote_addr in ('127.0.0.1', '::1', '0.0.0.0', '::ffff:127.0.0.1')
+    _local_addrs = ('127.0.0.1', '::1', '0.0.0.0', '::ffff:127.0.0.1')
+    is_local = request.remote_addr in _local_addrs
     local_pw = (
         '<div class="divider">\u2014 or local password \u2014</div>'
         '<input type="password" id="pw-input" class="pw-input" placeholder="Dashboard password"'
@@ -302,7 +303,12 @@ def login_page():
 
 @app.route('/login/password', methods=['POST'])
 def login_password():
-    if request.remote_addr not in ('127.0.0.1', '::1', '0.0.0.0', '::ffff:127.0.0.1'):
+    _local_addrs = ('127.0.0.1', '::1', '0.0.0.0', '::ffff:127.0.0.1')
+    remote = request.remote_addr
+    # Behind a reverse proxy (Azure/gunicorn), check X-Forwarded-For
+    if remote not in _local_addrs and request.headers.get('X-Forwarded-For'):
+        remote = request.headers.get('X-Forwarded-For', '').split(',')[0].strip()
+    if remote not in _local_addrs:
         return _jsonify_auth({'ok': False, 'error': 'localhost only'}), 403
     pw = (request.json or {}).get('password', '')
     if _hashlib.sha256(pw.encode()).hexdigest() == _hashlib.sha256(PAGES_PASSWORD.encode()).hexdigest():
@@ -4262,6 +4268,8 @@ def recheck_log():
 @app.route("/open-terminal", methods=["POST"])
 def open_terminal():
     from flask import jsonify
+    if os.name != "nt":
+        return jsonify({"ok": False, "error": "Only available on Windows"})
     try:
         log_path = LOG_FILE
         ps_cmd = f"Get-Content -Path '{log_path}' -Wait -Tail 80"
@@ -5325,33 +5333,26 @@ def _kill_search_processes():
             _search_proc.kill()
     _search_proc = None
     # Also scan for orphaned search processes (e.g. after dashboard restart)
-    # Match both "run_directories.py" and bare "run_directories" (covers import-style launches)
     search_scripts = {
         "searcher.py", "run_weekly.py", "run_facebook.py", "run_partial.py", "run_directories.py",
         "run_recheck.py",
         "searcher", "run_weekly", "run_facebook", "run_partial", "run_directories",
         "run_recheck",
     }
-    our_pid = str(os.getpid())
+    our_pid = os.getpid()
     try:
-        result = subprocess.run(
-            ["powershell", "-Command",
-             "Get-WmiObject Win32_Process | Where-Object { $_.Name -like 'python*' } "
-             "| Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"],
-            capture_output=True, text=True, timeout=10)
-        if result.stdout.strip():
-            import json as _json
-            procs = _json.loads(result.stdout)
-            if isinstance(procs, dict):
-                procs = [procs]
-            for proc in procs:
-                pid = str(proc.get("ProcessId", ""))
-                cmd = proc.get("CommandLine") or ""
-                if pid == our_pid:
-                    continue
-                if any(s in cmd for s in search_scripts):
-                    subprocess.run(["powershell", "-Command", f"Stop-Process -Id {pid} -Force"],
-                                   capture_output=True, timeout=5)
+        import psutil
+        for proc in psutil.process_iter(['pid', 'cmdline']):
+            if proc.info['pid'] == our_pid:
+                continue
+            cmdline = ' '.join(proc.info['cmdline'] or [])
+            if any(s in cmdline for s in search_scripts):
+                try:
+                    proc.terminate()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+    except ImportError:
+        pass  # psutil not installed — graceful stop via Supabase flag is primary mechanism
     except Exception:
         pass
 
@@ -7091,10 +7092,9 @@ def open_nzsa_report():
         tmp_script.close()
 
         # Launch detached — Flask responds immediately, browser stays open
-        CREATE_NO_WINDOW = 0x08000000
         subprocess.Popen(
             [sys.executable, tmp_script.name, tmp_data.name],
-            creationflags=CREATE_NO_WINDOW,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         return jsonify({"ok": True})
     except Exception as _e:
