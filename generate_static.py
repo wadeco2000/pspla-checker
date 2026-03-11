@@ -698,14 +698,36 @@ async function initAuth() {{
     if (_PW_HASH && localStorage.getItem('pspla-auth') === _PW_HASH) {{
         showApp('password'); return;
     }}
-    // Listen for new Google logins (fired after OAuth redirect completes)
+    // Check if a stored Supabase token exists in localStorage
+    var hasSbToken = Object.keys(localStorage).some(function(k) {{
+        return k.startsWith('sb-') && k.endsWith('-auth-token');
+    }});
+    // Check if this is an OAuth callback (tokens in URL hash/params)
+    var hasOAuthCallback = window.location.hash.indexOf('access_token') !== -1
+        || window.location.search.indexOf('code=') !== -1;
+
+    if (!hasSbToken && !hasOAuthCallback) {{
+        // Fresh visitor — show login immediately, no network call needed
+        showLoginForm();
+        // Still listen in case onAuthStateChange fires (e.g. OAuth redirect processed)
+        _sb.auth.onAuthStateChange(async function(event, session) {{
+            if (event === 'SIGNED_IN' && session && !_authHandled) {{
+                _authHandled = true;
+                document.getElementById('auth-login').style.display = 'none';
+                document.getElementById('auth-loading').style.display = 'block';
+                await handleGoogleSession(session);
+            }}
+        }});
+        return;
+    }}
+
+    // Has stored session or OAuth callback — verify with Supabase
     _sb.auth.onAuthStateChange(async function(event, session) {{
         if (event === 'SIGNED_IN' && session && !_authHandled) {{
             _authHandled = true;
             await handleGoogleSession(session);
         }}
     }});
-    // Explicitly check for an existing stored session (page reload after prior login)
     try {{
         var res = await _sb.auth.getSession();
         var session = res.data && res.data.session;
