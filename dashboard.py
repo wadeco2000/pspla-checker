@@ -190,6 +190,13 @@ _AUTH_SKIP = {
     'login_page', 'login_password', 'auth_callback', 'auth_verify', 'auth_logout'
 }
 
+def _is_admin():
+    """True if the logged-in user has admin privileges (password/localhost login, or NOTIFY_EMAIL)."""
+    if session.get('auth_method') == 'password':
+        return True
+    email = (session.get('email') or '').lower().strip()
+    return bool(email and NOTIFY_EMAIL and email == NOTIFY_EMAIL.lower().strip())
+
 @app.before_request
 def _require_dashboard_auth():
     if request.endpoint in _AUTH_SKIP or (request.endpoint or '').startswith('static'):
@@ -4615,7 +4622,8 @@ def _send_welcome_email(to_email, to_name, added_by):
 @app.route("/user-access")
 def user_access_page():
     from flask import Response as _R
-    return _R(_USER_ACCESS_HTML, mimetype='text/html')
+    html = _USER_ACCESS_HTML.replace('__IS_ADMIN__', 'true' if _is_admin() else 'false')
+    return _R(html, mimetype='text/html')
 
 @app.route("/api/allowed-users", methods=["GET"])
 def api_allowed_users_get():
@@ -4630,6 +4638,8 @@ def api_allowed_users_get():
 @app.route("/api/allowed-users", methods=["POST"])
 def api_allowed_users_add():
     from flask import jsonify
+    if not _is_admin():
+        return jsonify({"ok": False, "error": "admin only"}), 403
     data = request.json or {}
     email = data.get("email", "").lower().strip()
     name = data.get("name", "").strip()
@@ -4650,6 +4660,8 @@ def api_allowed_users_add():
 @app.route("/api/allowed-users/<uid>", methods=["DELETE"])
 def api_allowed_users_delete(uid):
     from flask import jsonify
+    if not _is_admin():
+        return jsonify({"ok": False, "error": "admin only"}), 403
     r = requests.delete(f"{SUPABASE_URL}/rest/v1/allowed_users",
                         params={"id": f"eq.{uid}"},
                         headers={"apikey": SUPABASE_SERVICE_KEY,
@@ -4714,7 +4726,7 @@ tr:last-child td{border-bottom:none}
   <!-- Allowed Users -->
   <div class="card">
     <h2><i class="fa-solid fa-user-check" style="color:#27ae60"></i> Allowed Users</h2>
-    <div class="add-row">
+    <div id="add-row" class="add-row" style="display:none">
       <input type="email" id="new-email" placeholder="Email address" onkeydown="if(event.key==='Enter')addUser()">
       <input type="text" id="new-name" placeholder="Name (optional)" onkeydown="if(event.key==='Enter')addUser()">
       <button class="btn btn-add" onclick="addUser()"><i class="fa-solid fa-plus"></i> Add User</button>
@@ -4738,12 +4750,14 @@ tr:last-child td{border-bottom:none}
 
 </div>
 <script>
+var IS_ADMIN = __IS_ADMIN__;
 function fmt(ts) {
     if (!ts) return '—';
     var d = new Date(ts);
     return d.toLocaleDateString('en-NZ') + ' ' + d.toLocaleTimeString('en-NZ', {hour:'2-digit',minute:'2-digit'});
 }
 function loadUsers() {
+    if (IS_ADMIN) document.getElementById('add-row').style.display = '';
     fetch('/api/allowed-users').then(function(r){return r.json();}).then(function(rows){
         document.getElementById('users-loading').style.display = 'none';
         var t = document.getElementById('users-table');
@@ -4751,13 +4765,14 @@ function loadUsers() {
         b.innerHTML = '';
         rows.forEach(function(u) {
             var tr = document.createElement('tr');
+            var removeBtn = IS_ADMIN ? '<button class="btn-del" onclick="removeUser(\\'' + u.id + '\\', \\'' + u.email + '\\')">Remove</button>' : '';
             tr.innerHTML = '<td><strong>' + u.email + '</strong></td>' +
                 '<td>' + (u.name || '—') + '</td>' +
                 '<td>' + (u.added_by || '—') + '</td>' +
                 '<td>' + fmt(u.added_at) + '</td>' +
                 '<td>' + (u.last_login ? fmt(u.last_login) + (u.last_provider ? ' <span class="badge badge-' + u.last_provider + '">' + u.last_provider + '</span>' : '') : '—') + '</td>' +
                 '<td><span class="badge ' + (u.active ? 'badge-active">Active' : 'badge-inactive">Inactive') + '</span></td>' +
-                '<td><button class="btn-del" onclick="removeUser(\\'' + u.id + '\\', \\'' + u.email + '\\')">Remove</button></td>';
+                '<td>' + removeBtn + '</td>';
             b.appendChild(tr);
         });
         t.style.display = rows.length ? '' : 'none';
