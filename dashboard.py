@@ -4675,22 +4675,32 @@ function removeUser(id, email) {
     fetch('/api/allowed-users/' + id, {method:'DELETE'}).then(function(){loadUsers();});
 }
 function loadAudit() {
-    fetch('/api/login-audit').then(function(r){return r.json();}).then(function(rows){
-        document.getElementById('audit-loading').style.display = 'none';
+    fetch('/api/login-audit').then(function(r){
+        if (!r.ok) { return r.text().then(function(t){ throw new Error(r.status + ': ' + t.slice(0,200)); }); }
+        return r.json();
+    }).then(function(rows){
+        var el = document.getElementById('audit-loading');
         var t = document.getElementById('audit-table');
         var b = document.getElementById('audit-body');
         b.innerHTML = '';
+        if (!Array.isArray(rows) || !rows.length) {
+            el.textContent = 'No logins recorded yet.';
+            t.style.display = 'none';
+            return;
+        }
+        el.style.display = 'none';
         rows.forEach(function(a) {
             var tr = document.createElement('tr');
-            tr.innerHTML = '<td>' + a.email + '</td>' +
+            tr.innerHTML = '<td>' + (a.email||'') + '</td>' +
                 '<td style="white-space:nowrap">' + fmt(a.attempted_at) + '</td>' +
                 '<td><span class="badge badge-' + a.provider + '">' + a.provider + '</span></td>' +
                 '<td><span class="badge badge-' + a.result + '">' + a.result + '</span></td>' +
                 '<td class="ua-cell" title="' + (a.user_agent||'').replace(/"/g,'') + '">' + (a.user_agent || '—') + '</td>';
             b.appendChild(tr);
         });
-        t.style.display = rows.length ? '' : 'none';
-        if (!rows.length) document.getElementById('audit-loading').textContent = 'No logins recorded yet.';
+        t.style.display = '';
+    }).catch(function(e){
+        document.getElementById('audit-loading').textContent = 'Error loading audit log: ' + e.message;
     });
 }
 loadUsers();
