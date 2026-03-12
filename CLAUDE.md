@@ -261,7 +261,11 @@ Searches run via GitHub Actions workflows in `.github/workflows/`. Each workflow
 | `/recheck-services` | Re-scrapes website services for one company |
 | `/recheck-companies-office` | Re-runs CO check for one company |
 | `/recheck-google-profile` | Re-runs Google Business Profile for one company |
+| `/recheck-electrician` | Re-runs MBIE electrician licence check for one company |
+| `/recheck-llm-sense` | Runs AI association review for one company |
+| `/find-linkedin` | Re-runs LinkedIn URL discovery + overseas validation for one company |
 | `/full-recheck` | Runs all checks for one company |
+| `/open-nzsa-report` | Server-side NZSA report form submission (supports dry_run) |
 | `/save-correction` | Parses note, runs check_pspla, returns proposed match WITHOUT saving |
 | `/confirm-recheck` | Saves approved/rejected correction result to DB |
 | `/backup-db` | Saves CSV to local backups/ + uploads to Dropbox |
@@ -395,6 +399,84 @@ All LLM calls: intercepted by `_LoggingAnthropicClient` → logged to `llm_debug
 - **Region-boosted PSPLA sorting** — PSPLA names containing website region words ranked first.
 - **`_LoggingAnthropicClient`** — intercepts all LLM calls, logs to `llm_debug.log`.
 - **CSV exports** — always use `sorted(companies[0].keys())` for columns, never a hardcoded list.
+
+---
+
+## NZSA Report — Server-Side Form Submission (added 12 Mar 2026)
+
+The "Report to NZSA" button on expanded company detail cards submits the NZSA Gravity Forms report form server-side via `requests` (replaced previous Playwright approach which required a visible browser, broken on Azure).
+
+**Flow:**
+1. Dashboard modal pre-fills sender details (defaults: Anon/Anon, anon@anon.co.nz), company info, and auto-generated evidence text
+2. `POST /open-nzsa-report` — calls `_nzsa_build_payload()` which GETs the live form page, extracts nonces/hidden fields via BeautifulSoup, builds the POST payload
+3. Supports `dry_run` mode — returns payload without submitting (for testing)
+4. Required field validation in JS (`_nzsaValidate()`) — checks fname, lname, email (with @ check), company name, evidence
+
+**Key details:**
+- Form URL: `https://security.org.nz/public-info/report-unlicensed-operators/`
+- Gravity Forms ID: 13
+- Fields: `input_2.3` (fname), `input_2.6` (lname), `input_3` (email), `input_4` (mobile), `input_6` (party_name), `input_7` (location), `input_8` (evidence)
+- Nonces extracted fresh each submission from the live page
+
+---
+
+## LinkedIn Overseas Rejection (added 12 Mar 2026)
+
+Three-layer protection against accepting overseas LinkedIn profiles for NZ companies:
+
+**Layer 1 — Search scoring penalties** (`find_linkedin_url()` in `searcher.py`):
+- `_HARD_OVERSEAS_LI` list: Australia, UK, USA, Canada, Ireland, South Africa, India, Singapore keywords
+- `_NZ_SIGNALS_LI` list: NZ city names, .co.nz domains
+- Overseas penalty: −10 points; NZ signal bonus: +3 points
+
+**Layer 2 — Hard location gate** (after `scrape_linkedin_page()`):
+- If scraped `location` contains any overseas keyword → reject immediately, clear `linkedin_url`
+
+**Layer 3 — AI verification** (`llm_verify_associations()`):
+- Now accepts `linkedin_location`, `linkedin_industry`, `linkedin_description`, `linkedin_website` params
+- Prompt rule: "If the LinkedIn location shows a different country… then REJECT"
+- Also checks website domain mismatch between LinkedIn and company
+
+**Dashboard `/find-linkedin` endpoint** also applies layers 2+3 for individual rechecks.
+
+---
+
+## Inline Card Updates on Recheck (added 12 Mar 2026)
+
+When clicking individual Re-check buttons on expanded company detail cards, the card content updates inline with new data and shows a green highlight animation confirming success.
+
+**Implementation:**
+- Card body divs have IDs: `pspla-card-body-{{ c.id }}`, `co-card-body-{{ c.id }}`, etc.
+- Recheck endpoints return expanded response data (all relevant fields)
+- JS handlers rebuild card HTML from response data using `_gridRow()` helper
+- `_cardHighlight(el)` applies CSS animation: `@keyframes cardUpdated { 0% { background: #d4edda; } 100% { background: transparent; } }`
+- Works for: PSPLA, Companies Office, NZSA, Google, Facebook, Services, LinkedIn rechecks
+
+---
+
+## Mobile Responsive Design (added 12 Mar 2026)
+
+Dashboard is responsive with CSS media queries at two breakpoints:
+
+**Tablet (≤768px):**
+- Hamburger menu replaces navbar (animated 3-bar icon with open/close transition)
+- Table wrapped in `.table-wrap` div for horizontal scroll
+- Detail cards: top row (PSPLA+CO) stacks to 1 column; second row (FB+NZSA+Google+LinkedIn) goes to 2 columns
+- Filters stack vertically; stats row wraps with smaller boxes
+- Electrician card goes full-width
+
+**Phone (≤480px):**
+- Smaller brand text/logo
+- Detail cards all go to single column
+- Table font-size reduced
+
+**CSS classes on detail grids** (needed because inline styles can't be overridden by media queries):
+- `.detail-top-grid` — PSPLA + CO row
+- `.detail-cards-grid` — FB + NZSA + Google + LinkedIn row
+- `.detail-electrician` — electrician licence card
+- `.nzsa-form-grid` — NZSA report modal name fields
+
+**No desktop changes** — all responsive rules are inside `@media` blocks.
 
 ---
 
