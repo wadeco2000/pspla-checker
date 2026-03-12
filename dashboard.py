@@ -5800,7 +5800,7 @@ body{font-family:Arial,sans-serif;margin:0;background:#f4f4f4;color:#333}
         <div class="method"><i class="fa-brands fa-google"></i> Signed in with Google</div>
         <div class="avatar-actions">
           <label class="btn btn-sm btn-secondary" style="margin:0">
-            <i class="fa-solid fa-camera"></i> Upload Photo
+            <i class="fa-solid fa-camera"></i> __UPLOAD_LABEL__
             <input type="file" id="avatar-file" accept="image/*" style="display:none" onchange="uploadAvatar(this)">
           </label>
           <button class="btn btn-sm btn-outline" onclick="clearAvatar()" id="btn-clear-avatar" style="__CLEAR_DISPLAY__">
@@ -6001,10 +6001,12 @@ def account_profile_page():
     if avatar_url:
         avatar_html = f'<div class="avatar"><img src="{avatar_url}?t={int(_time.time())}" alt="Avatar"></div>'
         clear_display = ''
+        upload_label = 'Replace Photo'
     else:
         initials = ''.join([w[0] for w in email.split('@')[0].replace('.', ' ').split()[:2]]).upper() or '?'
         avatar_html = f'<div class="avatar-initials">{initials}</div>'
         clear_display = 'display:none'
+        upload_label = 'Upload Photo'
     user_name = profile.get('name') or ''
     # 2FA status
     enabled = totp_row and totp_row.get('totp_enabled')
@@ -6028,6 +6030,7 @@ def account_profile_page():
                 .replace('__USER_EMAIL__', email)
                 .replace('__USER_NAME__', user_name or 'No name set')
                 .replace('__CLEAR_DISPLAY__', clear_display)
+                .replace('__UPLOAD_LABEL__', upload_label)
                 .replace('__STATUS_CLASS__', 'enabled')
                 .replace('__STATUS_LABEL__', 'Enabled')
                 .replace('__STATUS_SUB__', sub)
@@ -6042,6 +6045,7 @@ def account_profile_page():
                 .replace('__USER_EMAIL__', email)
                 .replace('__USER_NAME__', user_name or 'No name set')
                 .replace('__CLEAR_DISPLAY__', clear_display)
+                .replace('__UPLOAD_LABEL__', upload_label)
                 .replace('__STATUS_CLASS__', 'disabled')
                 .replace('__STATUS_LABEL__', 'Disabled')
                 .replace('__STATUS_SUB__', 'Add an extra layer of security to your account')
