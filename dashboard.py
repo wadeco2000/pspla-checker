@@ -3516,8 +3516,8 @@ def index():
     init_log_lines = []
     if search_alive and _sb == "supabase":
         try:
-            _ll = _read_search_state("log_tail")
-            lt = _ll.get("log_tail", "")
+            _ll = _read_search_state("log_lines")
+            lt = _ll.get("log_lines", "")
             if lt:
                 init_log_lines = lt.split("\n")[-200:]
         except Exception:
@@ -4411,13 +4411,13 @@ def search_status():
 
     if STATE_BACKEND == "supabase" and running:
         # Read all state from Supabase
-        state = _read_search_state("status_json,log_tail,token_usage,is_running,paused")
+        state = _read_search_state("status_json,log_lines,token_usage,is_running,paused")
         paused = state.get("paused", False)
         status = {"running": running, "paused": paused}
         status_json = state.get("status_json")
         if status_json and isinstance(status_json, dict):
             status.update(status_json)
-        log_tail = state.get("log_tail", "")
+        log_tail = state.get("log_lines", "")
         if log_tail:
             status["log_lines"] = log_tail.split("\n")[-200:]
         token_usage = state.get("token_usage")
@@ -4619,6 +4619,10 @@ def search_history_data():
                 timeout=8
             )
             history = r.json() if r.ok else []
+            # Map Supabase column names to what the JS expects
+            for entry in history:
+                if "run_type" in entry and "type" not in entry:
+                    entry["type"] = entry.pop("run_type")
             # Mark stale "running" entries as crashed
             if not _search_process_alive():
                 for entry in history:

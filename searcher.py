@@ -297,13 +297,48 @@ def _push_search_status(is_running, search_type="", progress="", log_lines=""):
 
 def reset_session_log():
     """Call at the start of each search run to clear the session log."""
-    global _session_new_companies
+    global _session_new_companies, _terminal_log
     _session_new_companies = []
+    _terminal_log = []
 
 
 def get_session_log():
-    """Return a copy of the session log."""
+    """Return a copy of the session log (new company dicts for email)."""
     return list(_session_new_companies)
+
+
+# Terminal log buffer — captures print() output for pushing to Supabase
+_terminal_log = []
+_original_print = print
+
+
+def _capturing_print(*args, **kwargs):
+    """Wrapper around print() that also captures output to _terminal_log."""
+    _original_print(*args, **kwargs)
+    # Only capture if not writing to a specific file
+    if "file" not in kwargs or kwargs["file"] is None:
+        line = " ".join(str(a) for a in args)
+        _terminal_log.append(line)
+        # Keep buffer bounded
+        if len(_terminal_log) > 500:
+            del _terminal_log[:200]
+
+
+def get_terminal_log(tail=200):
+    """Return the last N lines of captured terminal output."""
+    return _terminal_log[-tail:]
+
+
+def enable_terminal_capture():
+    """Enable capturing print() output for Supabase log push."""
+    import builtins
+    builtins.print = _capturing_print
+
+
+def disable_terminal_capture():
+    """Restore original print()."""
+    import builtins
+    builtins.print = _original_print
 
 NZ_REGIONS = [
     # Major cities
@@ -4207,7 +4242,7 @@ def write_status(phase, region, term, region_idx, term_idx, total_regions, total
         if os.path.exists(_sf):
             with open(_sf) as _sfh:
                 _stype = json.load(_sfh).get("type", "")
-        _log_lines = get_session_log()[-60:]
+        _log_lines = get_terminal_log(200)
         _log = "\n".join(_log_lines)
         # Truncate log to avoid exceeding column limits
         if len(_log) > 50000:
@@ -4247,6 +4282,7 @@ def record_search_start(run_type, started_iso, triggered_by):
     """Write a 'running' sentinel to history at search start.
     If the process crashes without calling append_history(), this entry remains
     visible in the history so you can see the search started but never finished."""
+    enable_terminal_capture()
     record = {
         "type": run_type,
         "started": started_iso,
