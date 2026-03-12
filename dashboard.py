@@ -3538,15 +3538,27 @@ HISTORY_TEMPLATE = """
                        border-radius: 4px; font-size: 12px; cursor: default; }
         .warning { background: #fff3cd; border: 1px solid #ffc107; padding: 12px 16px;
                    border-radius: 6px; margin-top: 15px; font-size: 13px; color: #856404; }
+        .info { background: #d1ecf1; border: 1px solid #bee5eb; padding: 10px 14px;
+                border-radius: 6px; margin-top: 10px; font-size: 12px; color: #0c5460; }
+        .gh-link { color: #2980b9; text-decoration: none; font-size: 12px; }
+        .gh-link:hover { text-decoration: underline; }
+        #rollback-status { margin-top: 10px; padding: 10px; border-radius: 6px; display: none; font-size: 13px; }
     </style>
 </head>
 <body>
     <a href="/" class="back">&larr; Back to Dashboard</a>
     <h1>Version History</h1>
     <div class="warning">
-        <strong>Rollback</strong> resets the code to that version. Any uncommitted changes will be lost.
+        <strong>Rollback</strong> creates a revert commit and triggers a new deploy to Azure.
         The database is not affected — only the code changes.
     </div>
+    {% if source == 'github' %}
+    <div class="info">
+        Showing commits from GitHub ({{ repo }}).
+        <a href="https://github.com/{{ repo }}/commits/main" target="_blank" class="gh-link">View on GitHub &rarr;</a>
+    </div>
+    {% endif %}
+    <div id="rollback-status"></div>
     <table>
         <thead>
             <tr><th>Commit</th><th>Date</th><th>Message</th><th>Action</th></tr>
@@ -3554,24 +3566,55 @@ HISTORY_TEMPLATE = """
         <tbody>
             {% for commit in commits %}
             <tr {% if loop.first %}class="current"{% endif %}>
-                <td class="hash">{{ commit.hash }}</td>
+                <td class="hash">
+                    {% if repo %}
+                    <a href="https://github.com/{{ repo }}/commit/{{ commit.hash }}" target="_blank"
+                       style="color:#888; text-decoration:none;">{{ commit.hash }}</a>
+                    {% else %}
+                    {{ commit.hash }}
+                    {% endif %}
+                </td>
                 <td>{{ commit.date }}</td>
                 <td>{{ commit.message }}</td>
                 <td>
                     {% if loop.first %}
                         <button class="btn-current" disabled>Current</button>
                     {% else %}
-                        <form method="POST" action="/rollback/{{ commit.hash }}"
-                              onsubmit="return confirm('Roll back to: {{ commit.message }}?')">
-                            <button class="btn-rollback" type="submit">Rollback</button>
-                        </form>
+                        <button class="btn-rollback" onclick="doRollback('{{ commit.hash }}', '{{ commit.message|e }}')">Rollback</button>
                     {% endif %}
                 </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
-
+    <script>
+    function doRollback(hash, msg) {
+        if (!confirm('Revert to: ' + msg + '?\\n\\nThis will create a revert commit and deploy it to Azure.')) return;
+        var statusEl = document.getElementById('rollback-status');
+        statusEl.style.display = 'block';
+        statusEl.style.background = '#d1ecf1';
+        statusEl.style.color = '#0c5460';
+        statusEl.innerHTML = '<strong>Rolling back...</strong> Creating revert commit and deploying. This may take 1-2 minutes.';
+        fetch('/rollback/' + hash, { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.ok) {
+                    statusEl.style.background = '#d4edda';
+                    statusEl.style.color = '#155724';
+                    statusEl.innerHTML = '<strong>Rollback triggered!</strong> Revert commit pushed. Azure will redeploy in ~1 minute. <a href="/history">Refresh</a>';
+                } else {
+                    statusEl.style.background = '#f8d7da';
+                    statusEl.style.color = '#721c24';
+                    statusEl.innerHTML = '<strong>Rollback failed:</strong> ' + (data.error || 'Unknown error');
+                }
+            })
+            .catch(function(e) {
+                statusEl.style.background = '#f8d7da';
+                statusEl.style.color = '#721c24';
+                statusEl.innerHTML = '<strong>Error:</strong> ' + e.message;
+            });
+    }
+    </script>
 </body>
 </html>
 """
@@ -3579,35 +3622,135 @@ HISTORY_TEMPLATE = """
 
 @app.route("/history")
 def history():
-    try:
-        result = subprocess.run(
-            ["git", "log", "--pretty=format:%h|%ad|%s", "--date=short", "-20"],
-            capture_output=True, text=True, cwd=os.path.dirname(os.path.abspath(__file__))
-        )
-        commits = []
-        for line in result.stdout.strip().splitlines():
-            parts = line.split("|", 2)
-            if len(parts) == 3:
-                commits.append({"hash": parts[0], "date": parts[1], "message": parts[2]})
-    except Exception as e:
-        commits = []
-        print(f"Git log error: {e}")
-    return render_template_string(HISTORY_TEMPLATE, commits=commits)
+    commits = []
+    repo = os.getenv("GITHUB_REPO", "wadeco2000/pspla-checker")
+    pat = os.getenv("GITHUB_PAT", "")
+    source = "local"
+
+    # Try GitHub API first (works on Azure where there's no git repo)
+    if pat and repo:
+        try:
+            r = requests.get(
+                f"https://api.github.com/repos/{repo}/commits?sha=main&per_page=20",
+                headers={"Authorization": f"token {pat}", "Accept": "application/vnd.github.v3+json"},
+                timeout=10
+            )
+            if r.ok:
+                for c in r.json():
+                    commits.append({
+                        "hash": c["sha"][:7],
+                        "full_hash": c["sha"],
+                        "date": c["commit"]["committer"]["date"][:10],
+                        "message": c["commit"]["message"].split("\n")[0][:120],
+                    })
+                source = "github"
+        except Exception as e:
+            print(f"GitHub API error: {e}")
+
+    # Fallback: local git log (works on laptop)
+    if not commits:
+        try:
+            result = subprocess.run(
+                ["git", "log", "--pretty=format:%h|%H|%ad|%s", "--date=short", "-20"],
+                capture_output=True, text=True, cwd=os.path.dirname(os.path.abspath(__file__))
+            )
+            for line in result.stdout.strip().splitlines():
+                parts = line.split("|", 3)
+                if len(parts) == 4:
+                    commits.append({"hash": parts[0], "full_hash": parts[1], "date": parts[2], "message": parts[3]})
+        except Exception as e:
+            print(f"Git log error: {e}")
+
+    return render_template_string(HISTORY_TEMPLATE, commits=commits, source=source, repo=repo)
 
 
 @app.route("/rollback/<commit_hash>", methods=["POST"])
 def rollback(commit_hash):
-    # Safety check: only allow valid short hashes (7 hex chars)
-    if not all(c in "0123456789abcdef" for c in commit_hash) or len(commit_hash) != 7:
-        return "Invalid commit hash", 400
+    from flask import jsonify
+    # Validate hash (7 or 40 hex chars)
+    if not all(c in "0123456789abcdef" for c in commit_hash) or len(commit_hash) not in (7, 40):
+        return jsonify({"ok": False, "error": "Invalid commit hash"}), 400
+
+    repo = os.getenv("GITHUB_REPO", "wadeco2000/pspla-checker")
+    pat = os.getenv("GITHUB_PAT", "")
+
+    # Cloud rollback: use GitHub API to create a revert commit
+    if pat and repo:
+        try:
+            # 1. Get the full SHA if we only have a short hash
+            if len(commit_hash) == 7:
+                r = requests.get(
+                    f"https://api.github.com/repos/{repo}/commits/{commit_hash}",
+                    headers={"Authorization": f"token {pat}", "Accept": "application/vnd.github.v3+json"},
+                    timeout=10
+                )
+                if not r.ok:
+                    return jsonify({"ok": False, "error": f"Could not find commit {commit_hash}"}), 400
+                full_sha = r.json()["sha"]
+            else:
+                full_sha = commit_hash
+
+            # 2. Get the tree of the target commit (the state we want to revert to)
+            r = requests.get(
+                f"https://api.github.com/repos/{repo}/git/commits/{full_sha}",
+                headers={"Authorization": f"token {pat}", "Accept": "application/vnd.github.v3+json"},
+                timeout=10
+            )
+            if not r.ok:
+                return jsonify({"ok": False, "error": "Could not fetch commit details"}), 500
+            target_tree = r.json()["tree"]["sha"]
+
+            # 3. Get current HEAD of main
+            r = requests.get(
+                f"https://api.github.com/repos/{repo}/git/refs/heads/main",
+                headers={"Authorization": f"token {pat}", "Accept": "application/vnd.github.v3+json"},
+                timeout=10
+            )
+            if not r.ok:
+                return jsonify({"ok": False, "error": "Could not fetch main branch HEAD"}), 500
+            current_head = r.json()["object"]["sha"]
+
+            # 4. Create a new commit with the target tree but parented on current HEAD
+            r = requests.post(
+                f"https://api.github.com/repos/{repo}/git/commits",
+                headers={"Authorization": f"token {pat}", "Accept": "application/vnd.github.v3+json"},
+                json={
+                    "message": f"Rollback to {commit_hash}\n\nReverts code to the state at commit {full_sha[:7]}.",
+                    "tree": target_tree,
+                    "parents": [current_head],
+                },
+                timeout=10
+            )
+            if not r.ok:
+                return jsonify({"ok": False, "error": f"Could not create revert commit: {r.text[:200]}"}), 500
+            new_commit_sha = r.json()["sha"]
+
+            # 5. Update main to point to the new commit
+            r = requests.patch(
+                f"https://api.github.com/repos/{repo}/git/refs/heads/main",
+                headers={"Authorization": f"token {pat}", "Accept": "application/vnd.github.v3+json"},
+                json={"sha": new_commit_sha},
+                timeout=10
+            )
+            if not r.ok:
+                return jsonify({"ok": False, "error": f"Could not update main branch: {r.text[:200]}"}), 500
+
+            return jsonify({"ok": True, "commit": new_commit_sha[:7]})
+
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    # Fallback: local git reset (laptop mode)
+    if len(commit_hash) != 7:
+        commit_hash = commit_hash[:7]
     try:
         subprocess.run(
             ["git", "reset", "--hard", commit_hash],
             capture_output=True, text=True, cwd=os.path.dirname(os.path.abspath(__file__))
         )
     except Exception as e:
-        return f"Rollback error: {e}", 500
-    return redirect(url_for("history"))
+        return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify({"ok": True})
 
 
 @app.route("/start-search", methods=["POST"])
