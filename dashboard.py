@@ -3448,31 +3448,76 @@ def index():
     regions = sorted(set(c.get("region", "") for c in companies if c.get("region")))
 
     search_alive = _search_process_alive()
-    search_paused = search_alive and os.path.exists(PAUSE_FLAG)
+    search_paused = False
+    if search_alive:
+        from searcher import STATE_BACKEND
+        if STATE_BACKEND == "supabase":
+            try:
+                from searcher import _read_search_state
+                _ps = _read_search_state("paused")
+                search_paused = bool(_ps.get("paused", False))
+            except Exception:
+                pass
+        else:
+            search_paused = os.path.exists(PAUSE_FLAG)
 
-    try:
-        _gh = subprocess.run(["git", "log", "-1", "--format=%h %cd", "--date=format:%d %b %Y %H:%M"],
-                             capture_output=True, text=True, cwd=BASE_DIR)
-        git_version = _gh.stdout.strip() if _gh.returncode == 0 else "unknown"
-    except Exception:
-        git_version = "unknown"
-
-    # Read live status for server-side progress bar pre-population
-    init_status = {}
-    if search_alive and os.path.exists(STATUS_FILE):
+    git_version = "unknown"
+    # Try GitHub API first (works on Azure), fall back to local git
+    if GITHUB_PAT and GITHUB_REPO:
         try:
-            with open(STATUS_FILE) as f:
-                init_status = json.load(f)
+            _gv = requests.get(
+                f"https://api.github.com/repos/{GITHUB_REPO}/commits/main",
+                headers={"Authorization": f"token {GITHUB_PAT}", "Accept": "application/vnd.github.v3+json"},
+                timeout=5,
+            )
+            if _gv.ok:
+                _gc = _gv.json()
+                _gdate = _gc["commit"]["committer"]["date"][:16].replace("T", " ")
+                git_version = f"{_gc['sha'][:7]} {_gdate}"
+        except Exception:
+            pass
+    if git_version == "unknown":
+        try:
+            _gh = subprocess.run(["git", "log", "-1", "--format=%h %cd", "--date=format:%d %b %Y %H:%M"],
+                                 capture_output=True, text=True, cwd=BASE_DIR)
+            git_version = _gh.stdout.strip() if _gh.returncode == 0 else "unknown"
         except Exception:
             pass
 
+    # Read live status for server-side progress bar pre-population
+    init_status = {}
+    if search_alive:
+        from searcher import STATE_BACKEND as _sb
+        if _sb == "supabase":
+            try:
+                from searcher import _read_search_state
+                _ss = _read_search_state("status_json")
+                sj = _ss.get("status_json")
+                if sj and isinstance(sj, dict):
+                    init_status = sj
+            except Exception:
+                pass
+        elif os.path.exists(STATUS_FILE):
+            try:
+                with open(STATUS_FILE) as f:
+                    init_status = json.load(f)
+            except Exception:
+                pass
 
     # Pre-load search terms for immediate render
     init_terms = _load_terms()
 
     # Pre-load last log lines for immediate render
     init_log_lines = []
-    if os.path.exists(LOG_FILE):
+    if search_alive and _sb == "supabase":
+        try:
+            _ll = _read_search_state("log_tail")
+            lt = _ll.get("log_tail", "")
+            if lt:
+                init_log_lines = lt.split("\n")[-200:]
+        except Exception:
+            pass
+    elif os.path.exists(LOG_FILE):
         try:
             with open(LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
                 raw = f.readlines()
@@ -5432,12 +5477,19 @@ KEY PATTERNS:
 @app.route("/toggle-schedule", methods=["POST"])
 def toggle_schedule():
     from searcher import _upsert_search_state
-    if os.path.exists(SCHEDULE_FLAG):
-        os.remove(SCHEDULE_FLAG)
+    currently_enabled = _get_schedule_enabled()
+    if currently_enabled:
+        try:
+            os.remove(SCHEDULE_FLAG)
+        except FileNotFoundError:
+            pass
         _upsert_search_state({"schedule_enabled": False})
         msg = "Scheduled searches disabled."
     else:
-        open(SCHEDULE_FLAG, "w").close()
+        try:
+            open(SCHEDULE_FLAG, "w").close()
+        except Exception:
+            pass
         _upsert_search_state({"schedule_enabled": True})
         msg = "Scheduled searches enabled."
     return redirect(url_for("index", message=msg, type="success"))
@@ -5461,33 +5513,78 @@ def resume_search():
 
 
 def _write_stopped_history():
-    """Write a 'stopped' history entry using search_start.json + current STATUS_FILE."""
+    """Write a 'stopped' history entry using Supabase SearchStatus (cloud) or local files."""
     try:
-        if not os.path.exists(START_FILE):
-            return
-        with open(START_FILE) as f:
-            start = json.load(f)
-        status = {}
-        if os.path.exists(STATUS_FILE):
-            with open(STATUS_FILE) as f:
-                status = json.load(f)
+        from searcher import STATE_BACKEND
+        search_type = "full"
+        started_iso = None
+        total_found = 0
+        total_new = 0
+        triggered_by = "manual"
+
+        if STATE_BACKEND == "supabase":
+            try:
+                from searcher import _read_search_state
+                state = _read_search_state("search_type,started_at,triggered_by,status_json")
+                search_type = state.get("search_type") or "full"
+                started_iso = state.get("started_at")
+                triggered_by = state.get("triggered_by") or "manual"
+                sj = state.get("status_json")
+                if sj and isinstance(sj, dict):
+                    total_found = sj.get("total_found", 0)
+                    total_new = sj.get("total_new", 0)
+            except Exception:
+                pass
+
+        # Fall back to local files if Supabase didn't have data
+        if not started_iso and os.path.exists(START_FILE):
+            with open(START_FILE) as f:
+                start = json.load(f)
+            search_type = start.get("type", "full")
+            started_iso = start.get("started")
+            triggered_by = start.get("triggered_by", "manual")
+
+        if not started_iso:
+            return  # nothing to record
+
+        if not total_found and os.path.exists(STATUS_FILE):
+            try:
+                with open(STATUS_FILE) as f:
+                    status = json.load(f)
+                total_found = status.get("total_found", 0)
+                total_new = status.get("total_new", 0)
+            except Exception:
+                pass
+
         finished = datetime.now(timezone.utc)
-        started_iso = start.get("started", finished.isoformat())
         try:
             started_dt = datetime.fromisoformat(started_iso)
             duration = round((finished - started_dt).total_seconds() / 60, 1)
         except Exception:
             duration = None
         record = {
-            "type": start.get("type", "full"),
+            "type": search_type,
             "started": started_iso,
             "finished": finished.isoformat(),
             "duration_minutes": duration,
-            "total_found": status.get("total_found", 0),
-            "total_new": status.get("total_new", 0),
+            "total_found": total_found,
+            "total_new": total_new,
             "status": "stopped",
-            "triggered_by": start.get("triggered_by", "manual"),
+            "triggered_by": triggered_by,
         }
+
+        # Write to Supabase search_runs if available
+        if STATE_BACKEND == "supabase":
+            try:
+                from searcher import SUPABASE_URL, SUPABASE_KEY, _SUPABASE_HEADERS
+                requests.post(
+                    f"{SUPABASE_URL}/rest/v1/search_runs",
+                    headers=_SUPABASE_HEADERS, json=record, timeout=8
+                )
+            except Exception:
+                pass
+
+        # Also write to local file (laptop fallback)
         history = []
         if os.path.exists(HISTORY_FILE):
             with open(HISTORY_FILE) as f:
@@ -5495,7 +5592,10 @@ def _write_stopped_history():
         history.insert(0, record)
         with open(HISTORY_FILE, "w") as f:
             json.dump(history[:100], f, indent=2)
-        os.remove(START_FILE)
+        try:
+            os.remove(START_FILE)
+        except FileNotFoundError:
+            pass
     except Exception:
         pass
 
@@ -7073,8 +7173,27 @@ _was_running = False  # tracks previous poll state for crash detection
 
 
 def _detect_and_mark_crashes():
-    """Scan search_history.json for stale 'running' entries and mark them 'crashed'.
+    """Mark stale 'running' search history entries as 'crashed'.
     Called when the dashboard detects a search process just died without writing a final entry."""
+    from searcher import STATE_BACKEND
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    # Supabase: update any stale 'running' entries in search_runs table
+    if STATE_BACKEND == "supabase":
+        try:
+            from searcher import SUPABASE_URL, SUPABASE_KEY
+            _h = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
+                  "Content-Type": "application/json", "Prefer": "return=minimal"}
+            requests.patch(
+                f"{SUPABASE_URL}/rest/v1/search_runs?status=eq.running",
+                headers=_h, timeout=8,
+                json={"status": "crashed", "finished": now_iso,
+                      "notes": "Process exited without writing a completion record."},
+            )
+        except Exception as e:
+            print(f"  [Crash detection supabase error] {e}")
+
+    # Local file fallback
     if not os.path.exists(HISTORY_FILE):
         return
     try:
@@ -7086,9 +7205,9 @@ def _detect_and_mark_crashes():
     for entry in history:
         if entry.get("status") == "running":
             entry["status"] = "crashed"
-            entry["finished"] = datetime.now(timezone.utc).isoformat()
+            entry["finished"] = now_iso
             if not entry.get("notes"):
-                entry["notes"] = "Process exited without writing a completion record. Check search_log.txt for details."
+                entry["notes"] = "Process exited without writing a completion record."
             changed = True
     if changed:
         try:
