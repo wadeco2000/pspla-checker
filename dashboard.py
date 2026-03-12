@@ -3048,44 +3048,67 @@ HTML_TEMPLATE = """
             modal.style.display = 'flex';
         }
 
-        function doOpenNzsaForm() {
+        function _nzsaPayload(dryRun) {
             var ls = localStorage;
             ls.setItem('nzsa-fname',  document.getElementById('nzsa-fname').value);
             ls.setItem('nzsa-lname',  document.getElementById('nzsa-lname').value);
             ls.setItem('nzsa-email',  document.getElementById('nzsa-email').value);
             ls.setItem('nzsa-mobile', document.getElementById('nzsa-mobile').value);
             var loc = [_nzsaFormData.address, _nzsaFormData.region].filter(Boolean).join(', ');
-            var payload = {
+            return {
                 fname:      document.getElementById('nzsa-fname').value,
                 lname:      document.getElementById('nzsa-lname').value,
                 email:      document.getElementById('nzsa-email').value,
                 mobile:     document.getElementById('nzsa-mobile').value,
                 party_name: _nzsaFormData.name,
                 location:   loc,
-                evidence:   document.getElementById('nzsa-evidence').value
+                evidence:   document.getElementById('nzsa-evidence').value,
+                dry_run:    !!dryRun
             };
-            var openBtn = document.querySelector('#nzsa-report-modal button[onclick="doOpenNzsaForm()"]');
-            if (openBtn) { openBtn.textContent = 'Opening browser...'; openBtn.disabled = true; }
+        }
+        function doTestNzsaForm() {
+            var btn = document.getElementById('nzsa-test-btn');
+            btn.textContent = 'Testing...'; btn.disabled = true;
+            document.getElementById('nzsa-dry-result').style.display = 'none';
             fetch('/open-nzsa-report', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(payload)
-            }).then(function(r) {
-                var status = r.status;
-                return r.text().then(function(txt) {
-                    console.log('open-nzsa-report response', status, txt.substring(0, 300));
-                    if (status === 200) {
-                        closeNzsaModal();
-                        return;
-                    }
-                    var msg = 'unknown error';
-                    try { var d = JSON.parse(txt); msg = d.error || msg; } catch(e) { msg = txt.substring(0, 200); }
-                    alert('Could not open browser: ' + msg);
-                    if (openBtn) { openBtn.textContent = 'Open Report Form'; openBtn.disabled = false; }
-                });
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(_nzsaPayload(true))
+            }).then(function(r){ return r.json(); }).then(function(d) {
+                btn.textContent = 'Test (Dry Run)'; btn.disabled = false;
+                var el = document.getElementById('nzsa-dry-result');
+                if (d.ok && d.dry_run) {
+                    var lines = Object.entries(d.payload).map(function(kv){ return kv[0] + ': ' + kv[1]; }).join('\\n');
+                    el.textContent = 'DRY RUN OK — payload that would be sent:\\n\\n' + lines;
+                    el.style.color = '#27ae60';
+                } else {
+                    el.textContent = 'Error: ' + (d.error || 'unknown');
+                    el.style.color = '#c0392b';
+                }
+                el.style.display = 'block';
+            }).catch(function(e) {
+                btn.textContent = 'Test (Dry Run)'; btn.disabled = false;
+                var el = document.getElementById('nzsa-dry-result');
+                el.textContent = 'Error: ' + e; el.style.color = '#c0392b'; el.style.display = 'block';
+            });
+        }
+        function doOpenNzsaForm() {
+            if (!confirm('This will submit the report to NZSA. Continue?')) return;
+            var btn = document.querySelector('#nzsa-report-modal button[onclick="doOpenNzsaForm()"]');
+            if (btn) { btn.textContent = 'Submitting...'; btn.disabled = true; }
+            fetch('/open-nzsa-report', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(_nzsaPayload(false))
+            }).then(function(r){ return r.json(); }).then(function(d) {
+                if (d.ok && d.submitted) {
+                    alert('Report submitted to NZSA successfully.');
+                    closeNzsaModal();
+                } else {
+                    alert('Submission issue: ' + (d.error || 'Unknown error'));
+                    if (btn) { btn.textContent = 'Submit Report'; btn.disabled = false; }
+                }
             }).catch(function(e) {
                 alert('Error: ' + e);
-                if (openBtn) { openBtn.textContent = 'Open Report Form'; openBtn.disabled = false; }
+                if (btn) { btn.textContent = 'Submit Report'; btn.disabled = false; }
             });
         }
 
@@ -3251,16 +3274,20 @@ HTML_TEMPLATE = """
                 <label style="font-weight:bold; font-size:11px; color:#555; text-transform:uppercase; letter-spacing:0.5px;">Evidence / Description</label>
                 <button onclick="copyNzsaEvidence()" id="nzsa-copy-btn" style="padding:2px 10px; font-size:11px; background:#2980b9; color:white; border:none; border-radius:3px; cursor:pointer;">Copy</button>
             </div>
-            <p style="font-size:11px; color:#888; margin:0 0 6px;"><i class="fa-solid fa-circle-info"></i>&nbsp;This field cannot be pre-filled via URL — copy it and paste it into the Evidence field after the form opens.</p>
+            <p style="font-size:11px; color:#888; margin:0 0 6px;"><i class="fa-solid fa-circle-info"></i>&nbsp;This will be submitted as the evidence/description in the NZSA report.</p>
             <textarea id="nzsa-evidence" style="width:100%; height:90px; font-size:12px; padding:6px 8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box; resize:vertical; line-height:1.5;"></textarea>
         </div>
+        <pre id="nzsa-dry-result" style="display:none; background:#f8f8f8; border:1px solid #ddd; border-radius:4px; padding:10px; font-size:11px; white-space:pre-wrap; margin-bottom:12px; max-height:200px; overflow:auto;"></pre>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button id="nzsa-test-btn" onclick="doTestNzsaForm()" style="padding:8px 16px; background:#2980b9; color:white; border:none; border-radius:5px; font-size:13px; font-weight:bold; cursor:pointer;">
+                <i class="fa-solid fa-flask"></i>&nbsp;Test (Dry Run)
+            </button>
             <button onclick="doOpenNzsaForm()" style="padding:8px 20px; background:#c0392b; color:white; border:none; border-radius:5px; font-size:13px; font-weight:bold; cursor:pointer; flex:1;">
-                <i class="fa-solid fa-arrow-up-right-from-square"></i>&nbsp;Open Report Form
+                <i class="fa-solid fa-paper-plane"></i>&nbsp;Submit Report
             </button>
             <button onclick="closeNzsaModal()" style="padding:8px 16px; background:#95a5a6; color:white; border:none; border-radius:5px; font-size:13px; cursor:pointer;">Cancel</button>
         </div>
-        <p style="font-size:11px; color:#aaa; margin:10px 0 0;">A browser window will open with the form fully filled in. Review the details then click Submit on the NZSA site.</p>
+        <p style="font-size:11px; color:#aaa; margin:10px 0 0;">Use <strong>Test</strong> to verify the form data without sending. <strong>Submit</strong> sends the report directly to NZSA.</p>
     </div>
 </div>
 
@@ -7439,81 +7466,79 @@ def _launch(script, args=None, triggered_by="manual"):
 
 
 
+_NZSA_FORM_URL = "https://security.org.nz/public-info/report-unlicensed-operators/"
+
+def _nzsa_build_payload(data):
+    """Fetch the NZSA Gravity Forms page, extract hidden fields, build POST payload."""
+    from bs4 import BeautifulSoup
+    # Step 1: GET the form page to extract nonces / hidden fields
+    r = requests.get(_NZSA_FORM_URL, timeout=15,
+                     headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+    form = soup.find("form", id="gform_13")
+    if not form:
+        raise ValueError("Could not find gform_13 on the NZSA page")
+
+    # Step 2: Collect all hidden fields
+    payload = {}
+    for inp in form.find_all("input", {"type": "hidden"}):
+        name = inp.get("name")
+        if name:
+            payload[name] = inp.get("value", "")
+
+    # Step 3: Map our data to Gravity Forms field names
+    loc = ", ".join(filter(None, [data.get("address", ""), data.get("location", "")]))
+    payload["input_2.3"] = data.get("fname", "")
+    payload["input_2.6"] = data.get("lname", "")
+    payload["input_3"] = data.get("email", "")
+    payload["input_4"] = data.get("mobile", "")
+    payload["input_6"] = data.get("party_name", "")
+    payload["input_7"] = loc or data.get("location", "")
+    payload["input_8"] = data.get("evidence", "")
+
+    return payload, r.cookies
+
+
 @app.route("/open-nzsa-report", methods=["POST"])
 def open_nzsa_report():
-    import tempfile, subprocess, sys, json as _json, traceback as _tb
     from flask import jsonify
     try:
-        try:
-            import playwright  # noqa: F401
-        except Exception:
-            pass  # will fail later if really missing; don't block on import quirks
-
         data = request.get_json(force=True) or {}
+        dry_run = data.pop("dry_run", False)
 
-        # Write form data to a temp JSON file
-        tmp_data = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False, encoding="utf-8")
-        _json.dump(data, tmp_data)
-        tmp_data.flush()
-        tmp_data.close()
+        payload, cookies = _nzsa_build_payload(data)
 
-        # Build the Playwright fill script
-        script_lines = [
-            "import sys, json, os",
-            "from playwright.sync_api import sync_playwright",
-            "data = json.load(open(sys.argv[1], encoding='utf-8'))",
-            "def fill(page, sel, val):",
-            "    if val:",
-            "        try:",
-            "            page.wait_for_selector(sel, timeout=5000)",
-            "            page.fill(sel, val)",
-            "        except Exception as e:",
-            "            print('Could not fill', sel, e)",
-            "with sync_playwright() as p:",
-            "    browser = p.chromium.launch(headless=False)",
-            "    page = browser.new_page()",
-            "    page.goto('https://security.org.nz/public-info/report-unlicensed-operators/')",
-            "    page.wait_for_load_state('networkidle', timeout=30000)",
-            "    fill(page, '#input_13_2_3', data.get('fname', ''))",
-            "    fill(page, '#input_13_2_6', data.get('lname', ''))",
-            "    fill(page, '#input_13_3',   data.get('email', ''))",
-            "    fill(page, '#input_13_4',   data.get('mobile', ''))",
-            "    fill(page, '#input_13_6',   data.get('party_name', ''))",
-            "    fill(page, '#input_13_7',   data.get('location', ''))",
-            "    fill(page, '#input_13_8',   data.get('evidence', ''))",
-            "    print('Form filled.')",
-            "    try:",
-            "        page.wait_for_event('close', timeout=600000)",
-            "    except Exception:",
-            "        pass",
-            "try:",
-            "    os.unlink(sys.argv[1])",
-            "except Exception:",
-            "    pass",
-        ]
-        script_src = "\n".join(script_lines) + "\n"
+        if dry_run:
+            # Return the payload without submitting — for testing
+            safe_payload = {k: v for k, v in payload.items()
+                           if not k.startswith("_gform") and k != "state_13" and k != "gform_currency"}
+            return jsonify({"ok": True, "dry_run": True, "payload": safe_payload})
 
-        tmp_script = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False, encoding="utf-8")
-        tmp_script.write(script_src)
-        tmp_script.flush()
-        tmp_script.close()
-
-        # Launch detached — Flask responds immediately, browser stays open
-        subprocess.Popen(
-            [sys.executable, tmp_script.name, tmp_data.name],
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        # Step 4: POST the form
+        resp = requests.post(
+            _NZSA_FORM_URL, data=payload, cookies=cookies, timeout=20,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": _NZSA_FORM_URL,
+                "Origin": "https://security.org.nz",
+            },
+            allow_redirects=True,
         )
-        return jsonify({"ok": True})
+
+        # Gravity Forms returns the same page with a confirmation message on success
+        if resp.ok and ("gform_confirmation" in resp.text or "Thank" in resp.text):
+            return jsonify({"ok": True, "submitted": True})
+        elif resp.ok:
+            return jsonify({"ok": False, "error": "Form submitted but no confirmation found. It may have succeeded — check with NZSA.",
+                            "status_code": resp.status_code})
+        else:
+            return jsonify({"ok": False, "error": f"NZSA returned HTTP {resp.status_code}"})
+
     except Exception as _e:
+        import traceback as _tb
         _err_text = _tb.format_exc()
         print("open-nzsa-report ERROR:", _err_text)
-        try:
-            with open("nzsa_error.txt", "w", encoding="utf-8") as _f:
-                _f.write(_err_text)
-        except Exception:
-            pass
         return jsonify({"ok": False, "error": str(_e)})
 
 
