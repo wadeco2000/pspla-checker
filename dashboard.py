@@ -521,6 +521,8 @@ HTML_TEMPLATE = """
                     background:#d68910; color:white; border:none; cursor:pointer; white-space:nowrap; }
         .dd-fresh:hover { background:#b7770d; }
         .dd-divider { height:1px; background:#3d5166; margin:5px 0; }
+        .dd-item.admin-locked { opacity:0.4; pointer-events:none; cursor:default; }
+        .dd-item.admin-locked .dd-sub { color:#e74c3c !important; }
         .dd-label { padding:6px 16px 3px; font-size:10px; color:#7f95b0; text-transform:uppercase;
                     letter-spacing:0.8px; font-weight:600; }
         .navbar-right { display:flex; align-items:center; gap:10px; padding-left:14px;
@@ -766,21 +768,26 @@ HTML_TEMPLATE = """
       <div class="dropdown">
         <div class="dd-label">Data management</div>
 
-        <form method="POST" action="/dedupe-db" onsubmit="return confirm('Find and merge duplicate companies?\n\nGroups by: matching name, same domain, or same Facebook URL.\nKeeps the record with the most data.\nAll data from duplicates is merged in — nothing is lost.\nAn audit entry is written for every merge.')">
-          <button type="submit" class="dd-item">
+        <form method="POST" action="/dedupe-db" {% if not is_admin %}onsubmit="return false"{% else %}onsubmit="return confirm('Find and merge duplicate companies?\n\nGroups by: matching name, same domain, or same Facebook URL.\nKeeps the record with the most data.\nAll data from duplicates is merged in — nothing is lost.\nAn audit entry is written for every merge.')"{% endif %}>
+          <button type="submit" class="dd-item{{ '' if is_admin else ' admin-locked' }}">
             <i class="fa-solid fa-filter dd-icon" style="color:#8e44ad;"></i>
-            <span>Dedupe DB<span class="dd-sub">Auto-merge duplicates (name / domain / FB URL)</span></span>
+            <span>Dedupe DB<span class="dd-sub">{{ 'Auto-merge duplicates (name / domain / FB URL)' if is_admin else 'Admin only' }}</span></span>
           </button>
         </form>
 
-        <a href="/review-duplicates" class="dd-item">
+        <a href="/review-duplicates" class="dd-item{{ '' if is_admin else ' admin-locked' }}">
           <i class="fa-solid fa-eye dd-icon" style="color:#e67e22;"></i>
-          <span>Review Near-Matches<span class="dd-sub">Manually review possible duplicates</span></span>
+          <span>Review Near-Matches<span class="dd-sub">{{ 'Manually review possible duplicates' if is_admin else 'Admin only' }}</span></span>
         </a>
 
-        <a href="/suspect-records" class="dd-item">
+        <a href="/suspect-records" class="dd-item{{ '' if is_admin else ' admin-locked' }}">
           <i class="fa-solid fa-triangle-exclamation dd-icon" style="color:#e74c3c;"></i>
-          <span>Suspect Records<span class="dd-sub">Review low-quality or possibly wrong entries</span></span>
+          <span>Suspect Records<span class="dd-sub">{{ 'Review low-quality or possibly wrong entries' if is_admin else 'Admin only' }}</span></span>
+        </a>
+
+        <a href="/duplicates" class="dd-item{{ '' if is_admin else ' admin-locked' }}">
+          <i class="fa-solid fa-copy dd-icon" style="color:#d68910;"></i>
+          <span>Duplicates Report<span class="dd-sub">{{ 'Companies flagged as possible duplicates' if is_admin else 'Admin only' }}</span></span>
         </a>
 
         <div class="dd-divider"></div>
@@ -797,23 +804,23 @@ HTML_TEMPLATE = """
           <span>View Live Site<span class="dd-sub">Open public GitHub Pages site</span></span>
         </a>
 
-        <button type="button" class="dd-item" onclick="document.getElementById('export-modal').style.display='flex'; closeMenus();">
+        <button type="button" class="dd-item{{ '' if is_admin else ' admin-locked' }}" {% if is_admin %}onclick="document.getElementById('export-modal').style.display='flex'; closeMenus();"{% endif %}>
           <i class="fa-solid fa-file-csv dd-icon" style="color:#27ae60;"></i>
-          <span>Export CSV<span class="dd-sub">Download all companies as CSV</span></span>
+          <span>Export CSV<span class="dd-sub">{{ 'Download all companies as CSV' if is_admin else 'Admin only' }}</span></span>
         </button>
 
-        <form method="POST" action="/backup-db">
-          <button type="submit" class="dd-item">
+        <form method="POST" action="/backup-db" {% if not is_admin %}onsubmit="return false"{% endif %}>
+          <button type="submit" class="dd-item{{ '' if is_admin else ' admin-locked' }}">
             <i class="fa-solid fa-cloud-arrow-up dd-icon" style="color:#8e44ad;"></i>
-            <span>Backup Now<span class="dd-sub">Save CSV to local folder + Dropbox</span></span>
+            <span>Backup Now<span class="dd-sub">{{ 'Save CSV to local folder + Dropbox' if is_admin else 'Admin only' }}</span></span>
           </button>
         </form>
 
         <div class="dd-divider"></div>
 
-        <button type="button" class="dd-item danger" onclick="document.getElementById('clear-db-modal').style.display='flex'; closeMenus();">
+        <button type="button" class="dd-item danger{{ '' if is_admin else ' admin-locked' }}" {% if is_admin %}onclick="document.getElementById('clear-db-modal').style.display='flex'; closeMenus();"{% endif %}>
           <i class="fa-solid fa-trash-can dd-icon"></i>
-          <span>Clear DB<span class="dd-sub">Delete all company records</span></span>
+          <span>Clear DB<span class="dd-sub">{{ 'Delete all company records' if is_admin else 'Admin only' }}</span></span>
         </button>
       </div>
     </div>
@@ -834,22 +841,18 @@ HTML_TEMPLATE = """
           <i class="fa-solid fa-book dd-icon" style="color:#6c3483;"></i>
           <span>Audit Log<span class="dd-sub">Every database change and AI decision</span></span>
         </a>
-        <a href="/llm-log" class="dd-item">
+        <a href="/llm-log" class="dd-item{{ '' if is_admin else ' admin-locked' }}">
           <i class="fa-solid fa-robot dd-icon" style="color:#27ae60;"></i>
-          <span>LLM Log<span class="dd-sub">Every AI prompt and response</span></span>
+          <span>LLM Log<span class="dd-sub">{{ 'Every AI prompt and response' if is_admin else 'Admin only' }}</span></span>
         </a>
-        <a href="/user-access" class="dd-item">
+        <a href="/user-access" class="dd-item{{ '' if is_admin else ' admin-locked' }}">
           <i class="fa-solid fa-users dd-icon" style="color:#2980b9;"></i>
-          <span>User Access<span class="dd-sub">Allowed users &amp; login audit log</span></span>
+          <span>User Access<span class="dd-sub">{{ 'Allowed users &amp; login audit log' if is_admin else 'Admin only' }}</span></span>
         </a>
         <div class="dd-divider"></div>
-        <a href="/history" class="dd-item">
+        <a href="/history" class="dd-item{{ '' if is_admin else ' admin-locked' }}">
           <i class="fa-solid fa-code-branch dd-icon" style="color:#7f8c8d;"></i>
-          <span>Version History<span class="dd-sub">Git commits — rollback if needed</span></span>
-        </a>
-        <a href="/duplicates" class="dd-item">
-          <i class="fa-solid fa-triangle-exclamation dd-icon" style="color:#e74c3c;"></i>
-          <span>Duplicates Report<span class="dd-sub">Companies flagged as possible duplicates</span></span>
+          <span>Version History<span class="dd-sub">{{ 'Git commits — rollback if needed' if is_admin else 'Admin only' }}</span></span>
         </a>
       </div>
     </div>
@@ -3774,6 +3777,7 @@ def index():
         init_log_lines=init_log_lines,
         git_version=git_version,
         github_repo=os.getenv("GITHUB_REPO", "wadeco2000/pspla-checker"),
+        is_admin=_is_admin(),
     )
 
 
