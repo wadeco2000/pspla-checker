@@ -3461,28 +3461,33 @@ def index():
         else:
             search_paused = os.path.exists(PAUSE_FLAG)
 
-    git_version = "unknown"
-    # Try GitHub API first (works on Azure), fall back to local git
-    if GITHUB_PAT and GITHUB_REPO:
-        try:
-            _gv = requests.get(
-                f"https://api.github.com/repos/{GITHUB_REPO}/commits/main",
-                headers={"Authorization": f"token {GITHUB_PAT}", "Accept": "application/vnd.github.v3+json"},
-                timeout=5,
-            )
-            if _gv.ok:
-                _gc = _gv.json()
-                _gdate = _gc["commit"]["committer"]["date"][:16].replace("T", " ")
-                git_version = f"{_gc['sha'][:7]} {_gdate}"
-        except Exception:
-            pass
-    if git_version == "unknown":
-        try:
-            _gh = subprocess.run(["git", "log", "-1", "--format=%h %cd", "--date=format:%d %b %Y %H:%M"],
-                                 capture_output=True, text=True, cwd=BASE_DIR)
-            git_version = _gh.stdout.strip() if _gh.returncode == 0 else "unknown"
-        except Exception:
-            pass
+    git_version = getattr(app, '_cached_git_version', None)
+    _cache_age = time.time() - getattr(app, '_cached_git_version_at', 0)
+    if not git_version or _cache_age > 300:  # refresh every 5 minutes
+        git_version = "unknown"
+        # Try GitHub API first (works on Azure), fall back to local git
+        if GITHUB_PAT and GITHUB_REPO:
+            try:
+                _gv = requests.get(
+                    f"https://api.github.com/repos/{GITHUB_REPO}/commits/main",
+                    headers={"Authorization": f"token {GITHUB_PAT}", "Accept": "application/vnd.github.v3+json"},
+                    timeout=5,
+                )
+                if _gv.ok:
+                    _gc = _gv.json()
+                    _gdate = _gc["commit"]["committer"]["date"][:16].replace("T", " ")
+                    git_version = f"{_gc['sha'][:7]} {_gdate}"
+            except Exception:
+                pass
+        if git_version == "unknown":
+            try:
+                _gh = subprocess.run(["git", "log", "-1", "--format=%h %cd", "--date=format:%d %b %Y %H:%M"],
+                                     capture_output=True, text=True, cwd=BASE_DIR)
+                git_version = _gh.stdout.strip() if _gh.returncode == 0 else "unknown"
+            except Exception:
+                pass
+        app._cached_git_version = git_version
+        app._cached_git_version_at = time.time()
 
     # Read live status for server-side progress bar pre-population
     init_status = {}
