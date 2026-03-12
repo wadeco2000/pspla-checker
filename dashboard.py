@@ -8,6 +8,8 @@ import time as _time
 import subprocess
 import secrets as _secrets
 import base64 as _b64
+import hashlib as _hashlib
+import hmac as _hmac
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import requests
@@ -209,7 +211,6 @@ def _load_terms():
 app = Flask(__name__)
 
 # ── Dashboard auth ─────────────────────────────────────────────────────────────
-import hashlib as _hashlib
 app.secret_key = _hashlib.sha256(
     (PAGES_PASSWORD + (SUPABASE_SERVICE_KEY or "")).encode()
 ).hexdigest()
@@ -256,6 +257,34 @@ def _totp_encrypt(plaintext):
 def _totp_decrypt(ciphertext):
     """Fernet-decrypt a ciphertext string, return plaintext."""
     return _totp_fernet().decrypt(ciphertext.encode()).decode()
+
+_2FA_REMEMBER_DAYS = 30
+
+def _make_2fa_remember_token(email):
+    """Create an HMAC-signed token: email|expiry|signature."""
+    expiry = int(_time.time()) + (_2FA_REMEMBER_DAYS * 86400)
+    msg = f"{email}|{expiry}"
+    sig = _hmac.new(app.secret_key.encode() if isinstance(app.secret_key, str) else app.secret_key,
+                    msg.encode(), _hashlib.sha256).hexdigest()[:32]
+    return f"{msg}|{sig}"
+
+def _verify_2fa_remember_token(token, email):
+    """Check if a remember-device token is valid and not expired."""
+    try:
+        parts = token.split('|')
+        if len(parts) != 3:
+            return False
+        tok_email, tok_expiry, tok_sig = parts
+        if tok_email != email:
+            return False
+        if int(tok_expiry) < int(_time.time()):
+            return False
+        expected_msg = f"{tok_email}|{tok_expiry}"
+        expected_sig = _hmac.new(app.secret_key.encode() if isinstance(app.secret_key, str) else app.secret_key,
+                                 expected_msg.encode(), _hashlib.sha256).hexdigest()[:32]
+        return _hmac.compare_digest(tok_sig, expected_sig)
+    except Exception:
+        return False
 
 def _generate_backup_codes(count=8):
     """Generate a list of single-use backup codes in XXXXX-XXXXX format."""
@@ -489,7 +518,13 @@ def auth_verify():
             _user_row = r2.json()[0]
             # ── 2FA check ──
             totp_row = _get_user_totp_row(email)
-            if totp_row and totp_row.get('totp_enabled'):
+            _2fa_enabled = totp_row and totp_row.get('totp_enabled')
+            _2fa_remembered = False
+            if _2fa_enabled:
+                remember_tok = request.cookies.get('2fa_remember')
+                if remember_tok and _verify_2fa_remember_token(remember_tok, email):
+                    _2fa_remembered = True
+            if _2fa_enabled and not _2fa_remembered:
                 session['2fa_pending'] = True
                 session['2fa_email'] = email
                 session['2fa_is_admin'] = bool(_user_row.get('is_admin'))
@@ -594,6 +629,8 @@ _DASH_2FA_HTML = """<!DOCTYPE html>
 .msg.error{color:#e74c3c}.msg.info{color:#3498db}
 .toggle-link{color:#3498db;font-size:12px;cursor:pointer;margin-top:14px;display:inline-block}
 .toggle-link:hover{text-decoration:underline}
+.remember-label{display:flex;align-items:center;justify-content:center;gap:6px;color:#889;font-size:12px;margin-top:14px;cursor:pointer}
+.remember-label input{accent-color:#e67e22;cursor:pointer}
 .cancel-link{color:#666;font-size:12px;text-decoration:none;margin-top:18px;display:inline-block}
 .cancel-link:hover{color:#aaa}
 </style>
@@ -604,14 +641,25 @@ _DASH_2FA_HTML = """<!DOCTYPE html>
 <h2>Two-Factor Authentication</h2>
 <p class="sub" id="subtitle">Enter the 6-digit code from your authenticator app</p>
 <input type="text" id="code-input" class="code-input" inputmode="numeric" pattern="[0-9]*" maxlength="6" autofocus
- onkeydown="if(event.key==='Enter')verify2FA()">
+ onkeydown="if(event.key==='Enter')verify2FA()" oninput="autoSubmit(this)">
 <button class="btn-verify" id="btn-verify" onclick="verify2FA()">Verify</button>
 <div class="msg" id="msg"></div>
+<label class="remember-label"><input type="checkbox" id="remember-device"> Remember this device for 30 days</label>
 <div class="toggle-link" id="toggle-link" onclick="toggleBackup()">Lost your device? Use a backup code</div>
 <br><a href="/logout" class="cancel-link">Cancel and sign out</a>
 </div>
 <script>
 var isBackup = false;
+var autoSubmitting = false;
+function autoSubmit(inp) {
+    if (isBackup) return;
+    // Strip non-digits
+    inp.value = inp.value.replace(/[^0-9]/g, '');
+    if (inp.value.length === 6 && !autoSubmitting) {
+        autoSubmitting = true;
+        setTimeout(function(){ verify2FA(); }, 80);
+    }
+}
 function toggleBackup() {
     isBackup = !isBackup;
     var inp = document.getElementById('code-input');
@@ -645,7 +693,9 @@ function verify2FA() {
     var btn = document.getElementById('btn-verify');
     btn.disabled = true;
     btn.textContent = 'Verifying...';
+    var remember = document.getElementById('remember-device').checked;
     var body = isBackup ? {code: code, is_backup: true} : {code: code};
+    if (remember) body.remember = true;
     fetch('/auth/2fa/verify', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})
     .then(function(r){return r.json();}).then(function(d){
         if (d.ok) {
@@ -661,6 +711,7 @@ function verify2FA() {
             }
             btn.disabled = false;
             btn.textContent = 'Verify';
+            autoSubmitting = false;
             document.getElementById('code-input').value = '';
             document.getElementById('code-input').focus();
         }
@@ -669,6 +720,7 @@ function verify2FA() {
         document.getElementById('msg').className = 'msg error';
         btn.disabled = false;
         btn.textContent = 'Verify';
+        autoSubmitting = false;
     });
 }
 </script>
@@ -739,7 +791,13 @@ def auth_2fa_verify():
                           timeout=5)
         except Exception:
             pass
-        return _jsonify_auth({'ok': True})
+        resp = _jsonify_auth({'ok': True})
+        if data.get('remember'):
+            token = _make_2fa_remember_token(email)
+            resp.set_cookie('2fa_remember', token,
+                            max_age=_2FA_REMEMBER_DAYS * 86400,
+                            httponly=True, samesite='Lax', secure=request.is_secure)
+        return resp
     # Invalid
     try:
         requests.post(f"{SUPABASE_URL}/rest/v1/login_audit",
