@@ -1602,6 +1602,10 @@ HTML_TEMPLATE = """
           <i class="fa-solid fa-users dd-icon" style="color:#2980b9;"></i>
           <span>User Access<span class="dd-sub">{{ 'Allowed users &amp; login audit log' if is_admin else 'Admin only' }}</span></span>
         </a>
+        <a href="/release-notes" class="dd-item">
+          <i class="fa-solid fa-newspaper dd-icon" style="color:#e74c3c;"></i>
+          <span>Release Notes<span class="dd-sub">What changed in each release</span></span>
+        </a>
         <div class="dd-divider"></div>
         <a href="/history" class="dd-item{{ '' if is_admin else ' admin-locked' }}">
           <i class="fa-solid fa-code-branch dd-icon" style="color:#7f8c8d;"></i>
@@ -5949,6 +5953,457 @@ fetch('/search-history-data')
 @app.route("/search-history")
 def search_history():
     return render_template_string(SEARCH_HISTORY_TEMPLATE)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RELEASE NOTES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+RELEASE_NOTES_FILE = os.path.join(BASE_DIR, "release_notes.json")
+
+RELEASE_NOTES_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <script>(function(){var _f=window.fetch;window.fetch=function(u,o){o=o||{};var m=(o.method||'GET').toUpperCase();if(m!=='GET'&&m!=='HEAD'){o.headers=o.headers||{};o.headers['X-CSRF-Token']=document.querySelector('meta[name="csrf-token"]').content;}return _f.call(this,u,o);};})();</script>
+    <title>Release Notes — PSPLA Checker</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer" />
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f4f4f4; color: #333; }
+        .page-header { background: #2c3e50; color: white; padding: 14px 24px;
+                       display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+        .page-header h1 { margin: 0; font-size: 18px; }
+        .page-header a { color: #85c1e9; text-decoration: none; font-size: 13px; }
+        .content { padding: 24px; max-width: 900px; margin: 0 auto; }
+
+        .empty-state { text-align: center; padding: 60px 20px; color: #888; }
+        .empty-state i { font-size: 48px; margin-bottom: 16px; color: #bbb; }
+        .empty-state h2 { margin: 0 0 10px; color: #666; }
+        .empty-state p { margin: 0 0 20px; font-size: 14px; }
+
+        .btn { display: inline-block; padding: 10px 20px; border: none; border-radius: 6px;
+               font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none; }
+        .btn-primary { background: #3498db; color: white; }
+        .btn-primary:hover { background: #2980b9; }
+        .btn-success { background: #27ae60; color: white; }
+        .btn-success:hover { background: #219a52; }
+        .btn-sm { padding: 6px 14px; font-size: 12px; }
+
+        .release-card { background: white; border-radius: 10px; padding: 0; margin-bottom: 20px;
+                       box-shadow: 0 2px 8px rgba(0,0,0,0.06); overflow: hidden; }
+        .release-header { padding: 16px 20px; display: flex; align-items: center; gap: 12px;
+                         border-bottom: 1px solid #eee; cursor: pointer; }
+        .release-header:hover { background: #fafafa; }
+        .version-badge { background: #2c3e50; color: white; padding: 4px 12px; border-radius: 20px;
+                        font-size: 12px; font-weight: 700; white-space: nowrap; }
+        .release-date { color: #999; font-size: 12px; white-space: nowrap; }
+        .release-title { font-weight: 600; font-size: 15px; flex: 1; }
+        .release-count { color: #999; font-size: 12px; white-space: nowrap; }
+        .release-chevron { color: #ccc; transition: transform 0.2s; }
+        .release-chevron.open { transform: rotate(180deg); }
+
+        .release-body { padding: 0 20px 16px; display: none; }
+        .release-body.open { display: block; }
+
+        .item-list { list-style: none; padding: 0; margin: 12px 0 0; }
+        .item-list li { padding: 6px 0; font-size: 13px; display: flex; align-items: flex-start; gap: 8px;
+                       border-bottom: 1px solid #f5f5f5; }
+        .item-list li:last-child { border-bottom: none; }
+        .item-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px;
+                   font-weight: 700; text-transform: uppercase; white-space: nowrap; min-width: 75px; text-align: center; }
+        .tag-feature { background: #d4edda; color: #155724; }
+        .tag-fix { background: #f8d7da; color: #721c24; }
+        .tag-improvement { background: #cce5ff; color: #004085; }
+
+        .commit-list { margin-top: 12px; padding-top: 10px; border-top: 1px solid #eee; }
+        .commit-list summary { font-size: 11px; color: #999; cursor: pointer; }
+        .commit-hash { font-family: monospace; font-size: 11px; color: #6c757d; background: #f1f1f1;
+                      padding: 1px 6px; border-radius: 3px; margin: 2px 4px 2px 0; display: inline-block; }
+
+        /* Add release note modal */
+        .modal-overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+                        background:rgba(0,0,0,0.5); z-index:1000; justify-content:center; align-items:center; }
+        .modal-overlay.open { display:flex; }
+        .modal { background:white; border-radius:12px; padding:24px; width:90%; max-width:550px;
+                max-height:80vh; overflow-y:auto; }
+        .modal h2 { margin:0 0 16px; font-size:18px; }
+        .modal label { display:block; font-size:13px; font-weight:600; margin:10px 0 4px; }
+        .modal input, .modal select { width:100%; padding:8px; border:1px solid #ddd; border-radius:6px; font-size:13px; }
+        .modal .item-row { display:flex; gap:8px; margin-bottom:6px; align-items:center; }
+        .modal .item-row select { width:120px; flex-shrink:0; }
+        .modal .item-row input { flex:1; }
+        .modal .item-row button { background:none; border:none; color:#e74c3c; cursor:pointer; font-size:16px; }
+        .modal-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:16px; }
+
+        .generating { text-align: center; padding: 40px; }
+        .generating i { font-size: 32px; color: #3498db; animation: spin 1s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        @media (max-width: 600px) {
+            .content { padding: 12px; }
+            .release-header { flex-wrap: wrap; gap: 6px; }
+            .release-title { width: 100%; order: 10; }
+        }
+    </style>
+</head>
+<body>
+<div class="page-header">
+    <h1><i class="fa-solid fa-newspaper"></i> Release Notes</h1>
+    <div style="display:flex;gap:8px;align-items:center;">
+        {% if is_admin %}
+        <button class="btn btn-success btn-sm" onclick="openAddModal()"><i class="fa-solid fa-plus"></i> Add Release</button>
+        {% endif %}
+        <a href="/"><i class="fa-solid fa-arrow-left"></i> Dashboard</a>
+    </div>
+</div>
+<div class="content">
+    <div id="generating" class="generating" style="display:none;">
+        <i class="fa-solid fa-spinner"></i>
+        <p style="margin-top:12px;color:#666;">Analysing commit history with AI...<br><small>This may take a minute.</small></p>
+    </div>
+    <div id="releases-container"></div>
+</div>
+
+<!-- Add Release Modal -->
+<div class="modal-overlay" id="add-modal">
+  <div class="modal">
+    <h2><i class="fa-solid fa-plus-circle" style="color:#27ae60;"></i> Add Release Note</h2>
+    <label>Version</label>
+    <input type="text" id="rn-version" placeholder="e.g. v2.5">
+    <label>Title</label>
+    <input type="text" id="rn-title" placeholder="e.g. Mobile improvements and bug fixes">
+    <label>Date</label>
+    <input type="date" id="rn-date">
+    <label>Items</label>
+    <div id="rn-items">
+        <div class="item-row">
+            <select><option value="feature">Feature</option><option value="fix">Fix</option><option value="improvement">Improvement</option></select>
+            <input type="text" placeholder="Description">
+            <button onclick="this.parentElement.remove()"><i class="fa-solid fa-times"></i></button>
+        </div>
+    </div>
+    <button class="btn btn-sm" style="background:#eee;color:#333;margin-top:6px;" onclick="addItemRow()"><i class="fa-solid fa-plus"></i> Add item</button>
+    <div class="modal-actions">
+        <button class="btn btn-sm" style="background:#eee;color:#333;" onclick="closeAddModal()">Cancel</button>
+        <button class="btn btn-success btn-sm" onclick="submitRelease()">Save Release</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var releases = {{ releases_json | safe }};
+var isAdmin = {{ 'true' if is_admin else 'false' }};
+
+function renderReleases() {
+    var c = document.getElementById('releases-container');
+    if (!releases.length) {
+        c.innerHTML = '<div class="empty-state">'
+            + '<i class="fa-solid fa-newspaper"></i>'
+            + '<h2>No release notes yet</h2>'
+            + '<p>Generate release notes from your commit history, or add them manually.</p>'
+            + (isAdmin ? '<button class="btn btn-primary" onclick="generateFromHistory()"><i class="fa-solid fa-magic"></i> Generate from Commit History</button>' : '')
+            + '</div>';
+        return;
+    }
+    var html = '';
+    if (isAdmin) {
+        html += '<div style="text-align:right;margin-bottom:16px;">'
+            + '<button class="btn btn-primary btn-sm" onclick="generateFromHistory()" style="margin-right:8px;"><i class="fa-solid fa-magic"></i> Regenerate from History</button>'
+            + '</div>';
+    }
+    for (var i = 0; i < releases.length; i++) {
+        var r = releases[i];
+        var items = r.items || [];
+        var features = items.filter(function(x){ return x.type === 'feature'; }).length;
+        var fixes = items.filter(function(x){ return x.type === 'fix'; }).length;
+        var improvements = items.filter(function(x){ return x.type === 'improvement'; }).length;
+        var countParts = [];
+        if (features) countParts.push(features + ' feature' + (features > 1 ? 's' : ''));
+        if (fixes) countParts.push(fixes + ' fix' + (fixes > 1 ? 'es' : ''));
+        if (improvements) countParts.push(improvements + ' improvement' + (improvements > 1 ? 's' : ''));
+
+        html += '<div class="release-card">';
+        html += '<div class="release-header" onclick="toggleRelease(' + i + ')">';
+        html += '<span class="version-badge">' + esc(r.version) + '</span>';
+        html += '<span class="release-date">' + esc(r.date || '') + '</span>';
+        html += '<span class="release-title">' + esc(r.title) + '</span>';
+        html += '<span class="release-count">' + countParts.join(', ') + '</span>';
+        html += '<i class="fa-solid fa-chevron-down release-chevron" id="chev-' + i + '"></i>';
+        html += '</div>';
+        html += '<div class="release-body" id="body-' + i + '">';
+        if (items.length) {
+            html += '<ul class="item-list">';
+            for (var j = 0; j < items.length; j++) {
+                var it = items[j];
+                var cls = it.type === 'feature' ? 'tag-feature' : it.type === 'fix' ? 'tag-fix' : 'tag-improvement';
+                html += '<li><span class="item-tag ' + cls + '">' + esc(it.type) + '</span> ' + esc(it.description) + '</li>';
+            }
+            html += '</ul>';
+        }
+        if (r.commits && r.commits.length) {
+            html += '<details class="commit-list"><summary>' + r.commits.length + ' commit' + (r.commits.length > 1 ? 's' : '') + '</summary><div style="margin-top:6px;">';
+            for (var k = 0; k < r.commits.length; k++) {
+                html += '<span class="commit-hash">' + esc(r.commits[k]) + '</span>';
+            }
+            html += '</div></details>';
+        }
+        html += '</div></div>';
+    }
+    c.innerHTML = html;
+}
+
+function toggleRelease(i) {
+    var body = document.getElementById('body-' + i);
+    var chev = document.getElementById('chev-' + i);
+    body.classList.toggle('open');
+    chev.classList.toggle('open');
+}
+
+function esc(s) { var d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+function generateFromHistory() {
+    if (!confirm('Generate release notes from all commit history? This will replace existing notes.')) return;
+    document.getElementById('generating').style.display = 'block';
+    document.getElementById('releases-container').style.display = 'none';
+    fetch('/generate-release-notes', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            document.getElementById('generating').style.display = 'none';
+            document.getElementById('releases-container').style.display = 'block';
+            if (d.ok) {
+                releases = d.releases;
+                renderReleases();
+            } else {
+                alert('Error: ' + (d.error || 'Unknown error'));
+            }
+        })
+        .catch(function(e) {
+            document.getElementById('generating').style.display = 'none';
+            document.getElementById('releases-container').style.display = 'block';
+            alert('Error: ' + e);
+        });
+}
+
+function openAddModal() {
+    document.getElementById('add-modal').classList.add('open');
+    document.getElementById('rn-date').value = new Date().toISOString().split('T')[0];
+    // Suggest next version
+    if (releases.length) {
+        var last = releases[0].version || 'v1.0';
+        var m = last.match(/(\\d+)\\.(\\d+)/);
+        if (m) document.getElementById('rn-version').value = 'v' + m[1] + '.' + (parseInt(m[2]) + 1);
+    } else {
+        document.getElementById('rn-version').value = 'v1.0';
+    }
+}
+
+function closeAddModal() { document.getElementById('add-modal').classList.remove('open'); }
+
+function addItemRow() {
+    var d = document.createElement('div');
+    d.className = 'item-row';
+    d.innerHTML = '<select><option value="feature">Feature</option><option value="fix">Fix</option><option value="improvement">Improvement</option></select>'
+        + '<input type="text" placeholder="Description">'
+        + '<button onclick="this.parentElement.remove()"><i class="fa-solid fa-times"></i></button>';
+    document.getElementById('rn-items').appendChild(d);
+}
+
+function submitRelease() {
+    var version = document.getElementById('rn-version').value.trim();
+    var title = document.getElementById('rn-title').value.trim();
+    var date = document.getElementById('rn-date').value;
+    if (!version || !title) { alert('Version and title are required.'); return; }
+    var rows = document.querySelectorAll('#rn-items .item-row');
+    var items = [];
+    for (var i = 0; i < rows.length; i++) {
+        var type = rows[i].querySelector('select').value;
+        var desc = rows[i].querySelector('input').value.trim();
+        if (desc) items.push({ type: type, description: desc });
+    }
+    if (!items.length) { alert('Add at least one item.'); return; }
+    fetch('/add-release-note', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version: version, title: title, date: date, items: items })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+        if (d.ok) {
+            releases = d.releases;
+            renderReleases();
+            closeAddModal();
+        } else {
+            alert('Error: ' + (d.error || 'Unknown'));
+        }
+    });
+}
+
+renderReleases();
+</script>
+</body>
+</html>"""
+
+
+@app.route("/release-notes")
+def release_notes_page():
+    notes = []
+    try:
+        if os.path.exists(RELEASE_NOTES_FILE):
+            with open(RELEASE_NOTES_FILE) as f:
+                notes = json.load(f)
+    except Exception:
+        pass
+    return render_template_string(RELEASE_NOTES_TEMPLATE,
+                                 releases_json=json.dumps(notes),
+                                 is_admin=_is_admin())
+
+
+@app.route("/generate-release-notes", methods=["POST"])
+def generate_release_notes():
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "Admin access required"}), 403
+    from flask import jsonify
+    # Fetch all commits
+    commits = []
+    pat = os.getenv("GITHUB_PAT", "")
+    repo = os.getenv("GITHUB_REPO", "wadeco2000/pspla-checker")
+    if pat and repo:
+        page = 1
+        while True:
+            try:
+                r = requests.get(
+                    f"https://api.github.com/repos/{repo}/commits?sha=main&per_page=100&page={page}",
+                    headers={"Authorization": f"token {pat}", "Accept": "application/vnd.github.v3+json"},
+                    timeout=15,
+                )
+                if not r.ok or not r.json():
+                    break
+                for c in r.json():
+                    commits.append({
+                        "hash": c["sha"][:7],
+                        "date": c["commit"]["committer"]["date"][:10],
+                        "message": c["commit"]["message"].split("\n")[0][:200],
+                    })
+                if len(r.json()) < 100:
+                    break
+                page += 1
+            except Exception:
+                break
+    if not commits:
+        # Fallback: local git
+        try:
+            result = subprocess.run(
+                ["git", "log", "--pretty=format:%h|%ad|%s", "--date=short"],
+                capture_output=True, text=True, cwd=BASE_DIR,
+            )
+            for line in result.stdout.strip().splitlines():
+                parts = line.split("|", 2)
+                if len(parts) == 3:
+                    commits.append({"hash": parts[0], "date": parts[1], "message": parts[2]})
+        except Exception:
+            pass
+    if not commits:
+        return jsonify({"ok": False, "error": "Could not fetch commit history"}), 500
+    # Build commit summary for AI
+    commit_text = "\n".join(f"{c['hash']} ({c['date']}) {c['message']}" for c in commits)
+    # Use Claude to group commits into releases
+    try:
+        import anthropic
+        client = anthropic.Anthropic()
+        prompt = f"""You are analysing the git commit history of a New Zealand security industry web application called "PSPLA Checker".
+Group these commits into logical releases (about 12-20 releases). Each release should represent a meaningful milestone or set of related changes.
+
+Rules:
+- Version numbers: start at v1.0, increment minor version for each release (v1.0, v1.1, v1.2... v2.0 for major milestones)
+- Date: use the date of the latest commit in that release group
+- Title: brief 5-10 word summary of the release theme
+- Items: categorise each meaningful change as "feature", "fix", or "improvement"
+  - feature = new functionality that didn't exist before
+  - fix = bug fix or error correction
+  - improvement = enhancement to existing functionality
+- Merge trivial/related commits into single items (don't list every tiny commit)
+- commits: list the commit hashes included in each release
+- Order releases from newest to oldest
+
+Return ONLY valid JSON (no markdown, no explanation) in this exact format:
+[
+  {{
+    "version": "v2.5",
+    "date": "2026-03-13",
+    "title": "Security hardening and mobile improvements",
+    "items": [
+      {{"type": "feature", "description": "Added CSRF protection on all endpoints"}},
+      {{"type": "fix", "description": "Fixed crash detection using wrong time module"}}
+    ],
+    "commits": ["abc1234", "def5678"]
+  }}
+]
+
+Here are the commits (oldest first at bottom):
+
+{commit_text}"""
+
+        response = client.messages.create(
+            model="claude-haiku-4-20250414",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        result_text = response.content[0].text.strip()
+        # Parse JSON — handle potential markdown wrapping
+        if result_text.startswith("```"):
+            result_text = result_text.split("\n", 1)[1]
+            if result_text.endswith("```"):
+                result_text = result_text[:-3]
+        releases = json.loads(result_text)
+        # Save to file
+        with open(RELEASE_NOTES_FILE, "w") as f:
+            json.dump(releases, f, indent=2)
+        return jsonify({"ok": True, "releases": releases})
+    except json.JSONDecodeError as e:
+        return jsonify({"ok": False, "error": f"AI returned invalid JSON: {e}"}), 500
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"AI generation failed: {e}"}), 500
+
+
+@app.route("/add-release-note", methods=["POST"])
+def add_release_note():
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "Admin access required"}), 403
+    from flask import jsonify
+    data = request.get_json() or {}
+    version = (data.get("version") or "").strip()
+    title = (data.get("title") or "").strip()
+    date = (data.get("date") or "").strip()
+    items = data.get("items") or []
+    if not version or not title:
+        return jsonify({"ok": False, "error": "Version and title are required"}), 400
+    if not items:
+        return jsonify({"ok": False, "error": "At least one item is required"}), 400
+    # Validate items
+    valid_items = []
+    for item in items:
+        t = item.get("type", "improvement")
+        d = (item.get("description") or "").strip()
+        if d:
+            valid_items.append({"type": t, "description": d})
+    if not valid_items:
+        return jsonify({"ok": False, "error": "At least one item with description is required"}), 400
+    # Load existing
+    notes = []
+    try:
+        if os.path.exists(RELEASE_NOTES_FILE):
+            with open(RELEASE_NOTES_FILE) as f:
+                notes = json.load(f)
+    except Exception:
+        pass
+    # Prepend new release
+    new_entry = {"version": version, "date": date, "title": title, "items": valid_items, "commits": []}
+    notes.insert(0, new_entry)
+    with open(RELEASE_NOTES_FILE, "w") as f:
+        json.dump(notes, f, indent=2)
+    return jsonify({"ok": True, "releases": notes})
 
 
 @app.route("/audit-log-data")
