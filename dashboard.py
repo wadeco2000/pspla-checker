@@ -8,8 +8,6 @@ import time as _time
 import subprocess
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
 import requests
 from flask import Flask, render_template_string, redirect, url_for, request, Response, session, jsonify as _jsonify_auth
 from dotenv import load_dotenv
@@ -7030,24 +7028,6 @@ def _launch(script, args=None, triggered_by="manual"):
     })
 
 
-def _scheduled_full():
-    if os.path.exists(SCHEDULE_FLAG):
-        _launch("searcher.py", ["--scheduled"], triggered_by="scheduled")
-
-
-def _scheduled_weekly():
-    if os.path.exists(SCHEDULE_FLAG):
-        _launch("run_weekly.py", ["--scheduled"], triggered_by="scheduled")
-
-
-def _scheduled_facebook():
-    if os.path.exists(SCHEDULE_FLAG):
-        _launch("run_facebook.py", ["--scheduled"], triggered_by="scheduled")
-
-
-def _scheduled_directories():
-    if os.path.exists(SCHEDULE_FLAG):
-        _launch("run_directories.py", ["--scheduled"], triggered_by="scheduled")
 
 
 
@@ -8190,21 +8170,6 @@ def license_checker_chat():
 
 
 if __name__ == "__main__":
-    scheduler = BackgroundScheduler(timezone="Pacific/Auckland")
-    # Full search: 1st of each month at 2am NZ
-    scheduler.add_job(_scheduled_full, CronTrigger(day=1, hour=2, minute=0),
-                      id="full", name="Full search (monthly)")
-    # Google weekly: 8th, 15th, 22nd at 2am NZ
-    scheduler.add_job(_scheduled_weekly, CronTrigger(day="8,15,22", hour=2, minute=0),
-                      id="weekly", name="Google weekly scan")
-    # Facebook: Tuesday and Friday at 3am NZ
-    scheduler.add_job(_scheduled_facebook, CronTrigger(day_of_week="tue,fri", hour=3, minute=0),
-                      id="facebook", name="Facebook scan")
-    # Directory import (NZSA + LinkedIn): 15th of each month at 4am NZ
-    scheduler.add_job(_scheduled_directories, CronTrigger(day=15, hour=4, minute=0),
-                      id="directories", name="Directory import (NZSA + LinkedIn)")
-
-    scheduler.start()
     print("Dashboard running at http://localhost:5000")
-    print("Scheduler started — scheduled searches run automatically when enabled.")
+    print("Scheduled searches run via GitHub Actions.")
     app.run(host="0.0.0.0", port=5000, debug=False)
