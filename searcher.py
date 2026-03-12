@@ -1648,6 +1648,21 @@ def find_linkedin_url(company_name, page_text=""):
                 "camera", "cctv", "surveillance", "protection", "management"}
     sig_words = [w for w in name_words if w not in _GENERIC]
 
+    _HARD_OVERSEAS_LI = ["australia", "australian", "sydney", "melbourne", "brisbane",
+                         "perth", "united kingdom", " uk ", "london", "england", "scotland",
+                         "united states", " usa ", "u.s.a.", "us-based", "canada", "toronto",
+                         "ireland", "dublin", "south africa", "india", "singapore"]
+    _NZ_SIGNALS_LI = ["new zealand", " nz", ".co.nz", ".nz",
+                       "auckland", "wellington", "christchurch", "hamilton",
+                       "tauranga", "dunedin", "palmerston north", "napier",
+                       "hastings", "rotorua", "nelson", "invercargill",
+                       "whangarei", "waikato", "northland", "otago",
+                       "southland", "taranaki", "bay of plenty", "hawke"]
+
+    def _is_overseas_li(r):
+        text = (r.get("snippet", "") + " " + r.get("title", "")).lower()
+        return any(ind in text for ind in _HARD_OVERSEAS_LI)
+
     def _score(r):
         link = r.get("link", "")
         combined = (link + " " + r.get("snippet", "") + " " + r.get("title", "")).lower()
@@ -1655,9 +1670,9 @@ def find_linkedin_url(company_name, page_text=""):
         slug = link.lower().replace("-", " ").replace("_", " ").replace("/", " ")
         word_hits = sum(1 for w in name_words if w in slug)
         sig_hits = sum(1 for w in sig_words if w in slug)
-        nz_hit = 1 if any(s in combined for s in ["new zealand", " nz", ".co.nz", "auckland",
-                           "wellington", "christchurch", "hamilton", "tauranga"]) else 0
-        return sig_hits * 3 + word_hits * 2 + nz_hit
+        nz_hit = 3 if any(s in combined for s in _NZ_SIGNALS_LI) else 0
+        overseas_penalty = -10 if _is_overseas_li(r) else 0
+        return sig_hits * 3 + word_hits * 2 + nz_hit + overseas_penalty
 
     # Try three progressively broader queries, collect all linkedin.com/company/ results
     queries = [
@@ -4716,6 +4731,16 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         li_page_data = scrape_linkedin_page(info["linkedin_url"], company_name=company_name)
         if any(v for v in li_page_data.values()):
             print(f"  [LinkedIn data] followers={li_page_data.get('followers')} desc={bool(li_page_data.get('description'))}")
+        # Hard location gate — reject LinkedIn if location is clearly overseas
+        _li_loc = (li_page_data.get("location") or "").lower()
+        _OVERSEAS_LI = ["australia", "england", "united kingdom", "united states",
+                        "canada", "ireland", "south africa", "india", "singapore",
+                        "scotland", "wales", "london", "sydney", "melbourne",
+                        "brisbane", "perth", "toronto", "dublin"]
+        if _li_loc and any(ov in _li_loc for ov in _OVERSEAS_LI):
+            print(f"  [LinkedIn] REJECTED — location '{li_page_data['location']}' is overseas, clearing LinkedIn URL")
+            info["linkedin_url"] = None
+            li_page_data = {}
 
     # LLM pre-save review: sanity-check ALL gathered associations before saving
     rejections = llm_verify_associations(

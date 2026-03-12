@@ -2555,23 +2555,29 @@ HTML_TEMPLATE = """
             })
             .then(function(r) { return r.json(); })
             .then(function(d) {
-                if (d.found && d.url) {
+                if (d.rejected) {
+                    result.innerHTML = '<em style="color:#e67e22">Rejected — ' + (d.reason || 'overseas company') + '</em>';
+                    _cardHighlight(result);
+                    btnSaved(btn, '#e67e22', 'Rejected');
+                } else if (d.found && d.url) {
                     var html = '<a href="' + d.url + '" target="_blank">' + d.url + '</a>';
                     var details = '';
-                    if (d.followers) details += '<div>👥 ' + d.followers + ' followers</div>';
-                    if (d.industry) details += '<div>🏭 ' + d.industry + '</div>';
-                    if (d.location) details += '<div>📍 ' + d.location + '</div>';
-                    if (d.size) details += '<div>👤 ' + d.size + '</div>';
-                    if (d.website) details += '<div>🌐 <a href="' + d.website + '" target="_blank">' + d.website + '</a></div>';
+                    if (d.followers) details += '<div>&#128101; ' + d.followers + ' followers</div>';
+                    if (d.industry) details += '<div>&#127981; ' + d.industry + '</div>';
+                    if (d.location) details += '<div>&#128205; ' + d.location + '</div>';
+                    if (d.size) details += '<div>&#128100; ' + d.size + '</div>';
+                    if (d.website) details += '<div>&#127760; <a href="' + d.website + '" target="_blank">' + d.website + '</a></div>';
                     if (details) html += '<div style="border-top:1px solid #b3c8e8;padding-top:5px;margin-top:4px;display:flex;flex-direction:column;gap:2px;color:#444;">' + details + '</div>';
                     if (d.description) html += '<div style="color:#777;font-style:italic;font-size:11px;margin-top:4px;">' + d.description.substring(0, 150) + (d.description.length > 150 ? '…' : '') + '</div>';
                     result.innerHTML = html;
+                    _cardHighlight(result);
                     btnSaved(btn);
                 } else if (d.error) {
                     result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
                     btn.textContent = 'Re-check'; btn.disabled = false;
                 } else {
-                    result.innerHTML = '<em style="color:#aaa">not found</em>';
+                    result.innerHTML = '<em style="color:#aaa">Not found</em>';
+                    _cardHighlight(result);
                     btnSaved(btn, '#95a5a6', 'Not found');
                 }
                 _recheckTermStop();
@@ -6791,6 +6797,16 @@ def find_linkedin_for_company():
             if li_data.get("followers"): print(f"[LinkedIn] Followers: {li_data['followers']}")
             if li_data.get("industry"):  print(f"[LinkedIn] Industry: {li_data['industry']}")
             if li_data.get("location"):  print(f"[LinkedIn] Location: {li_data['location']}")
+            # Reject if scraped location is clearly not NZ
+            _li_loc = (li_data.get("location") or "").lower()
+            _OVERSEAS_LOCS = ["australia", "england", "united kingdom", "united states",
+                              "canada", "ireland", "south africa", "india", "singapore",
+                              "scotland", "wales", "london", "sydney", "melbourne",
+                              "brisbane", "perth", "toronto", "dublin"]
+            if _li_loc and any(ov in _li_loc for ov in _OVERSEAS_LOCS):
+                print(f"[LinkedIn] REJECTED — location '{li_data['location']}' is not NZ")
+                return jsonify({"found": False, "rejected": True,
+                                "reason": f"Location is overseas: {li_data['location']}"})
             patch = {"linkedin_url": li_url}
             for field in ("followers", "description", "industry", "location", "website", "size"):
                 if li_data.get(field):
