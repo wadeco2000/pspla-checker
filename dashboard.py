@@ -3054,13 +3054,38 @@ HTML_TEMPLATE = """
             ls.setItem('nzsa-lname',  document.getElementById('nzsa-lname').value);
             ls.setItem('nzsa-email',  document.getElementById('nzsa-email').value);
             ls.setItem('nzsa-mobile', document.getElementById('nzsa-mobile').value);
-            var evidence = document.getElementById('nzsa-evidence').value;
-            navigator.clipboard.writeText(evidence).then(function() {
-                window.open('https://security.org.nz/public-info/report-unlicensed-operators/', '_blank');
-                closeNzsaModal();
-            }).catch(function() {
-                window.open('https://security.org.nz/public-info/report-unlicensed-operators/', '_blank');
-                closeNzsaModal();
+            var loc = [_nzsaFormData.address, _nzsaFormData.region].filter(Boolean).join(', ');
+            var payload = {
+                fname:      document.getElementById('nzsa-fname').value,
+                lname:      document.getElementById('nzsa-lname').value,
+                email:      document.getElementById('nzsa-email').value,
+                mobile:     document.getElementById('nzsa-mobile').value,
+                party_name: _nzsaFormData.name,
+                location:   loc,
+                evidence:   document.getElementById('nzsa-evidence').value
+            };
+            var openBtn = document.querySelector('#nzsa-report-modal button[onclick="doOpenNzsaForm()"]');
+            if (openBtn) { openBtn.textContent = 'Opening browser...'; openBtn.disabled = true; }
+            fetch('/open-nzsa-report', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            }).then(function(r) {
+                var status = r.status;
+                return r.text().then(function(txt) {
+                    console.log('open-nzsa-report response', status, txt.substring(0, 300));
+                    if (status === 200) {
+                        closeNzsaModal();
+                        return;
+                    }
+                    var msg = 'unknown error';
+                    try { var d = JSON.parse(txt); msg = d.error || msg; } catch(e) { msg = txt.substring(0, 200); }
+                    alert('Could not open browser: ' + msg);
+                    if (openBtn) { openBtn.textContent = 'Open Report Form'; openBtn.disabled = false; }
+                });
+            }).catch(function(e) {
+                alert('Error: ' + e);
+                if (openBtn) { openBtn.textContent = 'Open Report Form'; openBtn.disabled = false; }
             });
         }
 
@@ -3235,7 +3260,7 @@ HTML_TEMPLATE = """
             </button>
             <button onclick="closeNzsaModal()" style="padding:8px 16px; background:#95a5a6; color:white; border:none; border-radius:5px; font-size:13px; cursor:pointer;">Cancel</button>
         </div>
-        <p style="font-size:11px; color:#aaa; margin:10px 0 0;">The NZSA form will open in a new tab with the evidence copied to your clipboard. Paste it into the Evidence field on the form.</p>
+        <p style="font-size:11px; color:#aaa; margin:10px 0 0;">A browser window will open with the form fully filled in. Review the details then click Submit on the NZSA site.</p>
     </div>
 </div>
 
