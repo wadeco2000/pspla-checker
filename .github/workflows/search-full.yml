@@ -1,0 +1,36 @@
+name: Full Search
+
+on:
+  schedule:
+    - cron: '0 13 1 * *'  # 1st of month, 13:00 UTC = ~2am NZDT
+  workflow_dispatch:
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Run full search
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          STATE_BACKEND: supabase
+          FACEBOOK_APP_ID: ${{ secrets.FACEBOOK_APP_ID }}
+          FACEBOOK_APP_SECRET: ${{ secrets.FACEBOOK_APP_SECRET }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+          DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
+          GITHUB_PAT: ${{ secrets.GH_PAT }}
+          GITHUB_REPO: ${{ secrets.GITHUB_REPO }}
+        run: python searcher.py --scheduled
