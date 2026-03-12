@@ -5423,7 +5423,7 @@ design patterns, common tasks.
 
 KEY FILES:
 - searcher.py        Core engine: search, scrape, match, verify, save (~3500+ lines)
-- dashboard.py       Flask web UI + APScheduler + all API endpoints
+- dashboard.py       Flask web UI + all API endpoints
 - run_weekly.py      Full Google search entry point (all regions x all terms)
 - run_facebook.py    Facebook-only search entry point
 - run_directories.py NZSA + LinkedIn directory import entry point
