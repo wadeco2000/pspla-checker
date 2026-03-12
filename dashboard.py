@@ -3735,6 +3735,15 @@ def rollback(commit_hash):
             if not r.ok:
                 return jsonify({"ok": False, "error": f"Could not update main branch: {r.text[:200]}"}), 500
 
+            # Write audit log entry
+            try:
+                from searcher import write_audit
+                write_audit("rollback", None, None,
+                            changes=f"Code rollback to commit {full_sha[:7]} via GitHub API (new commit {new_commit_sha[:7]})",
+                            triggered_by="manual (dashboard)")
+            except Exception:
+                pass
+
             return jsonify({"ok": True, "commit": new_commit_sha[:7]})
 
         except Exception as e:
@@ -3748,6 +3757,14 @@ def rollback(commit_hash):
             ["git", "reset", "--hard", commit_hash],
             capture_output=True, text=True, cwd=os.path.dirname(os.path.abspath(__file__))
         )
+        # Write audit log entry
+        try:
+            from searcher import write_audit
+            write_audit("rollback", None, None,
+                        changes=f"Code rollback to commit {commit_hash} via local git reset",
+                        triggered_by="manual (dashboard)")
+        except Exception:
+            pass
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
     return jsonify({"ok": True})
