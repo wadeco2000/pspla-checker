@@ -6,9 +6,14 @@ import sys
 import threading
 import time as _time
 import subprocess
+import secrets as _secrets
+import base64 as _b64
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import requests
+import pyotp
+import qrcode
+from cryptography.fernet import Fernet
 from flask import Flask, render_template_string, redirect, url_for, request, Response, session, jsonify as _jsonify_auth
 from dotenv import load_dotenv
 
@@ -211,7 +216,7 @@ app.secret_key = _hashlib.sha256(
 
 _AUTH_SKIP = {
     'login_page', 'login_password', 'auth_callback', 'auth_verify', 'auth_logout',
-    'service_worker'
+    'service_worker', 'auth_2fa_page', 'auth_2fa_verify'
 }
 
 @app.route('/sw.js')
@@ -231,10 +236,98 @@ def _is_admin():
     email = (session.get('email') or '').lower().strip()
     return bool(email and NOTIFY_EMAIL and email == NOTIFY_EMAIL.lower().strip())
 
+# ── TOTP 2FA helpers ──────────────────────────────────────────────────────────
+
+def _totp_fernet():
+    """Return a Fernet instance for encrypting/decrypting TOTP secrets."""
+    key = os.getenv("TOTP_ENCRYPTION_KEY")
+    if not key:
+        # Derive deterministically from existing secrets
+        raw = _hashlib.sha256(
+            (PAGES_PASSWORD + (SUPABASE_SERVICE_KEY or "")).encode()
+        ).digest()
+        key = _b64.urlsafe_b64encode(raw).decode()
+    return Fernet(key.encode() if isinstance(key, str) else key)
+
+def _totp_encrypt(plaintext):
+    """Fernet-encrypt a string, return base64-encoded ciphertext."""
+    return _totp_fernet().encrypt(plaintext.encode()).decode()
+
+def _totp_decrypt(ciphertext):
+    """Fernet-decrypt a ciphertext string, return plaintext."""
+    return _totp_fernet().decrypt(ciphertext.encode()).decode()
+
+def _generate_backup_codes(count=8):
+    """Generate a list of single-use backup codes in XXXXX-XXXXX format."""
+    codes = []
+    for _ in range(count):
+        part1 = ''.join([str(_secrets.randbelow(10)) for _ in range(5)])
+        part2 = ''.join([str(_secrets.randbelow(10)) for _ in range(5)])
+        codes.append({"code": f"{part1}-{part2}", "used": False})
+    return codes
+
+def _get_user_totp_row(email):
+    """Fetch TOTP columns for a user from allowed_users."""
+    try:
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/allowed_users",
+                         params={"email": f"eq.{email}", "active": "eq.true",
+                                 "select": "id,totp_secret,totp_enabled,totp_backup_codes,totp_enabled_at"},
+                         headers={"apikey": SUPABASE_SERVICE_KEY,
+                                  "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                         timeout=10)
+        if r.ok and r.json():
+            return r.json()[0]
+    except Exception:
+        pass
+    return None
+
+def _verify_totp_code(secret, code):
+    """Verify a TOTP code with ±1 window (90 seconds tolerance)."""
+    try:
+        return pyotp.TOTP(secret).verify(code.strip(), valid_window=1)
+    except Exception:
+        return False
+
+def _verify_backup_code(email, submitted_code):
+    """Check a backup code, mark it used if valid. Returns True if consumed."""
+    row = _get_user_totp_row(email)
+    if not row or not row.get('totp_backup_codes'):
+        return False
+    try:
+        codes = json.loads(_totp_decrypt(row['totp_backup_codes']))
+    except Exception:
+        return False
+    submitted = submitted_code.strip().replace(' ', '')
+    found = False
+    for c in codes:
+        if c['code'] == submitted and not c['used']:
+            c['used'] = True
+            found = True
+            break
+    if not found:
+        return False
+    # Save updated codes back
+    try:
+        encrypted = _totp_encrypt(json.dumps(codes))
+        requests.patch(f"{SUPABASE_URL}/rest/v1/allowed_users",
+                       params={"id": f"eq.{row['id']}"},
+                       json={"totp_backup_codes": encrypted},
+                       headers={"apikey": SUPABASE_SERVICE_KEY,
+                                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                "Prefer": "return=minimal"},
+                       timeout=10)
+    except Exception:
+        pass
+    return True
+
+# ── End TOTP helpers ──────────────────────────────────────────────────────────
+
 @app.before_request
 def _require_dashboard_auth():
     if request.endpoint in _AUTH_SKIP or (request.endpoint or '').startswith('static'):
         return
+    if session.get('2fa_pending'):
+        return redirect(url_for('auth_2fa_page'))
     if not session.get('authenticated'):
         return redirect(url_for('login_page'))
 
@@ -297,7 +390,8 @@ _sb.auth.getSession().then(function(result){
     fetch('/auth/verify',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({access_token:s.access_token,email:s.user.email})
     }).then(function(r){return r.json();}).then(function(d){
-        window.location.href=d.ok?'/':('/login?e='+encodeURIComponent(d.error||'denied'));
+        if(d['2fa_required']){window.location.href='/auth/2fa';}
+        else{window.location.href=d.ok?'/':('/login?e='+encodeURIComponent(d.error||'denied'));}
     });
 });
 </script></body></html>"""
@@ -375,6 +469,24 @@ def auth_verify():
                           timeout=10)
         if r2.status_code == 200 and r2.json():
             _user_row = r2.json()[0]
+            # ── 2FA check ──
+            totp_row = _get_user_totp_row(email)
+            if totp_row and totp_row.get('totp_enabled'):
+                session['2fa_pending'] = True
+                session['2fa_email'] = email
+                session['2fa_is_admin'] = bool(_user_row.get('is_admin'))
+                session['2fa_attempts'] = 0
+                try:
+                    requests.post(f"{SUPABASE_URL}/rest/v1/login_audit",
+                                  json={'email': email, 'provider': 'google', 'result': '2fa_pending',
+                                        'user_agent': request.headers.get('User-Agent', '')},
+                                  headers={'apikey': SUPABASE_SERVICE_KEY,
+                                           'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}'},
+                                  timeout=5)
+                except Exception:
+                    pass
+                return _jsonify_auth({'ok': True, '2fa_required': True})
+            # ── Normal login (no 2FA) ──
             session['authenticated'] = True
             session['email'] = email
             session['auth_method'] = 'google'
@@ -408,6 +520,188 @@ def auth_verify():
 def auth_logout():
     session.clear()
     return redirect(url_for('login_page'))
+
+# ── 2FA verification (login interstitial) ─────────────────────────────────────
+
+_DASH_2FA_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Two-Factor Authentication — PSPLA Dashboard</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer"/>
+<style>
+*{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:0;background:#1a2233;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{background:#223;border-radius:12px;padding:36px 32px;width:380px;max-width:92vw;text-align:center;color:#ccd}
+.card h2{margin:0 0 6px;font-size:20px;color:#eef}
+.card .sub{color:#889;font-size:13px;margin-bottom:22px}
+.icon-shield{font-size:40px;color:#e67e22;margin-bottom:12px}
+.code-input{width:200px;padding:12px 16px;font-size:22px;text-align:center;letter-spacing:6px;border:2px solid #445;border-radius:8px;background:#1a2233;color:#eef;outline:none;font-family:monospace}
+.code-input:focus{border-color:#e67e22}
+.code-input.backup{width:260px;letter-spacing:2px;font-size:18px}
+.btn-verify{display:block;width:200px;margin:16px auto 0;padding:10px;background:#e67e22;color:white;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer}
+.btn-verify:hover{background:#d35400}
+.btn-verify:disabled{opacity:.5;cursor:default}
+.msg{margin-top:14px;font-size:13px;min-height:18px}
+.msg.error{color:#e74c3c}.msg.info{color:#3498db}
+.toggle-link{color:#3498db;font-size:12px;cursor:pointer;margin-top:14px;display:inline-block}
+.toggle-link:hover{text-decoration:underline}
+.cancel-link{color:#666;font-size:12px;text-decoration:none;margin-top:18px;display:inline-block}
+.cancel-link:hover{color:#aaa}
+</style>
+</head>
+<body>
+<div class="card">
+<div class="icon-shield"><i class="fa-solid fa-shield-halved"></i></div>
+<h2>Two-Factor Authentication</h2>
+<p class="sub" id="subtitle">Enter the 6-digit code from your authenticator app</p>
+<input type="text" id="code-input" class="code-input" inputmode="numeric" pattern="[0-9]*" maxlength="6" autofocus
+ onkeydown="if(event.key==='Enter')verify2FA()">
+<button class="btn-verify" id="btn-verify" onclick="verify2FA()">Verify</button>
+<div class="msg" id="msg"></div>
+<div class="toggle-link" id="toggle-link" onclick="toggleBackup()">Lost your device? Use a backup code</div>
+<br><a href="/logout" class="cancel-link">Cancel and sign out</a>
+</div>
+<script>
+var isBackup = false;
+function toggleBackup() {
+    isBackup = !isBackup;
+    var inp = document.getElementById('code-input');
+    var sub = document.getElementById('subtitle');
+    var tog = document.getElementById('toggle-link');
+    if (isBackup) {
+        inp.className = 'code-input backup';
+        inp.maxLength = 11;
+        inp.inputMode = 'text';
+        inp.pattern = '.*';
+        inp.placeholder = 'XXXXX-XXXXX';
+        inp.value = '';
+        sub.textContent = 'Enter one of your backup codes';
+        tog.textContent = 'Use authenticator app instead';
+    } else {
+        inp.className = 'code-input';
+        inp.maxLength = 6;
+        inp.inputMode = 'numeric';
+        inp.pattern = '[0-9]*';
+        inp.placeholder = '';
+        inp.value = '';
+        sub.textContent = 'Enter the 6-digit code from your authenticator app';
+        tog.textContent = 'Lost your device? Use a backup code';
+    }
+    inp.focus();
+    document.getElementById('msg').textContent = '';
+}
+function verify2FA() {
+    var code = document.getElementById('code-input').value.trim();
+    if (!code) return;
+    var btn = document.getElementById('btn-verify');
+    btn.disabled = true;
+    btn.textContent = 'Verifying...';
+    var body = isBackup ? {code: code, is_backup: true} : {code: code};
+    fetch('/auth/2fa/verify', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})
+    .then(function(r){return r.json();}).then(function(d){
+        if (d.ok) {
+            window.location.href = '/';
+        } else {
+            var m = document.getElementById('msg');
+            m.className = 'msg error';
+            if (d.error === 'too_many_attempts') {
+                m.textContent = 'Too many attempts. Please sign in again.';
+                setTimeout(function(){ window.location.href = '/login'; }, 2000);
+            } else {
+                m.textContent = 'Invalid code.' + (d.remaining ? ' ' + d.remaining + ' attempts remaining.' : '');
+            }
+            btn.disabled = false;
+            btn.textContent = 'Verify';
+            document.getElementById('code-input').value = '';
+            document.getElementById('code-input').focus();
+        }
+    }).catch(function(){
+        document.getElementById('msg').textContent = 'Connection error. Try again.';
+        document.getElementById('msg').className = 'msg error';
+        btn.disabled = false;
+        btn.textContent = 'Verify';
+    });
+}
+</script>
+</body></html>"""
+
+@app.route('/auth/2fa')
+def auth_2fa_page():
+    if not session.get('2fa_pending'):
+        return redirect(url_for('login_page'))
+    return _DASH_2FA_HTML
+
+@app.route('/auth/2fa/verify', methods=['POST'])
+def auth_2fa_verify():
+    if not session.get('2fa_pending'):
+        return _jsonify_auth({'ok': False, 'error': 'no_pending_2fa'})
+    data = request.json or {}
+    code = data.get('code', '').strip()
+    is_backup = data.get('is_backup', False)
+    email = session.get('2fa_email', '')
+    # Rate limit
+    attempts = session.get('2fa_attempts', 0) + 1
+    session['2fa_attempts'] = attempts
+    if attempts > 5:
+        _ua = request.headers.get('User-Agent', '')
+        try:
+            requests.post(f"{SUPABASE_URL}/rest/v1/login_audit",
+                          json={'email': email, 'provider': 'google', 'result': '2fa_lockout',
+                                'user_agent': _ua},
+                          headers={'apikey': SUPABASE_SERVICE_KEY,
+                                   'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}'},
+                          timeout=5)
+        except Exception:
+            pass
+        session.clear()
+        return _jsonify_auth({'ok': False, 'error': 'too_many_attempts'})
+    # Verify
+    valid = False
+    result_label = '2fa_failed'
+    if is_backup:
+        valid = _verify_backup_code(email, code)
+        if valid:
+            result_label = 'allowed_2fa_backup'
+    else:
+        row = _get_user_totp_row(email)
+        if row and row.get('totp_secret'):
+            try:
+                secret = _totp_decrypt(row['totp_secret'])
+                valid = _verify_totp_code(secret, code)
+                if valid:
+                    result_label = 'allowed_2fa'
+            except Exception:
+                pass
+    if valid:
+        is_admin = session.pop('2fa_is_admin', False)
+        session.pop('2fa_pending', None)
+        session.pop('2fa_attempts', None)
+        session.pop('2fa_email', None)
+        session['authenticated'] = True
+        session['email'] = email
+        session['auth_method'] = 'google'
+        session['is_admin'] = is_admin
+        try:
+            requests.post(f"{SUPABASE_URL}/rest/v1/login_audit",
+                          json={'email': email, 'provider': 'google', 'result': result_label,
+                                'user_agent': request.headers.get('User-Agent', '')},
+                          headers={'apikey': SUPABASE_SERVICE_KEY,
+                                   'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}'},
+                          timeout=5)
+        except Exception:
+            pass
+        return _jsonify_auth({'ok': True})
+    # Invalid
+    try:
+        requests.post(f"{SUPABASE_URL}/rest/v1/login_audit",
+                      json={'email': email, 'provider': 'google', 'result': '2fa_failed',
+                            'user_agent': request.headers.get('User-Agent', '')},
+                      headers={'apikey': SUPABASE_SERVICE_KEY,
+                               'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}'},
+                      timeout=5)
+    except Exception:
+        pass
+    return _jsonify_auth({'ok': False, 'error': 'invalid_code', 'remaining': max(0, 5 - attempts)})
 
 # ── End dashboard auth ─────────────────────────────────────────────────────────
 
@@ -844,6 +1138,10 @@ HTML_TEMPLATE = """
         <a href="/llm-log" class="dd-item{{ '' if is_admin else ' admin-locked' }}">
           <i class="fa-solid fa-robot dd-icon" style="color:#27ae60;"></i>
           <span>LLM Log<span class="dd-sub">{{ 'Every AI prompt and response' if is_admin else 'Admin only' }}</span></span>
+        </a>
+        <a href="/account/2fa" class="dd-item">
+          <i class="fa-solid fa-shield-halved dd-icon" style="color:#e67e22;"></i>
+          <span>Two-Factor Auth<span class="dd-sub">Set up or manage 2FA for your account</span></span>
         </a>
         <a href="/user-access" class="dd-item{{ '' if is_admin else ' admin-locked' }}">
           <i class="fa-solid fa-users dd-icon" style="color:#2980b9;"></i>
@@ -5252,6 +5550,346 @@ def _send_welcome_email(to_email, to_name, added_by):
         print(f"[welcome email] failed to send to {to_email}: {e}")
 
 
+# ── 2FA Setup & Management page ───────────────────────────────────────────────
+
+_DASH_2FA_SETUP_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Two-Factor Authentication — PSPLA Dashboard</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer"/>
+<style>
+*{box-sizing:border-box}
+body{font-family:Arial,sans-serif;margin:0;background:#f4f4f4;color:#333}
+.page-header{background:#2c3e50;color:white;padding:14px 24px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.page-header h1{margin:0;font-size:18px}
+.back-link{color:#aac;font-size:13px;text-decoration:none;display:flex;align-items:center;gap:6px}
+.back-link:hover{color:white}
+.content{padding:24px;max-width:600px;margin:0 auto}
+.card{background:white;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.1);padding:24px;margin-bottom:20px}
+.status-row{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.status-icon{font-size:28px}
+.status-icon.enabled{color:#27ae60}.status-icon.disabled{color:#bdc3c7}
+.status-text h3{margin:0;font-size:16px}.status-text p{margin:4px 0 0;font-size:13px;color:#777}
+.btn{padding:10px 20px;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:6px}
+.btn-enable{background:#27ae60;color:white}.btn-enable:hover{background:#219a52}
+.btn-danger{background:#e74c3c;color:white}.btn-danger:hover{background:#c0392b}
+.btn-secondary{background:#3498db;color:white}.btn-secondary:hover{background:#2980b9}
+.btn-outline{background:none;border:1px solid #999;color:#555}.btn-outline:hover{background:#f0f0f0}
+.btn:disabled{opacity:.5;cursor:default}
+.setup-area{margin-top:16px}
+.qr-box{text-align:center;padding:20px;background:#fafafa;border-radius:8px;border:1px solid #eee;margin-bottom:16px}
+.qr-box img{max-width:200px;margin:0 auto;display:block}
+.manual-key{font-family:monospace;font-size:14px;background:#f0f0f0;padding:8px 14px;border-radius:6px;word-break:break-all;margin:10px 0;user-select:all;cursor:text}
+.confirm-row{display:flex;gap:8px;align-items:center;margin-top:12px}
+.confirm-row input{flex:1;padding:10px;font-size:16px;text-align:center;letter-spacing:4px;border:1px solid #ddd;border-radius:6px;font-family:monospace}
+.backup-box{background:#fff8e1;border:1px solid #ffcc02;border-radius:8px;padding:16px;margin-top:16px}
+.backup-box h4{margin:0 0 8px;font-size:14px;color:#e65100}
+.backup-codes{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:12px 0}
+.backup-codes .code{font-family:monospace;font-size:15px;background:white;padding:6px 10px;border-radius:4px;text-align:center;border:1px solid #eee}
+.backup-codes .code.used{text-decoration:line-through;color:#bbb}
+.btn-download{font-size:12px;margin-top:8px}
+.msg{margin-top:12px;font-size:13px;padding:8px 12px;border-radius:6px}
+.msg.error{background:#fde8e8;color:#c0392b}.msg.success{background:#d5f5e3;color:#1e8449}
+.verify-row{margin-top:16px;display:flex;gap:8px;align-items:center}
+.verify-row input{width:160px;padding:8px;font-size:16px;text-align:center;letter-spacing:4px;border:1px solid #ddd;border-radius:6px;font-family:monospace}
+.apps-info{font-size:12px;color:#888;margin-top:12px;line-height:1.6}
+.apps-info i{margin-right:4px}
+</style>
+</head>
+<body>
+<div class="page-header">
+  <h1><i class="fa-solid fa-shield-halved"></i> Two-Factor Authentication</h1>
+  <a href="/" class="back-link"><i class="fa-solid fa-arrow-left"></i> Back to Dashboard</a>
+</div>
+<div class="content">
+
+  <!-- Status card -->
+  <div class="card">
+    <div class="status-row">
+      <div class="status-icon __STATUS_CLASS__"><i class="fa-solid fa-shield-halved"></i></div>
+      <div class="status-text">
+        <h3>Two-Factor Authentication is <strong>__STATUS_LABEL__</strong></h3>
+        <p>__STATUS_SUB__</p>
+      </div>
+    </div>
+
+    <div id="setup-area" class="setup-area" style="display:none">
+      <!-- Filled dynamically -->
+    </div>
+
+    <div id="actions">
+      __ACTIONS__
+    </div>
+
+    <div class="apps-info">
+      <i class="fa-solid fa-mobile-screen-button"></i> Compatible with Google Authenticator, Microsoft Authenticator, and DUO
+    </div>
+  </div>
+
+</div>
+<script>
+function enableSetup() {
+    var btn = event.target; btn.disabled = true; btn.textContent = 'Generating...';
+    fetch('/account/2fa/setup', {method:'POST'})
+    .then(function(r){return r.json();}).then(function(d){
+        if (!d.ok) { alert(d.error||'Error'); btn.disabled=false; btn.textContent='Enable Two-Factor Authentication'; return; }
+        var area = document.getElementById('setup-area');
+        area.style.display = '';
+        area.innerHTML = '<div class="qr-box">' +
+            '<p style="font-size:13px;color:#666;margin:0 0 10px">Scan this QR code with your authenticator app:</p>' +
+            '<img src="data:image/png;base64,' + d.qr_base64 + '" alt="QR Code">' +
+            '<p style="font-size:11px;color:#999;margin:8px 0 0">Or enter this key manually:</p>' +
+            '<div class="manual-key">' + d.secret_manual + '</div></div>' +
+            '<p style="font-size:13px;color:#555">Enter the 6-digit code from your app to confirm setup:</p>' +
+            '<div class="confirm-row">' +
+            '<input type="text" id="confirm-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="000000" onkeydown="if(event.key===\'Enter\')confirmSetup()">' +
+            '<button class="btn btn-enable" id="btn-confirm" onclick="confirmSetup()">Confirm</button></div>' +
+            '<div id="setup-msg"></div>';
+        document.getElementById('actions').style.display = 'none';
+        document.getElementById('confirm-code').focus();
+    });
+}
+function confirmSetup() {
+    var code = document.getElementById('confirm-code').value.trim();
+    if (!code || code.length < 6) return;
+    var btn = document.getElementById('btn-confirm'); btn.disabled = true;
+    fetch('/account/2fa/confirm-setup', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({code:code})})
+    .then(function(r){return r.json();}).then(function(d){
+        if (d.ok) {
+            var area = document.getElementById('setup-area');
+            var codesHtml = d.backup_codes.map(function(c){return '<div class="code">' + c + '</div>';}).join('');
+            area.innerHTML = '<div class="backup-box">' +
+                '<h4><i class="fa-solid fa-triangle-exclamation"></i> Save Your Backup Codes</h4>' +
+                '<p style="font-size:13px;margin:0 0 8px">These codes can be used to sign in if you lose access to your authenticator app. Each code can only be used once.</p>' +
+                '<div class="backup-codes">' + codesHtml + '</div>' +
+                '<button class="btn btn-outline btn-download" onclick="downloadCodes()"><i class="fa-solid fa-download"></i> Download codes</button></div>' +
+                '<p style="font-size:13px;color:#27ae60;margin-top:16px"><i class="fa-solid fa-check-circle"></i> Two-factor authentication has been enabled!</p>' +
+                '<a href="/account/2fa" class="btn btn-secondary" style="margin-top:10px;text-decoration:none"><i class="fa-solid fa-arrow-left"></i> Done</a>';
+            window._backupCodes = d.backup_codes;
+        } else {
+            var m = document.getElementById('setup-msg');
+            m.innerHTML = '<div class="msg error">Invalid code. Please try again.</div>';
+            btn.disabled = false;
+            document.getElementById('confirm-code').value = '';
+            document.getElementById('confirm-code').focus();
+        }
+    });
+}
+function downloadCodes() {
+    var codes = window._backupCodes || [];
+    var text = 'PSPLA Dashboard - 2FA Backup Codes\\nGenerated: ' + new Date().toLocaleString() + '\\n\\n' +
+               codes.join('\\n') + '\\n\\nEach code can only be used once.';
+    var blob = new Blob([text], {type:'text/plain'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'pspla-2fa-backup-codes.txt';
+    a.click();
+}
+function disable2FA() {
+    var code = prompt('Enter your current 6-digit authenticator code to disable 2FA:');
+    if (!code) return;
+    fetch('/account/2fa/disable', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({code:code.trim()})})
+    .then(function(r){return r.json();}).then(function(d){
+        if (d.ok) { alert('Two-factor authentication has been disabled.'); window.location.reload(); }
+        else { alert(d.error || 'Invalid code. 2FA was not disabled.'); }
+    });
+}
+function viewBackupCodes() {
+    var code = prompt('Enter your current 6-digit authenticator code to view backup codes:');
+    if (!code) return;
+    fetch('/account/2fa/backup-codes', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({code:code.trim()})})
+    .then(function(r){return r.json();}).then(function(d){
+        if (!d.ok) { alert(d.error || 'Invalid code.'); return; }
+        var area = document.getElementById('setup-area');
+        area.style.display = '';
+        var codesHtml = d.codes.map(function(c){
+            return '<div class="code' + (c.used ? ' used' : '') + '">' + c.code + (c.used ? ' (used)' : '') + '</div>';
+        }).join('');
+        var unused = d.codes.filter(function(c){return !c.used;}).length;
+        area.innerHTML = '<div class="backup-box">' +
+            '<h4><i class="fa-solid fa-key"></i> Your Backup Codes</h4>' +
+            '<p style="font-size:13px;margin:0 0 8px">' + unused + ' of ' + d.codes.length + ' codes remaining</p>' +
+            '<div class="backup-codes">' + codesHtml + '</div></div>';
+    });
+}
+function regenBackupCodes() {
+    var code = prompt('Enter your current 6-digit authenticator code to regenerate backup codes:');
+    if (!code) return;
+    if (!confirm('This will invalidate all existing backup codes. Continue?')) return;
+    fetch('/account/2fa/regenerate-backup', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({code:code.trim()})})
+    .then(function(r){return r.json();}).then(function(d){
+        if (!d.ok) { alert(d.error || 'Invalid code.'); return; }
+        var area = document.getElementById('setup-area');
+        area.style.display = '';
+        var codesHtml = d.codes.map(function(c){return '<div class="code">' + c + '</div>';}).join('');
+        area.innerHTML = '<div class="backup-box">' +
+            '<h4><i class="fa-solid fa-triangle-exclamation"></i> New Backup Codes Generated</h4>' +
+            '<p style="font-size:13px;margin:0 0 8px">Your old codes have been invalidated. Save these new codes:</p>' +
+            '<div class="backup-codes">' + codesHtml + '</div>' +
+            '<button class="btn btn-outline btn-download" onclick="downloadCodes()"><i class="fa-solid fa-download"></i> Download codes</button></div>';
+        window._backupCodes = d.codes;
+    });
+}
+</script>
+</body></html>"""
+
+@app.route('/account/2fa')
+def account_2fa_page():
+    from flask import Response as _R
+    email = session.get('email', '')
+    row = _get_user_totp_row(email)
+    enabled = row and row.get('totp_enabled')
+    if enabled:
+        enabled_at = row.get('totp_enabled_at', '')
+        try:
+            dt = datetime.fromisoformat(enabled_at.replace('Z', '+00:00'))
+            sub = f"Enabled on {dt.strftime('%d %b %Y at %H:%M')}"
+        except Exception:
+            sub = "Enabled"
+        actions = (
+            '<button class="btn btn-secondary" onclick="viewBackupCodes()" style="margin-right:8px">'
+            '<i class="fa-solid fa-key"></i> View Backup Codes</button>'
+            '<button class="btn btn-outline" onclick="regenBackupCodes()" style="margin-right:8px">'
+            '<i class="fa-solid fa-rotate"></i> Regenerate Codes</button>'
+            '<button class="btn btn-danger" onclick="disable2FA()">'
+            '<i class="fa-solid fa-ban"></i> Disable 2FA</button>'
+        )
+        html = (_DASH_2FA_SETUP_HTML
+                .replace('__STATUS_CLASS__', 'enabled')
+                .replace('__STATUS_LABEL__', 'Enabled')
+                .replace('__STATUS_SUB__', sub)
+                .replace('__ACTIONS__', actions))
+    else:
+        actions = (
+            '<button class="btn btn-enable" onclick="enableSetup()">'
+            '<i class="fa-solid fa-shield-halved"></i> Enable Two-Factor Authentication</button>'
+        )
+        html = (_DASH_2FA_SETUP_HTML
+                .replace('__STATUS_CLASS__', 'disabled')
+                .replace('__STATUS_LABEL__', 'Disabled')
+                .replace('__STATUS_SUB__', 'Add an extra layer of security to your account')
+                .replace('__ACTIONS__', actions))
+    return _R(html, mimetype='text/html')
+
+@app.route('/account/2fa/setup', methods=['POST'])
+def account_2fa_setup():
+    email = session.get('email', '')
+    if not email or session.get('auth_method') != 'google':
+        return _jsonify_auth({'ok': False, 'error': '2FA is only available for Google sign-in accounts'})
+    secret = pyotp.random_base32()
+    uri = pyotp.TOTP(secret).provisioning_uri(name=email, issuer_name="PSPLA Dashboard")
+    # Generate QR code as base64 PNG
+    img = qrcode.make(uri, box_size=6, border=2)
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    qr_b64 = _b64.b64encode(buf.getvalue()).decode()
+    # Encrypt and save secret (but do NOT enable yet)
+    encrypted = _totp_encrypt(secret)
+    row = _get_user_totp_row(email)
+    if row:
+        requests.patch(f"{SUPABASE_URL}/rest/v1/allowed_users",
+                       params={"id": f"eq.{row['id']}"},
+                       json={"totp_secret": encrypted},
+                       headers={"apikey": SUPABASE_SERVICE_KEY,
+                                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                "Prefer": "return=minimal"},
+                       timeout=10)
+    return _jsonify_auth({'ok': True, 'qr_base64': qr_b64, 'secret_manual': secret})
+
+@app.route('/account/2fa/confirm-setup', methods=['POST'])
+def account_2fa_confirm_setup():
+    email = session.get('email', '')
+    code = (request.json or {}).get('code', '').strip()
+    row = _get_user_totp_row(email)
+    if not row or not row.get('totp_secret'):
+        return _jsonify_auth({'ok': False, 'error': 'No setup in progress'})
+    try:
+        secret = _totp_decrypt(row['totp_secret'])
+    except Exception:
+        return _jsonify_auth({'ok': False, 'error': 'Decryption error'})
+    if not _verify_totp_code(secret, code):
+        return _jsonify_auth({'ok': False, 'error': 'invalid_code'})
+    # Enable 2FA, generate backup codes
+    backup = _generate_backup_codes()
+    encrypted_backup = _totp_encrypt(json.dumps(backup))
+    requests.patch(f"{SUPABASE_URL}/rest/v1/allowed_users",
+                   params={"id": f"eq.{row['id']}"},
+                   json={"totp_enabled": True,
+                         "totp_backup_codes": encrypted_backup,
+                         "totp_enabled_at": datetime.now(timezone.utc).isoformat()},
+                   headers={"apikey": SUPABASE_SERVICE_KEY,
+                            "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                            "Prefer": "return=minimal"},
+                   timeout=10)
+    return _jsonify_auth({'ok': True, 'backup_codes': [c['code'] for c in backup]})
+
+@app.route('/account/2fa/disable', methods=['POST'])
+def account_2fa_disable():
+    email = session.get('email', '')
+    code = (request.json or {}).get('code', '').strip()
+    row = _get_user_totp_row(email)
+    if not row or not row.get('totp_secret'):
+        return _jsonify_auth({'ok': False, 'error': '2FA not enabled'})
+    try:
+        secret = _totp_decrypt(row['totp_secret'])
+    except Exception:
+        return _jsonify_auth({'ok': False, 'error': 'error'})
+    if not _verify_totp_code(secret, code):
+        return _jsonify_auth({'ok': False, 'error': 'Invalid code'})
+    requests.patch(f"{SUPABASE_URL}/rest/v1/allowed_users",
+                   params={"id": f"eq.{row['id']}"},
+                   json={"totp_enabled": False, "totp_secret": None,
+                         "totp_backup_codes": None, "totp_enabled_at": None},
+                   headers={"apikey": SUPABASE_SERVICE_KEY,
+                            "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                            "Prefer": "return=minimal"},
+                   timeout=10)
+    return _jsonify_auth({'ok': True})
+
+@app.route('/account/2fa/backup-codes', methods=['POST'])
+def account_2fa_backup_codes():
+    email = session.get('email', '')
+    code = (request.json or {}).get('code', '').strip()
+    row = _get_user_totp_row(email)
+    if not row or not row.get('totp_secret') or not row.get('totp_backup_codes'):
+        return _jsonify_auth({'ok': False, 'error': '2FA not enabled'})
+    try:
+        secret = _totp_decrypt(row['totp_secret'])
+    except Exception:
+        return _jsonify_auth({'ok': False, 'error': 'error'})
+    if not _verify_totp_code(secret, code):
+        return _jsonify_auth({'ok': False, 'error': 'Invalid code'})
+    try:
+        codes = json.loads(_totp_decrypt(row['totp_backup_codes']))
+    except Exception:
+        return _jsonify_auth({'ok': False, 'error': 'error'})
+    return _jsonify_auth({'ok': True, 'codes': codes})
+
+@app.route('/account/2fa/regenerate-backup', methods=['POST'])
+def account_2fa_regen_backup():
+    email = session.get('email', '')
+    code = (request.json or {}).get('code', '').strip()
+    row = _get_user_totp_row(email)
+    if not row or not row.get('totp_secret'):
+        return _jsonify_auth({'ok': False, 'error': '2FA not enabled'})
+    try:
+        secret = _totp_decrypt(row['totp_secret'])
+    except Exception:
+        return _jsonify_auth({'ok': False, 'error': 'error'})
+    if not _verify_totp_code(secret, code):
+        return _jsonify_auth({'ok': False, 'error': 'Invalid code'})
+    backup = _generate_backup_codes()
+    encrypted_backup = _totp_encrypt(json.dumps(backup))
+    requests.patch(f"{SUPABASE_URL}/rest/v1/allowed_users",
+                   params={"id": f"eq.{row['id']}"},
+                   json={"totp_backup_codes": encrypted_backup},
+                   headers={"apikey": SUPABASE_SERVICE_KEY,
+                            "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                            "Prefer": "return=minimal"},
+                   timeout=10)
+    return _jsonify_auth({'ok': True, 'codes': [c['code'] for c in backup]})
+
 # ── User Access page ───────────────────────────────────────────────────────────
 @app.route("/user-access")
 def user_access_page():
@@ -5263,7 +5901,7 @@ def user_access_page():
 def api_allowed_users_get():
     from flask import jsonify
     r = requests.get(f"{SUPABASE_URL}/rest/v1/allowed_users",
-                     params={"select": "id,email,name,added_by,added_at,active,last_login,last_provider,is_admin",
+                     params={"select": "id,email,name,added_by,added_at,active,last_login,last_provider,is_admin,totp_enabled",
                              "order": "added_at.desc"},
                      headers={"apikey": SUPABASE_SERVICE_KEY,
                               "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
@@ -5315,6 +5953,31 @@ def api_allowed_users_toggle_admin(uid):
                        headers={"apikey": SUPABASE_SERVICE_KEY,
                                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                                 "Prefer": "return=minimal"})
+    return jsonify({"ok": r.ok})
+
+@app.route("/api/allowed-users/<uid>/reset-2fa", methods=["POST"])
+def api_reset_user_2fa(uid):
+    from flask import jsonify
+    if not _is_admin():
+        return jsonify({"ok": False, "error": "admin only"}), 403
+    r = requests.patch(f"{SUPABASE_URL}/rest/v1/allowed_users",
+                       params={"id": f"eq.{uid}"},
+                       json={"totp_enabled": False, "totp_secret": None,
+                             "totp_backup_codes": None, "totp_enabled_at": None},
+                       headers={"apikey": SUPABASE_SERVICE_KEY,
+                                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                "Prefer": "return=minimal"})
+    if r.ok:
+        try:
+            requests.post(f"{SUPABASE_URL}/rest/v1/login_audit",
+                          json={"email": session.get("email", "admin"), "provider": "admin",
+                                "result": "2fa_admin_reset",
+                                "user_agent": f"Reset 2FA for user {uid}"},
+                          headers={"apikey": SUPABASE_SERVICE_KEY,
+                                   "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                          timeout=5)
+        except Exception:
+            pass
     return jsonify({"ok": r.ok})
 
 @app.route("/api/login-audit")
@@ -5385,7 +6048,7 @@ tr:last-child td{border-bottom:none}
     </div>
     <div id="users-loading" class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</div>
     <table id="users-table" style="display:none">
-      <thead><tr><th>Email</th><th>Name</th><th>Added by</th><th>Added</th><th>Last login</th><th>Status</th><th>Role</th><th></th></tr></thead>
+      <thead><tr><th>Email</th><th>Name</th><th>Added by</th><th>Added</th><th>Last login</th><th>Status</th><th>Role</th><th>2FA</th><th></th></tr></thead>
       <tbody id="users-body"></tbody>
     </table>
   </div>
@@ -5426,6 +6089,13 @@ function loadUsers() {
                 adminCol = '<span style="color:#999;font-size:12px">User</span>';
                 if (IS_ADMIN) adminCol += ' <button class="btn-admin" onclick="toggleAdmin(\\'' + u.id + '\\', true)" title="Make admin">Make Admin</button>';
             }
+            var tfaCol = '';
+            if (u.totp_enabled) {
+                tfaCol = '<i class="fa-solid fa-shield-halved" style="color:#27ae60" title="2FA enabled"></i>';
+                if (IS_ADMIN) tfaCol += ' <button class="btn-del" style="border-color:#e67e22;color:#e67e22;font-size:11px" onclick="reset2FA(\\'' + u.id + '\\', \\'' + u.email + '\\')" title="Reset 2FA">Reset</button>';
+            } else {
+                tfaCol = '<i class="fa-solid fa-shield-halved" style="color:#ddd" title="2FA not enabled"></i>';
+            }
             tr.innerHTML = '<td><strong>' + u.email + '</strong></td>' +
                 '<td>' + (u.name || '—') + '</td>' +
                 '<td>' + (u.added_by || '—') + '</td>' +
@@ -5433,6 +6103,7 @@ function loadUsers() {
                 '<td>' + (u.last_login ? fmt(u.last_login) + (u.last_provider ? ' <span class="badge badge-' + u.last_provider + '">' + u.last_provider + '</span>' : '') : '—') + '</td>' +
                 '<td><span class="badge ' + (u.active ? 'badge-active">Active' : 'badge-inactive">Inactive') + '</span></td>' +
                 '<td>' + adminCol + '</td>' +
+                '<td style="text-align:center">' + tfaCol + '</td>' +
                 '<td>' + removeBtn + '</td>';
             b.appendChild(tr);
         });
@@ -5454,6 +6125,13 @@ function addUser() {
 function removeUser(id, email) {
     if (!confirm('Remove ' + email + ' from allowed users?')) return;
     fetch('/api/allowed-users/' + id, {method:'DELETE'}).then(function(){loadUsers();});
+}
+function reset2FA(id, email) {
+    if (!confirm('Reset two-factor authentication for ' + email + '? They will need to set it up again.')) return;
+    fetch('/api/allowed-users/' + id + '/reset-2fa', {method:'POST'}).then(function(r){return r.json();}).then(function(d){
+        if (d.ok) { alert('2FA has been reset for ' + email); loadUsers(); }
+        else { alert('Failed to reset 2FA.'); }
+    });
 }
 function toggleAdmin(id, makeAdmin) {
     var msg = makeAdmin ? 'Grant admin privileges to this user?' : 'Revoke admin privileges from this user?';
