@@ -32,5 +32,5 @@ jobs:
           NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
           DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
           GITHUB_PAT: ${{ secrets.GH_PAT }}
-          GITHUB_REPO: ${{ secrets.GITHUB_REPO }}
+          GITHUB_REPO: ${{ secrets.REPO_NAME }}
         run: python run_directories.py --scheduled
