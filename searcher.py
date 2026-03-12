@@ -1305,7 +1305,9 @@ def llm_verify_associations(company_name, website_url, region,
                             pspla_name=None, pspla_address=None, pspla_status=None,
                             nzsa_name=None,
                             google_address=None, google_phone=None,
-                            fb_description=None):
+                            fb_description=None,
+                            linkedin_location=None, linkedin_industry=None,
+                            linkedin_description=None, linkedin_website=None):
     """Use Claude Haiku to sanity-check ALL gathered associations before saving.
     Reviews PSPLA, CO, NZSA, LinkedIn, Facebook, and Google profile data.
     Returns a dict of fields to reject (set to None), with reasons."""
@@ -1314,6 +1316,14 @@ def llm_verify_associations(company_name, website_url, region,
     lines = []
     if linkedin_url:
         lines.append(f"LinkedIn URL: {linkedin_url}")
+        if linkedin_location:
+            lines.append(f"LinkedIn location: {linkedin_location}")
+        if linkedin_industry:
+            lines.append(f"LinkedIn industry: {linkedin_industry}")
+        if linkedin_description:
+            lines.append(f"LinkedIn description: {linkedin_description[:200]}")
+        if linkedin_website:
+            lines.append(f"LinkedIn website: {linkedin_website}")
     if facebook_url:
         lines.append(f"Facebook URL: {facebook_url}")
         if fb_description:
@@ -1351,6 +1361,8 @@ For each piece of data, decide if it genuinely belongs to this company or is lik
 
 Rules:
 - LinkedIn/Facebook URL slugs should share meaningful words with the company name. A completely unrelated slug is wrong.
+- LinkedIn location: this company is in New Zealand. If the LinkedIn location shows a different country (e.g. England, Australia, USA) then REJECT — it is a different company. A different NZ city is fine.
+- LinkedIn website: if the LinkedIn page lists a website domain that clearly differs from the company's known website, that is suspicious.
 - Companies Office name: minor variations (Ltd/Limited, (2008), punctuation) are fine. A completely different business is wrong.
 - PSPLA name: should be a plausible variation of the company name or a known trading name. Totally unrelated is wrong.
 - NZSA name: same rules as CO name.
@@ -4756,6 +4768,10 @@ def process_and_save_company(info, website_url, root_domain, source_label, fallb
         google_address=google_profile.get("address"),
         google_phone=google_profile.get("phone"),
         fb_description=fb_page_data.get("description"),
+        linkedin_location=li_page_data.get("location"),
+        linkedin_industry=li_page_data.get("industry"),
+        linkedin_description=li_page_data.get("description"),
+        linkedin_website=li_page_data.get("website"),
     )
     if rejections.get("linkedin_url"):
         write_audit("llm_decision", None, company_name,

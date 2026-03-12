@@ -6788,7 +6788,18 @@ def find_linkedin_for_company():
     _rl = _recheck_log_capture(); _rl.__enter__()
     snapshot = _fetch_company_snapshot(company_id)
     try:
-        from searcher import find_linkedin_url, scrape_linkedin_page, write_audit
+        from searcher import find_linkedin_url, scrape_linkedin_page, write_audit, llm_verify_associations
+        # Fetch company context for AI verification
+        _li_row = {}
+        try:
+            _h = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+            _r = requests.get(f"{SUPABASE_URL}/rest/v1/Companies",
+                              headers=_h, params={"id": f"eq.{company_id}", "select": "region,website"})
+            _li_row = (_r.json() or [{}])[0]
+        except Exception:
+            pass
+        _company_region = _li_row.get("region", "")
+        _company_website = _li_row.get("website", "")
         print(f"[LinkedIn] Searching for LinkedIn page: {company_name}")
         li_url = find_linkedin_url(company_name)
         if li_url:
@@ -6797,7 +6808,7 @@ def find_linkedin_for_company():
             if li_data.get("followers"): print(f"[LinkedIn] Followers: {li_data['followers']}")
             if li_data.get("industry"):  print(f"[LinkedIn] Industry: {li_data['industry']}")
             if li_data.get("location"):  print(f"[LinkedIn] Location: {li_data['location']}")
-            # Reject if scraped location is clearly not NZ
+            # Hard gate: reject if scraped location is clearly not NZ
             _li_loc = (li_data.get("location") or "").lower()
             _OVERSEAS_LOCS = ["australia", "england", "united kingdom", "united states",
                               "canada", "ireland", "south africa", "india", "singapore",
@@ -6807,6 +6818,21 @@ def find_linkedin_for_company():
                 print(f"[LinkedIn] REJECTED — location '{li_data['location']}' is not NZ")
                 return jsonify({"found": False, "rejected": True,
                                 "reason": f"Location is overseas: {li_data['location']}"})
+            # AI verification — give Claude the full picture
+            print(f"[LinkedIn] Running AI verification...")
+            ai_rejections = llm_verify_associations(
+                company_name, _company_website, _company_region,
+                linkedin_url=li_url,
+                linkedin_location=li_data.get("location"),
+                linkedin_industry=li_data.get("industry"),
+                linkedin_description=li_data.get("description"),
+                linkedin_website=li_data.get("website"),
+            )
+            if ai_rejections.get("linkedin_url"):
+                _reason = ai_rejections["linkedin_url"]
+                print(f"[LinkedIn] AI REJECTED: {_reason}")
+                return jsonify({"found": False, "rejected": True,
+                                "reason": f"AI review: {_reason}"})
             patch = {"linkedin_url": li_url}
             for field in ("followers", "description", "industry", "location", "website", "size"):
                 if li_data.get(field):
