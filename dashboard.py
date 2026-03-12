@@ -1139,9 +1139,9 @@ HTML_TEMPLATE = """
           <i class="fa-solid fa-robot dd-icon" style="color:#27ae60;"></i>
           <span>LLM Log<span class="dd-sub">{{ 'Every AI prompt and response' if is_admin else 'Admin only' }}</span></span>
         </a>
-        <a href="/account/2fa" class="dd-item">
-          <i class="fa-solid fa-shield-halved dd-icon" style="color:#e67e22;"></i>
-          <span>Two-Factor Auth<span class="dd-sub">Set up or manage 2FA for your account</span></span>
+        <a href="/account/profile" class="dd-item">
+          <i class="fa-solid fa-user-gear dd-icon" style="color:#e67e22;"></i>
+          <span>My Account<span class="dd-sub">Profile picture, 2FA &amp; security</span></span>
         </a>
         <a href="/user-access" class="dd-item{{ '' if is_admin else ' admin-locked' }}">
           <i class="fa-solid fa-users dd-icon" style="color:#2980b9;"></i>
@@ -1187,7 +1187,8 @@ HTML_TEMPLATE = """
   <!-- Right: credits + running state -->
   <div class="navbar-right">
     <button id="dark-toggle" onclick="(function(){var d=document.documentElement.classList.toggle('dark');localStorage.setItem('pspla-dark',d?'1':'0');})()"></button>
-    <a href="/logout" style="background:rgba(231,76,60,0.15);border:1px solid rgba(231,76,60,0.4);border-radius:6px;padding:5px 12px;font-size:12px;color:#e98;text-decoration:none;white-space:nowrap;" title="Signed in as {{ session.get('email','') }}"><i class="fa-solid fa-right-from-bracket"></i> Sign out</a>
+    <a href="/account/profile" style="text-decoration:none;display:inline-flex;align-items:center;" title="Signed in as {{ session.get('email','') }}">{% if avatar_url %}<img src="{{ avatar_url }}" style="width:26px;height:26px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,0.3);">{% else %}<i class="fa-solid fa-user-circle" style="font-size:24px;color:#7f95b0;"></i>{% endif %}</a>
+    <a href="/logout" style="background:rgba(231,76,60,0.15);border:1px solid rgba(231,76,60,0.4);border-radius:6px;padding:5px 12px;font-size:12px;color:#e98;text-decoration:none;white-space:nowrap;" title="Sign out"><i class="fa-solid fa-right-from-bracket"></i> Sign out</a>
     <div class="credits-bar" id="api-credits-bar">
       <span id="credit-serp"><i class="fa-solid fa-magnifying-glass"></i> SerpAPI: <b>loading…</b></span>
       <span id="credit-tokens"><i class="fa-solid fa-robot"></i> Claude: <b>–</b></span>
@@ -4091,6 +4092,7 @@ def index():
         git_version=git_version,
         github_repo=os.getenv("GITHUB_REPO", "wadeco2000/pspla-checker"),
         is_admin=_is_admin(),
+        avatar_url=(_get_user_profile(session.get('email', '')) or {}).get('avatar_url', ''),
     )
 
 
@@ -5552,11 +5554,11 @@ def _send_welcome_email(to_email, to_name, added_by):
 
 # ── 2FA Setup & Management page ───────────────────────────────────────────────
 
-_DASH_2FA_SETUP_HTML = """<!DOCTYPE html>
+_DASH_PROFILE_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Two-Factor Authentication — PSPLA Dashboard</title>
+<title>My Account — PSPLA Dashboard</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer"/>
 <style>
 *{box-sizing:border-box}
@@ -5567,16 +5569,29 @@ body{font-family:Arial,sans-serif;margin:0;background:#f4f4f4;color:#333}
 .back-link:hover{color:white}
 .content{padding:24px;max-width:600px;margin:0 auto}
 .card{background:white;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.1);padding:24px;margin-bottom:20px}
-.status-row{display:flex;align-items:center;gap:12px;margin-bottom:16px}
-.status-icon{font-size:28px}
-.status-icon.enabled{color:#27ae60}.status-icon.disabled{color:#bdc3c7}
-.status-text h3{margin:0;font-size:16px}.status-text p{margin:4px 0 0;font-size:13px;color:#777}
+.card h2{margin:0 0 16px;font-size:15px;font-weight:600;color:#2c3e50;display:flex;align-items:center;gap:8px}
+.profile-row{display:flex;align-items:center;gap:20px;margin-bottom:16px}
+.avatar-wrap{position:relative;flex-shrink:0}
+.avatar{width:80px;height:80px;border-radius:50%;object-fit:cover;border:3px solid #eee;background:#2c3e50;display:flex;align-items:center;justify-content:center;font-size:28px;color:white;font-weight:600;overflow:hidden}
+.avatar img{width:100%;height:100%;object-fit:cover}
+.avatar-initials{width:80px;height:80px;border-radius:50%;background:#2c3e50;display:flex;align-items:center;justify-content:center;font-size:28px;color:white;font-weight:600;border:3px solid #eee}
+.profile-info{flex:1}
+.profile-info .email{font-size:15px;font-weight:600;color:#2c3e50}
+.profile-info .name{font-size:13px;color:#777;margin-top:2px}
+.profile-info .method{font-size:11px;color:#999;margin-top:4px}
+.avatar-actions{display:flex;gap:8px;margin-top:8px}
+.avatar-actions label,.avatar-actions button{font-size:12px;cursor:pointer}
 .btn{padding:10px 20px;border:none;border-radius:6px;font-size:13px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:6px}
+.btn-sm{padding:6px 14px;font-size:12px}
 .btn-enable{background:#27ae60;color:white}.btn-enable:hover{background:#219a52}
 .btn-danger{background:#e74c3c;color:white}.btn-danger:hover{background:#c0392b}
 .btn-secondary{background:#3498db;color:white}.btn-secondary:hover{background:#2980b9}
 .btn-outline{background:none;border:1px solid #999;color:#555}.btn-outline:hover{background:#f0f0f0}
 .btn:disabled{opacity:.5;cursor:default}
+.status-row{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.status-icon{font-size:28px}
+.status-icon.enabled{color:#27ae60}.status-icon.disabled{color:#bdc3c7}
+.status-text h3{margin:0;font-size:16px}.status-text p{margin:4px 0 0;font-size:13px;color:#777}
 .setup-area{margin-top:16px}
 .qr-box{text-align:center;padding:20px;background:#fafafa;border-radius:8px;border:1px solid #eee;margin-bottom:16px}
 .qr-box img{max-width:200px;margin:0 auto;display:block}
@@ -5591,25 +5606,50 @@ body{font-family:Arial,sans-serif;margin:0;background:#f4f4f4;color:#333}
 .btn-download{font-size:12px;margin-top:8px}
 .msg{margin-top:12px;font-size:13px;padding:8px 12px;border-radius:6px}
 .msg.error{background:#fde8e8;color:#c0392b}.msg.success{background:#d5f5e3;color:#1e8449}
-.verify-row{margin-top:16px;display:flex;gap:8px;align-items:center}
-.verify-row input{width:160px;padding:8px;font-size:16px;text-align:center;letter-spacing:4px;border:1px solid #ddd;border-radius:6px;font-family:monospace}
 .apps-info{font-size:12px;color:#888;margin-top:12px;line-height:1.6}
 .apps-info i{margin-right:4px}
+.upload-progress{display:none;margin-top:8px;font-size:12px;color:#3498db}
 </style>
 </head>
 <body>
 <div class="page-header">
-  <h1><i class="fa-solid fa-shield-halved"></i> Two-Factor Authentication</h1>
+  <h1><i class="fa-solid fa-user-gear"></i> My Account</h1>
   <a href="/" class="back-link"><i class="fa-solid fa-arrow-left"></i> Back to Dashboard</a>
 </div>
 <div class="content">
 
-  <!-- Status card -->
+  <!-- Profile card -->
   <div class="card">
+    <h2><i class="fa-solid fa-user-circle" style="color:#3498db"></i> Profile</h2>
+    <div class="profile-row">
+      <div class="avatar-wrap">
+        <div id="avatar-display">__AVATAR_HTML__</div>
+      </div>
+      <div class="profile-info">
+        <div class="email">__USER_EMAIL__</div>
+        <div class="name">__USER_NAME__</div>
+        <div class="method"><i class="fa-brands fa-google"></i> Signed in with Google</div>
+        <div class="avatar-actions">
+          <label class="btn btn-sm btn-secondary" style="margin:0">
+            <i class="fa-solid fa-camera"></i> Upload Photo
+            <input type="file" id="avatar-file" accept="image/*" style="display:none" onchange="uploadAvatar(this)">
+          </label>
+          <button class="btn btn-sm btn-outline" onclick="clearAvatar()" id="btn-clear-avatar" style="__CLEAR_DISPLAY__">
+            <i class="fa-solid fa-trash"></i> Remove
+          </button>
+        </div>
+        <div class="upload-progress" id="upload-progress"><i class="fa-solid fa-spinner fa-spin"></i> Uploading...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2FA card -->
+  <div class="card">
+    <h2><i class="fa-solid fa-shield-halved" style="color:#e67e22"></i> Two-Factor Authentication</h2>
     <div class="status-row">
       <div class="status-icon __STATUS_CLASS__"><i class="fa-solid fa-shield-halved"></i></div>
       <div class="status-text">
-        <h3>Two-Factor Authentication is <strong>__STATUS_LABEL__</strong></h3>
+        <h3>2FA is <strong>__STATUS_LABEL__</strong></h3>
         <p>__STATUS_SUB__</p>
       </div>
     </div>
@@ -5629,6 +5669,34 @@ body{font-family:Arial,sans-serif;margin:0;background:#f4f4f4;color:#333}
 
 </div>
 <script>
+function uploadAvatar(input) {
+    if (!input.files || !input.files[0]) return;
+    var file = input.files[0];
+    if (file.size > 2 * 1024 * 1024) { alert('Image must be under 2MB.'); return; }
+    var prog = document.getElementById('upload-progress');
+    prog.style.display = '';
+    var reader = new FileReader();
+    reader.onload = function(e) {
+        fetch('/account/profile/upload-avatar', {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({image: e.target.result})
+        }).then(function(r){return r.json();}).then(function(d){
+            prog.style.display = 'none';
+            if (d.ok) {
+                document.getElementById('avatar-display').innerHTML = '<div class="avatar"><img src="' + d.url + '?t=' + Date.now() + '" alt="Avatar"></div>';
+                document.getElementById('btn-clear-avatar').style.display = '';
+            } else { alert(d.error || 'Upload failed.'); }
+        }).catch(function(){ prog.style.display = 'none'; alert('Upload failed.'); });
+    };
+    reader.readAsDataURL(file);
+}
+function clearAvatar() {
+    if (!confirm('Remove your profile picture?')) return;
+    fetch('/account/profile/clear-avatar', {method:'POST'})
+    .then(function(r){return r.json();}).then(function(d){
+        if (d.ok) { window.location.reload(); }
+        else { alert(d.error || 'Failed to remove avatar.'); }
+    });
+}
 function enableSetup() {
     var btn = event.target; btn.disabled = true; btn.textContent = 'Generating...';
     fetch('/account/2fa/setup', {method:'POST'})
@@ -5665,7 +5733,7 @@ function confirmSetup() {
                 '<div class="backup-codes">' + codesHtml + '</div>' +
                 '<button class="btn btn-outline btn-download" onclick="downloadCodes()"><i class="fa-solid fa-download"></i> Download codes</button></div>' +
                 '<p style="font-size:13px;color:#27ae60;margin-top:16px"><i class="fa-solid fa-check-circle"></i> Two-factor authentication has been enabled!</p>' +
-                '<a href="/account/2fa" class="btn btn-secondary" style="margin-top:10px;text-decoration:none"><i class="fa-solid fa-arrow-left"></i> Done</a>';
+                '<a href="/account/profile" class="btn btn-secondary" style="margin-top:10px;text-decoration:none"><i class="fa-solid fa-arrow-left"></i> Done</a>';
             window._backupCodes = d.backup_codes;
         } else {
             var m = document.getElementById('setup-msg');
@@ -5734,14 +5802,45 @@ function regenBackupCodes() {
 </script>
 </body></html>"""
 
+def _get_user_profile(email):
+    """Fetch profile data (name, avatar_url) for current user."""
+    try:
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/allowed_users",
+                         params={"email": f"eq.{email}", "active": "eq.true",
+                                 "select": "id,name,avatar_url"},
+                         headers={"apikey": SUPABASE_SERVICE_KEY,
+                                  "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                         timeout=10)
+        if r.ok and r.json():
+            return r.json()[0]
+    except Exception:
+        pass
+    return {}
+
 @app.route('/account/2fa')
 def account_2fa_page():
+    return redirect(url_for('account_profile_page'))
+
+@app.route('/account/profile')
+def account_profile_page():
     from flask import Response as _R
     email = session.get('email', '')
-    row = _get_user_totp_row(email)
-    enabled = row and row.get('totp_enabled')
+    profile = _get_user_profile(email)
+    totp_row = _get_user_totp_row(email)
+    # Avatar
+    avatar_url = profile.get('avatar_url')
+    if avatar_url:
+        avatar_html = f'<div class="avatar"><img src="{avatar_url}?t={int(_time.time())}" alt="Avatar"></div>'
+        clear_display = ''
+    else:
+        initials = ''.join([w[0] for w in email.split('@')[0].replace('.', ' ').split()[:2]]).upper() or '?'
+        avatar_html = f'<div class="avatar-initials">{initials}</div>'
+        clear_display = 'display:none'
+    user_name = profile.get('name') or ''
+    # 2FA status
+    enabled = totp_row and totp_row.get('totp_enabled')
     if enabled:
-        enabled_at = row.get('totp_enabled_at', '')
+        enabled_at = totp_row.get('totp_enabled_at', '')
         try:
             dt = datetime.fromisoformat(enabled_at.replace('Z', '+00:00'))
             sub = f"Enabled on {dt.strftime('%d %b %Y at %H:%M')}"
@@ -5755,7 +5854,11 @@ def account_2fa_page():
             '<button class="btn btn-danger" onclick="disable2FA()">'
             '<i class="fa-solid fa-ban"></i> Disable 2FA</button>'
         )
-        html = (_DASH_2FA_SETUP_HTML
+        html = (_DASH_PROFILE_HTML
+                .replace('__AVATAR_HTML__', avatar_html)
+                .replace('__USER_EMAIL__', email)
+                .replace('__USER_NAME__', user_name or 'No name set')
+                .replace('__CLEAR_DISPLAY__', clear_display)
                 .replace('__STATUS_CLASS__', 'enabled')
                 .replace('__STATUS_LABEL__', 'Enabled')
                 .replace('__STATUS_SUB__', sub)
@@ -5765,12 +5868,110 @@ def account_2fa_page():
             '<button class="btn btn-enable" onclick="enableSetup()">'
             '<i class="fa-solid fa-shield-halved"></i> Enable Two-Factor Authentication</button>'
         )
-        html = (_DASH_2FA_SETUP_HTML
+        html = (_DASH_PROFILE_HTML
+                .replace('__AVATAR_HTML__', avatar_html)
+                .replace('__USER_EMAIL__', email)
+                .replace('__USER_NAME__', user_name or 'No name set')
+                .replace('__CLEAR_DISPLAY__', clear_display)
                 .replace('__STATUS_CLASS__', 'disabled')
                 .replace('__STATUS_LABEL__', 'Disabled')
                 .replace('__STATUS_SUB__', 'Add an extra layer of security to your account')
                 .replace('__ACTIONS__', actions))
     return _R(html, mimetype='text/html')
+
+@app.route('/account/profile/upload-avatar', methods=['POST'])
+def account_upload_avatar():
+    email = session.get('email', '')
+    data = request.json or {}
+    image_data = data.get('image', '')
+    if not image_data or ',' not in image_data:
+        return _jsonify_auth({'ok': False, 'error': 'No image data'})
+    # Parse base64 data URL
+    header, b64 = image_data.split(',', 1)
+    # Determine content type
+    content_type = 'image/png'
+    ext = 'png'
+    if 'jpeg' in header or 'jpg' in header:
+        content_type = 'image/jpeg'
+        ext = 'jpg'
+    elif 'webp' in header:
+        content_type = 'image/webp'
+        ext = 'webp'
+    try:
+        img_bytes = _b64.b64decode(b64)
+    except Exception:
+        return _jsonify_auth({'ok': False, 'error': 'Invalid image data'})
+    if len(img_bytes) > 2 * 1024 * 1024:
+        return _jsonify_auth({'ok': False, 'error': 'Image too large (max 2MB)'})
+    # Get user ID for filename
+    profile = _get_user_profile(email)
+    if not profile or not profile.get('id'):
+        return _jsonify_auth({'ok': False, 'error': 'User not found'})
+    user_id = profile['id']
+    filename = f"{user_id}.{ext}"
+    # Upload to Supabase Storage
+    try:
+        # Try upsert (update if exists)
+        r = requests.post(
+            f"{SUPABASE_URL}/storage/v1/object/avatars/{filename}",
+            data=img_bytes,
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type": content_type,
+                "x-upsert": "true"
+            },
+            timeout=30
+        )
+        if not r.ok:
+            return _jsonify_auth({'ok': False, 'error': f'Storage upload failed: {r.status_code}'})
+    except Exception as e:
+        return _jsonify_auth({'ok': False, 'error': f'Upload error: {str(e)}'})
+    # Build public URL
+    public_url = f"{SUPABASE_URL}/storage/v1/object/public/avatars/{filename}"
+    # Save URL to allowed_users
+    try:
+        requests.patch(f"{SUPABASE_URL}/rest/v1/allowed_users",
+                       params={"id": f"eq.{user_id}"},
+                       json={"avatar_url": public_url},
+                       headers={"apikey": SUPABASE_SERVICE_KEY,
+                                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                "Prefer": "return=minimal"},
+                       timeout=10)
+    except Exception:
+        pass
+    return _jsonify_auth({'ok': True, 'url': public_url})
+
+@app.route('/account/profile/clear-avatar', methods=['POST'])
+def account_clear_avatar():
+    email = session.get('email', '')
+    profile = _get_user_profile(email)
+    if not profile or not profile.get('id'):
+        return _jsonify_auth({'ok': False, 'error': 'User not found'})
+    user_id = profile['id']
+    # Delete from Supabase Storage (try common extensions)
+    for ext in ['png', 'jpg', 'webp']:
+        try:
+            requests.delete(
+                f"{SUPABASE_URL}/storage/v1/object/avatars/{user_id}.{ext}",
+                headers={"apikey": SUPABASE_SERVICE_KEY,
+                         "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                timeout=10
+            )
+        except Exception:
+            pass
+    # Clear URL in DB
+    try:
+        requests.patch(f"{SUPABASE_URL}/rest/v1/allowed_users",
+                       params={"id": f"eq.{user_id}"},
+                       json={"avatar_url": None},
+                       headers={"apikey": SUPABASE_SERVICE_KEY,
+                                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                "Prefer": "return=minimal"},
+                       timeout=10)
+    except Exception:
+        pass
+    return _jsonify_auth({'ok': True})
 
 @app.route('/account/2fa/setup', methods=['POST'])
 def account_2fa_setup():
@@ -5901,7 +6102,7 @@ def user_access_page():
 def api_allowed_users_get():
     from flask import jsonify
     r = requests.get(f"{SUPABASE_URL}/rest/v1/allowed_users",
-                     params={"select": "id,email,name,added_by,added_at,active,last_login,last_provider,is_admin,totp_enabled",
+                     params={"select": "id,email,name,added_by,added_at,active,last_login,last_provider,is_admin,totp_enabled,avatar_url",
                              "order": "added_at.desc"},
                      headers={"apikey": SUPABASE_SERVICE_KEY,
                               "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
@@ -6096,7 +6297,10 @@ function loadUsers() {
             } else {
                 tfaCol = '<i class="fa-solid fa-shield-halved" style="color:#ddd" title="2FA not enabled"></i>';
             }
-            tr.innerHTML = '<td><strong>' + u.email + '</strong></td>' +
+            var avatarHtml = u.avatar_url
+                ? '<img src="' + u.avatar_url + '" style="width:24px;height:24px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:6px">'
+                : '<i class="fa-solid fa-user-circle" style="font-size:22px;color:#ccc;vertical-align:middle;margin-right:6px"></i>';
+            tr.innerHTML = '<td>' + avatarHtml + '<strong>' + u.email + '</strong></td>' +
                 '<td>' + (u.name || '—') + '</td>' +
                 '<td>' + (u.added_by || '—') + '</td>' +
                 '<td>' + fmt(u.added_at) + '</td>' +
