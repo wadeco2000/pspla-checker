@@ -214,8 +214,10 @@ _AUTH_SKIP = {
 }
 
 def _is_admin():
-    """True if the logged-in user has admin privileges (password/localhost login, or NOTIFY_EMAIL)."""
+    """True if the logged-in user has admin privileges."""
     if session.get('auth_method') == 'password':
+        return True
+    if session.get('is_admin'):
         return True
     email = (session.get('email') or '').lower().strip()
     return bool(email and NOTIFY_EMAIL and email == NOTIFY_EMAIL.lower().strip())
@@ -358,14 +360,16 @@ def auth_verify():
     # Check allowed_users table using service key (bypasses RLS)
     try:
         r2 = requests.get(f"{SUPABASE_URL}/rest/v1/allowed_users",
-                          params={'email': f'eq.{email}', 'active': 'eq.true', 'select': 'id'},
+                          params={'email': f'eq.{email}', 'active': 'eq.true', 'select': 'id,is_admin'},
                           headers={'apikey': SUPABASE_SERVICE_KEY,
                                    'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}'},
                           timeout=10)
         if r2.status_code == 200 and r2.json():
+            _user_row = r2.json()[0]
             session['authenticated'] = True
             session['email'] = email
             session['auth_method'] = 'google'
+            session['is_admin'] = bool(_user_row.get('is_admin'))
             # Audit log (fire and forget)
             try:
                 requests.post(f"{SUPABASE_URL}/rest/v1/login_audit",
@@ -3481,8 +3485,9 @@ def index():
                 pass
         if git_version == "unknown":
             try:
+                _gh_env = {**os.environ, "TZ": "Pacific/Auckland"}
                 _gh = subprocess.run(["git", "log", "-1", "--format=%h %cd", "--date=format:%d %b %Y %H:%M"],
-                                     capture_output=True, text=True, cwd=BASE_DIR)
+                                     capture_output=True, text=True, cwd=BASE_DIR, env=_gh_env)
                 git_version = _gh.stdout.strip() if _gh.returncode == 0 else "unknown"
             except Exception:
                 pass
@@ -3551,43 +3556,6 @@ def index():
         git_version=git_version,
         github_repo=os.getenv("GITHUB_REPO", "wadeco2000/pspla-checker"),
     )
-
-
-@app.route("/debug")
-def debug():
-    from flask import jsonify
-    info = {
-        "GITHUB_PAT_set": bool(GITHUB_PAT),
-        "GITHUB_PAT_length": len(GITHUB_PAT) if GITHUB_PAT else 0,
-        "GITHUB_PAT_prefix": (GITHUB_PAT[:8] + "...") if GITHUB_PAT else None,
-        "GITHUB_REPO": GITHUB_REPO,
-    }
-    # Test the GitHub API call
-    if GITHUB_PAT and GITHUB_REPO:
-        try:
-            r = requests.get(
-                f"https://api.github.com/repos/{GITHUB_REPO}/commits/main",
-                headers={"Authorization": f"token {GITHUB_PAT}", "Accept": "application/vnd.github.v3+json"},
-                timeout=5,
-            )
-            info["github_api_status"] = r.status_code
-            if r.ok:
-                gc = r.json()
-                info["latest_commit"] = gc["sha"][:7]
-                info["commit_date"] = gc["commit"]["committer"]["date"]
-            else:
-                info["github_api_error"] = r.text[:300]
-        except Exception as e:
-            info["github_api_exception"] = str(e)
-    # Test local git
-    try:
-        gh = subprocess.run(["git", "log", "-1", "--format=%h"], capture_output=True, text=True, cwd=BASE_DIR)
-        info["local_git_returncode"] = gh.returncode
-        info["local_git_output"] = gh.stdout.strip()
-        info["local_git_stderr"] = gh.stderr.strip()[:200]
-    except Exception as e:
-        info["local_git_exception"] = str(e)
-    return jsonify(info)
 
 
 HISTORY_TEMPLATE = """
@@ -4619,10 +4587,10 @@ def search_history_data():
                 timeout=8
             )
             history = r.json() if r.ok else []
-            # Map Supabase column names to what the JS expects
+            # Map Supabase column names to JS-expected keys
             for entry in history:
                 if "run_type" in entry and "type" not in entry:
-                    entry["type"] = entry.pop("run_type")
+                    entry["type"] = entry["run_type"]
             # Mark stale "running" entries as crashed
             if not _search_process_alive():
                 for entry in history:
@@ -4730,10 +4698,11 @@ SEARCH_HISTORY_TEMPLATE = """<!DOCTYPE html>
                 <th class="right">Found</th>
                 <th class="right">New</th>
                 <th>Status</th>
+                <th>Details</th>
                 <th>Notes</th>
             </tr>
         </thead>
-        <tbody id="tableBody"><tr><td colspan="8" style="text-align:center;color:#aaa;padding:30px;">Loading...</td></tr></tbody>
+        <tbody id="tableBody"><tr><td colspan="9" style="text-align:center;color:#aaa;padding:30px;">Loading...</td></tr></tbody>
     </table>
 </div>
 <script>
@@ -4746,6 +4715,51 @@ function fmt(iso) {
     var d = new Date(iso.replace('+00:00','Z'));
     return d.toLocaleDateString('en-NZ',{day:'2-digit',month:'short',year:'numeric'})
          + ' ' + d.toLocaleTimeString('en-NZ',{hour:'2-digit',minute:'2-digit'});
+}
+
+function parseConfig(r) {
+    var c = r.config;
+    if (!c) return null;
+    if (typeof c === 'string') { try { c = JSON.parse(c); } catch(e) { return null; } }
+    if (!c || typeof c !== 'object' || Object.keys(c).length === 0) return null;
+    return c;
+}
+
+function configSummary(r) {
+    var c = parseConfig(r);
+    if (!c) return '';
+    var parts = [];
+    if (c.regions) parts.push(c.regions.length + ' regions');
+    if (c.terms) parts.push(c.terms.length + ' terms');
+    if (c.includes) parts.push(c.includes.join(', '));
+    if (c.checks) parts.push(c.check_labels || c.checks.join(', '));
+    if (c.scope) parts.push(c.scope);
+    if (c.fresh) parts.push('fresh');
+    if (c.include_facebook) parts.push('+ Facebook');
+    if (c.include_nationwide) parts.push('+ NZ-wide FB');
+    if (c.time_filter) parts.push(c.time_filter);
+    if (c.test_mode) parts.push('TEST MODE');
+    return parts.join(' &middot; ');
+}
+
+function configDetail(r) {
+    var c = parseConfig(r);
+    if (!c) return '';
+    var lines = [];
+    if (c.regions && c.regions.length <= 20) lines.push('<b>Regions:</b> ' + c.regions.join(', '));
+    else if (c.regions) lines.push('<b>Regions:</b> ' + c.regions.length + ' regions (all NZ)');
+    if (c.terms && c.terms.length <= 10) lines.push('<b>Terms:</b> ' + c.terms.map(function(t){return t;}).join(', '));
+    else if (c.terms) lines.push('<b>Terms:</b> ' + c.terms.length + ' search terms');
+    if (c.includes) lines.push('<b>Includes:</b> ' + c.includes.join(', '));
+    if (c.checks) lines.push('<b>Checks:</b> ' + (c.check_labels || c.checks.join(', ')));
+    if (c.scope) lines.push('<b>Scope:</b> ' + c.scope);
+    if (c.fresh) lines.push('<b>Mode:</b> Fresh (ignore progress)');
+    if (c.include_facebook) lines.push('<b>Facebook:</b> included');
+    if (c.include_nationwide) lines.push('<b>NZ-wide FB:</b> included');
+    if (c.time_filter) lines.push('<b>Time filter:</b> ' + c.time_filter);
+    if (c.test_mode) lines.push('<b>Test mode:</b> limit ' + (c.limit || 5));
+    if (c.imports) lines.push('<b>Imports:</b> ' + c.imports.join(', '));
+    return lines.join('<br>');
 }
 
 function renderStats(rows) {
@@ -4766,35 +4780,59 @@ function renderTable() {
             && (!status || r.status === status)
             && (!search || (r.type||'').toLowerCase().includes(search)
                         || (r.status||'').toLowerCase().includes(search)
-                        || (r.triggered_by||'').toLowerCase().includes(search));
+                        || (r.triggered_by||'').toLowerCase().includes(search)
+                        || configSummary(r).toLowerCase().includes(search));
     });
     if (!rows.length) {
         document.getElementById('tableBody').innerHTML =
-            '<tr><td colspan="8" style="text-align:center;color:#aaa;padding:30px;">No records match.</td></tr>';
+            '<tr><td colspan="9" style="text-align:center;color:#aaa;padding:30px;">No records match.</td></tr>';
         return;
     }
     var html = '';
     rows.forEach(function(r, idx) {
         var col = STATUS_COLORS[r.status] || '#888';
-        var lbl = TYPE_LABELS[r.type] || r.type;
+        var lbl = TYPE_LABELS[r.type] || r.type || '?';
         var dur = r.duration_minutes ? r.duration_minutes + ' min' : (r.status === 'running' ? '(running...)' : '-');
+
+        // Config/details cell
+        var cfgSum = configSummary(r);
+        var cfgDet = configDetail(r);
+        var detailsTd = '';
+        if (cfgSum) {
+            detailsTd = '<td style="max-width:200px;color:#666;font-size:11px;">'
+                + cfgSum
+                + (cfgDet ? ' <a href="#" onclick="toggleDetail(event,' + idx + ');return false;" style="color:#3498db;font-size:10px;">[details]</a>' : '')
+                + '</td>';
+        } else {
+            detailsTd = '<td style="color:#aaa;font-size:11px;">-</td>';
+        }
+
+        // Notes cell
         var notes = r.notes || '';
         var notesTd = '';
-        var notesRow = '';
         if (notes) {
             var short = notes.length > 60 ? notes.substring(0, 60) + '...' : notes;
             notesTd = '<td style="max-width:220px;color:#888;font-size:11px;" title="' + notes.replace(/"/g,'&quot;') + '">'
                 + '<span>' + short.replace(/</g,'&lt;') + '</span>'
                 + (notes.length > 60 ? ' <a href="#" onclick="toggleNotes(event,' + idx + ');return false;" style="color:#3498db;font-size:10px;">[expand]</a>' : '')
                 + '</td>';
-            if (notes.length > 60) {
-                notesRow = '<tr id="notes-' + idx + '" style="display:none;">'
-                    + '<td colspan="8" style="background:#fff8f8;padding:10px 14px;font-size:11px;color:#555;white-space:pre-wrap;font-family:monospace;">'
-                    + notes.replace(/</g,'&lt;') + '</td></tr>';
-            }
         } else {
             notesTd = '<td></td>';
         }
+
+        // Expandable rows
+        var extraRows = '';
+        if (cfgDet) {
+            extraRows += '<tr id="detail-' + idx + '" style="display:none;">'
+                + '<td colspan="9" style="background:#f0f6ff;padding:10px 14px;font-size:12px;color:#333;">'
+                + cfgDet + '</td></tr>';
+        }
+        if (notes && notes.length > 60) {
+            extraRows += '<tr id="notes-' + idx + '" style="display:none;">'
+                + '<td colspan="9" style="background:#fff8f8;padding:10px 14px;font-size:11px;color:#555;white-space:pre-wrap;font-family:monospace;">'
+                + notes.replace(/</g,'&lt;') + '</td></tr>';
+        }
+
         html += '<tr style="' + (r.status==='crashed'?'background:#fff5f5;':r.status==='running'?'background:#fffaf0;':'') + '">'
             + '<td>' + fmt(r.started) + '</td>'
             + '<td>' + lbl + '</td>'
@@ -4803,10 +4841,16 @@ function renderTable() {
             + '<td class="right">' + (r.total_found||0).toLocaleString() + '</td>'
             + '<td class="right" style="font-weight:bold;">' + (r.total_new||0).toLocaleString() + '</td>'
             + '<td><span class="badge" style="background:' + col + '20;color:' + col + ';">' + r.status + '</span></td>'
+            + detailsTd
             + notesTd
-            + '</tr>' + notesRow;
+            + '</tr>' + extraRows;
     });
     document.getElementById('tableBody').innerHTML = html;
+}
+
+function toggleDetail(e, idx) {
+    var row = document.getElementById('detail-' + idx);
+    if (row) row.style.display = row.style.display === 'none' ? '' : 'none';
 }
 
 function toggleNotes(e, idx) {
@@ -4817,12 +4861,18 @@ function toggleNotes(e, idx) {
 fetch('/search-history-data')
     .then(function(r){ return r.json(); })
     .then(function(data) {
+        // Normalise: Supabase uses 'config' as JSON string, file uses object
+        data.forEach(function(r) {
+            if (typeof r.config === 'string') {
+                try { r.config = JSON.parse(r.config); } catch(e) { r.config = null; }
+            }
+        });
         _allRows = data;
         renderStats(data);
         renderTable();
     })
     .catch(function(){ document.getElementById('tableBody').innerHTML =
-        '<tr><td colspan="8" style="text-align:center;color:#e74c3c;padding:30px;">Failed to load history.</td></tr>'; });
+        '<tr><td colspan="9" style="text-align:center;color:#e74c3c;padding:30px;">Failed to load history.</td></tr>'; });
 </script>
 </body>
 </html>"""
@@ -4975,7 +5025,7 @@ def user_access_page():
 def api_allowed_users_get():
     from flask import jsonify
     r = requests.get(f"{SUPABASE_URL}/rest/v1/allowed_users",
-                     params={"select": "id,email,name,added_by,added_at,active,last_login,last_provider",
+                     params={"select": "id,email,name,added_by,added_at,active,last_login,last_provider,is_admin",
                              "order": "added_at.desc"},
                      headers={"apikey": SUPABASE_SERVICE_KEY,
                               "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
@@ -5014,6 +5064,21 @@ def api_allowed_users_delete(uid):
                                  "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
     return jsonify({"ok": r.ok})
 
+@app.route("/api/allowed-users/<uid>/toggle-admin", methods=["POST"])
+def api_allowed_users_toggle_admin(uid):
+    from flask import jsonify
+    if not _is_admin():
+        return jsonify({"ok": False, "error": "admin only"}), 403
+    data = request.json or {}
+    new_val = bool(data.get("is_admin", False))
+    r = requests.patch(f"{SUPABASE_URL}/rest/v1/allowed_users",
+                       params={"id": f"eq.{uid}"},
+                       json={"is_admin": new_val},
+                       headers={"apikey": SUPABASE_SERVICE_KEY,
+                                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                "Prefer": "return=minimal"})
+    return jsonify({"ok": r.ok})
+
 @app.route("/api/login-audit")
 def api_login_audit():
     from flask import jsonify
@@ -5047,6 +5112,9 @@ h2{font-size:15px;font-weight:600;color:#2c3e50;margin:0 0 12px;display:flex;ali
 .btn-add{background:#27ae60;color:white}.btn-add:hover{background:#219a52}
 .btn-del{background:none;border:1px solid #e74c3c;color:#e74c3c;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer}
 .btn-del:hover{background:#e74c3c;color:white}
+.btn-admin{background:none;border:1px solid #8e44ad;color:#8e44ad;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer}
+.btn-admin:hover{background:#8e44ad;color:white}
+.badge-admin{background:#f0e6f6;color:#8e44ad}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th{text-align:left;padding:8px 10px;border-bottom:2px solid #eee;color:#666;font-weight:600;font-size:12px;text-transform:uppercase}
 td{padding:8px 10px;border-bottom:1px solid #f0f0f0;vertical-align:middle}
@@ -5079,7 +5147,7 @@ tr:last-child td{border-bottom:none}
     </div>
     <div id="users-loading" class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</div>
     <table id="users-table" style="display:none">
-      <thead><tr><th>Email</th><th>Name</th><th>Added by</th><th>Added</th><th>Last login</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Email</th><th>Name</th><th>Added by</th><th>Added</th><th>Last login</th><th>Status</th><th>Role</th><th></th></tr></thead>
       <tbody id="users-body"></tbody>
     </table>
   </div>
@@ -5112,12 +5180,21 @@ function loadUsers() {
         rows.forEach(function(u) {
             var tr = document.createElement('tr');
             var removeBtn = IS_ADMIN ? '<button class="btn-del" onclick="removeUser(\\'' + u.id + '\\', \\'' + u.email + '\\')">Remove</button>' : '';
+            var adminCol = '';
+            if (u.is_admin) {
+                adminCol = '<span class="badge badge-admin">Admin</span>';
+                if (IS_ADMIN) adminCol += ' <button class="btn-admin" onclick="toggleAdmin(\\'' + u.id + '\\', false)" title="Revoke admin">Revoke</button>';
+            } else {
+                adminCol = '<span style="color:#999;font-size:12px">User</span>';
+                if (IS_ADMIN) adminCol += ' <button class="btn-admin" onclick="toggleAdmin(\\'' + u.id + '\\', true)" title="Make admin">Make Admin</button>';
+            }
             tr.innerHTML = '<td><strong>' + u.email + '</strong></td>' +
                 '<td>' + (u.name || '—') + '</td>' +
                 '<td>' + (u.added_by || '—') + '</td>' +
                 '<td>' + fmt(u.added_at) + '</td>' +
                 '<td>' + (u.last_login ? fmt(u.last_login) + (u.last_provider ? ' <span class="badge badge-' + u.last_provider + '">' + u.last_provider + '</span>' : '') : '—') + '</td>' +
                 '<td><span class="badge ' + (u.active ? 'badge-active">Active' : 'badge-inactive">Inactive') + '</span></td>' +
+                '<td>' + adminCol + '</td>' +
                 '<td>' + removeBtn + '</td>';
             b.appendChild(tr);
         });
@@ -5139,6 +5216,15 @@ function addUser() {
 function removeUser(id, email) {
     if (!confirm('Remove ' + email + ' from allowed users?')) return;
     fetch('/api/allowed-users/' + id, {method:'DELETE'}).then(function(){loadUsers();});
+}
+function toggleAdmin(id, makeAdmin) {
+    var msg = makeAdmin ? 'Grant admin privileges to this user?' : 'Revoke admin privileges from this user?';
+    if (!confirm(msg)) return;
+    fetch('/api/allowed-users/' + id + '/toggle-admin', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({is_admin: makeAdmin})
+    }).then(function(r){return r.json();}).then(function(d){
+        if (d.ok) loadUsers(); else alert('Failed to update admin status.');
+    });
 }
 function loadAudit() {
     fetch('/api/login-audit').then(function(r){

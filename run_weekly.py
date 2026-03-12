@@ -17,7 +17,7 @@ from searcher import (
     find_email_via_google, find_facebook_url, find_linkedin_url,
     get_root_domain, get_domain_record,
     company_exists, process_and_save_company, check_schema,
-    write_status, clear_status, append_history, check_pause,
+    write_status, clear_status, append_history, record_search_start, check_pause,
     RUNNING_FLAG, PAUSE_FLAG, SKIP_DOMAINS, NZ_REGIONS, SERPAPI_EXHAUSTED,
     is_directory_listing_url,
     reset_session_log, reset_token_usage, get_session_log, send_search_email,
@@ -40,6 +40,7 @@ PAUSE_FLAG = os.path.join(BASE_DIR, "pause.flag")
 
 def run_weekly(triggered_by="manual"):
     started_iso = datetime.now(timezone.utc).isoformat()
+    _config = {"regions": list(NZ_REGIONS), "terms": list(WEEKLY_TERMS), "time_filter": "last 7 days"}
     reset_session_log()
     print("=" * 60)
     print("  PSPLA Weekly Light Scan (last 7 days)")
@@ -55,7 +56,7 @@ def run_weekly(triggered_by="manual"):
     open(RUNNING_FLAG, "w").close()
     reset_token_usage()
     reset_serp_query_count()
-    record_search_start("google-weekly", started_iso, triggered_by)
+    record_search_start("google-weekly", started_iso, triggered_by, config=_config)
     total_found = 0
     total_new = 0
     found_urls = set()
@@ -79,7 +80,7 @@ def run_weekly(triggered_by="manual"):
                 if results is SERPAPI_EXHAUSTED:
                     print("\n  [STOPPED] SerpAPI exhausted.")
                     append_history("google-weekly", started_iso, total_found, total_new,
-                                   "stopped", triggered_by)
+                                   "stopped", triggered_by, config=_config)
                     send_search_email("google-weekly", started_iso, total_found, total_new, triggered_by, get_session_log())
                     return
 
@@ -138,7 +139,7 @@ def run_weekly(triggered_by="manual"):
                         total_new += 1
 
         append_history("google-weekly", started_iso, total_found, total_new,
-                       "completed", triggered_by)
+                       "completed", triggered_by, config=_config)
         send_search_email("google-weekly", started_iso, total_found, total_new, triggered_by, get_session_log())
 
     finally:

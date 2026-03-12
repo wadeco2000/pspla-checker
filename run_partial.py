@@ -67,7 +67,9 @@ def run_partial(triggered_by="manual", fresh=False):
     if os.path.exists(PAUSE_FLAG):
         os.remove(PAUSE_FLAG)
     open(RUNNING_FLAG, "w").close()
-    record_search_start("google-partial", started_iso, triggered_by)
+    _hist_config = {"regions": regions, "terms": google_terms,
+                     "include_facebook": include_facebook, "include_nationwide": include_nationwide}
+    record_search_start("google-partial", started_iso, triggered_by, config=_hist_config)
     total_found = 0
     total_new = 0
     found_urls = set()
@@ -104,7 +106,7 @@ def run_partial(triggered_by="manual", fresh=False):
                     if results is SERPAPI_EXHAUSTED:
                         print("\n  [STOPPED] SerpAPI exhausted.")
                         append_history("google-partial", started_iso, total_found, total_new,
-                                       "stopped", triggered_by)
+                                       "stopped", triggered_by, config=_hist_config)
                         send_search_email("google-partial", started_iso, total_found, total_new, triggered_by, get_session_log())
                         return
 
@@ -183,7 +185,7 @@ def run_partial(triggered_by="manual", fresh=False):
             save_partial_progress(partial_progress)
 
         append_history("google-partial", started_iso, total_found, total_new,
-                       "completed", triggered_by)
+                       "completed", triggered_by, config=_hist_config)
         send_search_email("google-partial", started_iso, total_found, total_new, triggered_by, get_session_log())
         clear_partial_progress()
 
@@ -192,7 +194,7 @@ def run_partial(triggered_by="manual", fresh=False):
         print(f"\n  [CRASH] Unhandled exception in Partial search: {e}")
         print(tb)
         append_history("google-partial", started_iso, total_found, total_new,
-                       f"error: {type(e).__name__}: {e}", triggered_by, notes=tb[:1500])
+                       f"error: {type(e).__name__}: {e}", triggered_by, notes=tb[:1500], config=_hist_config)
         raise
 
     finally:

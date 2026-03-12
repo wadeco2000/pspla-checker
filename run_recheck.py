@@ -519,7 +519,8 @@ def run_recheck(triggered_by="manual"):
     if os.path.exists(PAUSE_FLAG):
         os.remove(PAUSE_FLAG)
     open(RUNNING_FLAG, "w").close()
-    record_search_start("bulk-recheck", started_iso, triggered_by)
+    _hist_config = {"checks": checks, "check_labels": check_label, "scope": scope_label}
+    record_search_start("bulk-recheck", started_iso, triggered_by, config=_hist_config)
 
     total_processed = 0
     total_updated = 0
@@ -569,7 +570,7 @@ def run_recheck(triggered_by="manual"):
             total_processed += 1
 
         append_history("bulk-recheck", started_iso, total_processed, total_updated,
-                       "completed", triggered_by)
+                       "completed", triggered_by, config=_hist_config)
         send_search_email("bulk-recheck", started_iso, total_processed, total_updated,
                           triggered_by, get_session_log(), checks_label=check_label,
                           total_edits=total_edits)
@@ -579,7 +580,7 @@ def run_recheck(triggered_by="manual"):
         print(f"\n  [CRASH] Unhandled exception in Bulk Recheck: {e}")
         print(tb)
         append_history("bulk-recheck", started_iso, total_processed, total_updated,
-                       f"error: {type(e).__name__}: {e}", triggered_by, notes=tb[:1500])
+                       f"error: {type(e).__name__}: {e}", triggered_by, notes=tb[:1500], config=_hist_config)
         raise
 
     finally:

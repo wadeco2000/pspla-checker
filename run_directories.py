@@ -42,6 +42,14 @@ if __name__ == "__main__":
         raise SystemExit(0)
 
     started_iso = datetime.now(timezone.utc).isoformat()
+    _imports = []
+    if not linkedin_only:
+        _imports.append("nzsa")
+    if not nzsa_only:
+        _imports.append("linkedin")
+    _config = {"imports": _imports, "fresh": fresh, "test_mode": test_mode}
+    if test_mode:
+        _config["limit"] = 5
 
     print("=" * 60)
     print("  PSPLA Directory Import (NZSA + LinkedIn)")
@@ -60,7 +68,7 @@ if __name__ == "__main__":
     reset_token_usage()
     reset_serp_query_count()
     open(RUNNING_FLAG, "w").close()
-    record_search_start("directories", started_iso, triggered_by)
+    record_search_start("directories", started_iso, triggered_by, config=_config)
 
     found_urls = set()
     total_found = 0
@@ -77,7 +85,7 @@ if __name__ == "__main__":
             total_found += li_found
             total_new += li_new
 
-        append_history("directories", started_iso, total_found, total_new, "completed", triggered_by)
+        append_history("directories", started_iso, total_found, total_new, "completed", triggered_by, config=_config)
         send_search_email("directories", started_iso, total_found, total_new, triggered_by, get_session_log())
         clear_dir_progress()
 
@@ -86,7 +94,7 @@ if __name__ == "__main__":
         print(f"\n  [CRASH] Unhandled exception in Directory import: {e}")
         print(tb)
         append_history("directories", started_iso, total_found, total_new,
-                       f"error: {type(e).__name__}: {e}", triggered_by, notes=tb[:1500])
+                       f"error: {type(e).__name__}: {e}", triggered_by, notes=tb[:1500], config=_config)
         raise
 
     finally:

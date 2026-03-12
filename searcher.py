@@ -981,14 +981,23 @@ def find_facebook_url(company_name, page_text=""):
 
     try:
         all_candidates = []
+        _serp_exhausted = False
 
         for term in search_terms:
             r1 = google_search(f'site:facebook.com "{term}"', num_results=50)
-            if r1 and r1 is not SERPAPI_EXHAUSTED:
+            if r1 is SERPAPI_EXHAUSTED:
+                _serp_exhausted = True
+            elif r1:
                 all_candidates += _extract_fb_candidates(r1)
             r2 = google_search(f'"{term}" facebook', num_results=50)
-            if r2 and r2 is not SERPAPI_EXHAUSTED:
+            if r2 is SERPAPI_EXHAUSTED:
+                _serp_exhausted = True
+            elif r2:
                 all_candidates += _extract_fb_candidates(r2)
+
+        if _serp_exhausted and not all_candidates:
+            print(f"  [Facebook] SerpAPI exhausted — skipped FB lookup for {company_name}")
+            return None
 
         # Dedupe by URL, track score, NZ signal, and best snippet
         best_per_url = {}  # url -> (total_score, has_nz_signal, snippet)
@@ -1001,6 +1010,10 @@ def find_facebook_url(company_name, page_text=""):
                 best_per_url[url] = (total, has_nz, snippet)
 
         if not best_per_url:
+            if _serp_exhausted:
+                print(f"  [Facebook] SerpAPI exhausted — no candidates for {company_name}")
+            else:
+                print(f"  [Facebook] No candidates found for {company_name} (searched: {search_terms})")
             return None
 
         ranked = sorted(best_per_url.items(), key=lambda x: -x[1][0])
@@ -1016,8 +1029,13 @@ def find_facebook_url(company_name, page_text=""):
             return _pick(*nz_results[0])
 
         # No NZ signal found — try one targeted search before giving up
+        non_nz_urls = [url for url, _ in ranked[:3]]
+        print(f"  [Facebook] {len(ranked)} candidates but none with NZ signal for {company_name}"
+              f" (top: {non_nz_urls})")
         r_nz = google_search(f'site:facebook.com "{company_name}" "New Zealand"', num_results=10)
-        if r_nz and r_nz is not SERPAPI_EXHAUSTED:
+        if r_nz is SERPAPI_EXHAUSTED:
+            print(f"  [Facebook] SerpAPI exhausted during NZ-targeted search for {company_name}")
+        elif r_nz:
             nz_extra = _extract_fb_candidates(r_nz)
             nz_extra_signal = [(u, s, t) for u, s, t in nz_extra if _nz_bonus(u, s, t) > 0]
             if nz_extra_signal:
@@ -1066,10 +1084,11 @@ def find_facebook_url(company_name, page_text=""):
         except Exception as _ai_e:
             print(f"  [Facebook] AI fallback error: {_ai_e}")
 
+        print(f"  [Facebook] All strategies exhausted — no FB page found for {company_name}")
         return None
 
-    except Exception:
-        pass
+    except Exception as _fb_e:
+        print(f"  [Facebook] Error searching for {company_name}: {_fb_e}")
     return None
 
 
@@ -4278,10 +4297,11 @@ def clear_status():
     })
 
 
-def record_search_start(run_type, started_iso, triggered_by):
+def record_search_start(run_type, started_iso, triggered_by, config=None):
     """Write a 'running' sentinel to history at search start.
     If the process crashes without calling append_history(), this entry remains
-    visible in the history so you can see the search started but never finished."""
+    visible in the history so you can see the search started but never finished.
+    config: optional dict of search parameters (regions, terms, options, etc.)"""
     enable_terminal_capture()
     record = {
         "type": run_type,
@@ -4293,6 +4313,7 @@ def record_search_start(run_type, started_iso, triggered_by):
         "status": "running",
         "triggered_by": triggered_by,
         "notes": "",
+        "config": config or {},
     }
     history = []
     if os.path.exists(HISTORY_FILE):
@@ -4318,11 +4339,12 @@ def record_search_start(run_type, started_iso, triggered_by):
     _insert_search_run({
         "run_type": run_type, "started": started_iso, "status": "running",
         "triggered_by": triggered_by,
+        "config": json.dumps(config) if config else None,
     })
     _push_search_status(True, search_type=run_type, progress="Starting...", log_lines="")
 
 
-def append_history(run_type, started_iso, total_found, total_new, status="completed", triggered_by="manual", notes=""):
+def append_history(run_type, started_iso, total_found, total_new, status="completed", triggered_by="manual", notes="", config=None):
     """Append a run record to search_history.json (newest first, capped at 100).
     Replaces any 'running' sentinel written by record_search_start() for the same started_iso."""
     finished = datetime.now(timezone.utc)
@@ -4341,6 +4363,7 @@ def append_history(run_type, started_iso, total_found, total_new, status="comple
         "status": status,
         "triggered_by": triggered_by,
         "notes": notes,
+        "config": config or {},
     }
     history = []
     if os.path.exists(HISTORY_FILE):
@@ -4368,7 +4391,8 @@ def append_history(run_type, started_iso, total_found, total_new, status="comple
             f"{SUPABASE_URL}/rest/v1/search_runs?run_type=eq.{run_type}&status=eq.running",
             headers=_patch_h,
             json={"finished": finished.isoformat(), "duration_minutes": duration_minutes,
-                  "total_found": total_found, "total_new": total_new, "status": status},
+                  "total_found": total_found, "total_new": total_new, "status": status,
+                  "notes": notes or None, "config": json.dumps(config) if config else None},
             timeout=8
         )
     except Exception:
@@ -5932,7 +5956,9 @@ def run_search(triggered_by="manual"):
     print("  PSPLA Security Camera Company Checker")
     print("=" * 60)
     started_iso = datetime.now(timezone.utc).isoformat()
-    record_search_start("full", started_iso, triggered_by)
+    _full_config = {"regions": list(NZ_REGIONS), "terms": list(SEARCH_TERMS),
+                    "includes": ["facebook", "nzsa", "linkedin"]}
+    record_search_start("full", started_iso, triggered_by, config=_full_config)
     reset_session_log()
     reset_token_usage()
     reset_serp_query_count()
@@ -5986,7 +6012,7 @@ def run_search(triggered_by="manual"):
                     print(f"  Progress saved — completed regions: {', '.join(completed_regions) or 'none'}")
                     print("  Upgrade your SerpAPI plan or wait for next month, then re-run to resume.")
                     save_progress(completed_regions, total_found, total_new)
-                    append_history("full", started_iso, total_found, total_new, "stopped", triggered_by)
+                    append_history("full", started_iso, total_found, total_new, "stopped", triggered_by, config=_full_config)
                     return
 
                 for result in results:
@@ -6078,7 +6104,7 @@ def run_search(triggered_by="manual"):
         total_new += li_new
 
         clear_progress()
-        append_history("full", started_iso, total_found, total_new, "completed", triggered_by)
+        append_history("full", started_iso, total_found, total_new, "completed", triggered_by, config=_full_config)
         send_search_email("full", started_iso, total_found, total_new, triggered_by, get_session_log())
 
     except Exception as e:
@@ -6088,7 +6114,7 @@ def run_search(triggered_by="manual"):
         print(tb)
         append_history("full", started_iso, total_found, total_new,
                        f"error: {type(e).__name__}: {e}", triggered_by,
-                       notes=tb[:1500])
+                       notes=tb[:1500], config=_full_config)
         raise
 
     finally:

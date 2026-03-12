@@ -34,6 +34,7 @@ if __name__ == "__main__":
         raise SystemExit(0)
 
     started_iso = datetime.now(timezone.utc).isoformat()
+    _config = {"fresh": fresh}
 
     print("=" * 60)
     print("  PSPLA Facebook Search Pass")
@@ -50,10 +51,10 @@ if __name__ == "__main__":
     reset_token_usage()
     reset_serp_query_count()
     open(RUNNING_FLAG, "w").close()
-    record_search_start("facebook", started_iso, triggered_by)
+    record_search_start("facebook", started_iso, triggered_by, config=_config)
     try:
         fb_found, fb_new = run_facebook_search(set(), fresh=fresh)
-        append_history("facebook", started_iso, fb_found, fb_new, "completed", triggered_by)
+        append_history("facebook", started_iso, fb_found, fb_new, "completed", triggered_by, config=_config)
         send_search_email("facebook", started_iso, fb_found, fb_new, triggered_by, get_session_log())
         clear_fb_progress()
     except Exception as e:
@@ -61,7 +62,7 @@ if __name__ == "__main__":
         print(f"\n  [CRASH] Unhandled exception in Facebook search: {e}")
         print(tb)
         append_history("facebook", started_iso, 0, 0, f"error: {type(e).__name__}: {e}", triggered_by,
-                       notes=tb[:1500])
+                       notes=tb[:1500], config=_config)
         raise
     finally:
         clear_status()

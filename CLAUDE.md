@@ -12,8 +12,8 @@ Owned and operated by Wade. The goal is to build a comprehensive list of every N
 - **Supabase** — PostgreSQL database, accessed via REST API with `apikey` header
 - **Anthropic Claude API** — Haiku for fast tasks, Sonnet for deep verification
 - **SerpAPI** — Google search wrapper (all web searches go through this, paid per query)
-- **APScheduler** — scheduled runs inside dashboard.py process (4 scheduled jobs)
-- **Windows 11** host, launched via `.bat` file, system tray icon via `tray.py`
+- **GitHub Actions** — scheduled searches (full, weekly, facebook, directories) run via cron workflows
+- **Azure App Service** — hosts the Flask dashboard (Linux container)
 - **BeautifulSoup** — HTML scraping
 - **StatiCrypt** — AES-256 client-side encryption for public GitHub Pages site
 - **Dropbox API** — automatic CSV backups to Dropbox on backup and clear-db
@@ -24,13 +24,12 @@ Owned and operated by Wade. The goal is to build a comprehensive list of every N
 
 | File | Purpose |
 |------|---------|
-| `searcher.py` | Core engine — all search, scrape, match, verify, save logic (~5000 lines) |
-| `dashboard.py` | Flask web UI + scheduler + all API endpoints (~4900 lines) |
+| `searcher.py` | Core engine — all search, scrape, match, verify, save logic (~6000 lines) |
+| `dashboard.py` | Flask web UI + all API endpoints (~8400 lines) |
 | `run_weekly.py` | Entry point: Google weekly light scan (last 7 days, 5 broad terms) |
 | `run_facebook.py` | Entry point: Facebook-only search pass |
 | `run_directories.py` | Entry point: NZSA + LinkedIn directory import |
 | `run_partial.py` | Entry point: user-configured partial search (reads `partial_config.json`) |
-| `tray.py` | Windows system tray icon — start/stop the dashboard bat process |
 | `generate_static.py` | Generates public GitHub Pages site — HTML with JS that fetches from Supabase at runtime. Encrypts output with StatiCrypt. |
 | `review.py` | Standalone correction/review tool (CLI) |
 | `search_terms.json` | Google + Facebook search terms, editable from dashboard Terms panel |
@@ -223,21 +222,20 @@ Stop & Start New: calls `POST /stop-search`, waits 2 seconds, then runs the call
 
 ---
 
-## Scheduled Searches (APScheduler in dashboard.py)
+## Scheduled Searches (GitHub Actions)
 
-APScheduler runs as a background thread inside the dashboard.py process. The **browser tab does not need to be open** — only the tray icon / bat process must be running.
+Searches run via GitHub Actions workflows in `.github/workflows/`. Each workflow calls its `run_*.py` script with `--scheduled`.
 
-| Schedule | Search | Script |
-|----------|--------|--------|
-| 1st of month, 2am NZ | Full Search | `searcher.py --scheduled` |
-| 8th, 15th, 22nd, 2am NZ | Weekly Scan | `run_weekly.py --scheduled` |
-| Tue & Fri, 3am NZ | Facebook Search | `run_facebook.py --scheduled` |
-| 15th of month, 4am NZ | Directory Import | `run_directories.py --scheduled` |
+| Schedule | Search | Workflow |
+|----------|--------|----------|
+| 1st of month, 2am NZ | Full Search | `scheduled-full.yml` |
+| 8th, 15th, 22nd, 2am NZ | Weekly Scan | `scheduled-weekly.yml` |
+| Tue & Fri, 3am NZ | Facebook Search | `scheduled-facebook.yml` |
+| 15th of month, 4am NZ | Directory Import | `scheduled-directories.yml` |
 
-- Timezone: `Pacific/Auckland`
-- If a search is already running when a job fires, it silently skips (`_launch()` checks `_search_process_alive()`)
-- Enable/disable via Database menu → Scheduled Searches panel → Enabled/Disabled button (creates/removes `schedule_enabled.flag`)
-- All `_scheduled_*` functions check `schedule_enabled.flag` before calling `_launch()`
+- All scripts check `is_schedule_enabled()` (Supabase flag) before running — exits silently if disabled
+- Enable/disable via Database menu → Scheduled Searches panel → Enabled/Disabled toggle
+- Dashboard shows link to GitHub Actions runs page
 
 ---
 
@@ -277,6 +275,28 @@ APScheduler runs as a background thread inside the dashboard.py process. The **b
 | `/rollback/<hash>` | Runs `git stash` or `git reset --hard <hash>` |
 | `/llm-log` | View `llm_debug.log` |
 | `/llm-log/clear` | Clears `llm_debug.log` |
+| `/user-access` | User Access page — manage allowed users, view login audit |
+| `/api/allowed-users` | GET: list users. POST: add user (admin only) |
+| `/api/allowed-users/<id>` | DELETE: remove user (admin only) |
+| `/api/allowed-users/<id>/toggle-admin` | POST: toggle `is_admin` flag (admin only) |
+| `/api/login-audit` | GET: last 200 login attempts |
+
+---
+
+## User Access & Admin System
+
+**Authentication:** Google OAuth (via Supabase Auth) or localhost password login. Google users must be in the `allowed_users` table with `active=true`.
+
+**Admin detection** (`_is_admin()`):
+1. Password login (localhost) → always admin
+2. `session['is_admin']` set from `allowed_users.is_admin` column during Google login
+3. Email matches `NOTIFY_EMAIL` env var → always admin
+
+**Admin-only actions:** Add/remove users, toggle admin status. New users default to `is_admin=false`.
+
+**Supabase tables:**
+- `allowed_users` — `id, email, name, added_by, added_at, active, last_login, last_provider, is_admin`
+- `login_audit` — `id, email, provider, result, attempted_at, user_agent`
 
 ---
 
