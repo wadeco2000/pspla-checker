@@ -348,8 +348,8 @@ h2{color:white;margin:0 0 6px}p.sub{color:#aac;font-size:13px;margin:0 0 26px}
 .pw-input{width:100%;padding:10px 12px;border-radius:6px;border:1px solid #4a6080;background:#1a2d42;color:white;font-size:14px;margin-bottom:10px}
 .btn-unlock{width:100%;padding:10px;border:none;border-radius:6px;background:#27ae60;color:white;font-size:14px;cursor:pointer}
 .btn-unlock:hover{background:#219a52}
-.msg{font-size:12px;margin-top:12px;min-height:18px}
-.msg.error{color:#e74c3c}.msg.info{color:#aac}
+.msg{font-size:12px;margin-top:12px;min-height:18px;line-height:1.5}
+.msg.error{color:#e74c3c}.msg.info{color:#aac}.msg.warn{color:#f39c12}.msg.reject{color:#e74c3c}
 </style>
 </head>
 <body><div class="card">
@@ -407,9 +407,27 @@ def login_page():
         '<button class="btn-unlock" onclick="checkPassword()">Unlock</button>'
     ) if is_local else ''
     err = request.args.get('e', '')
-    msg = 'Your Google account is not on the authorised list.' if err == 'denied' else (
-          'Sign-in error — please try again.' if err else '')
-    msg_class = 'error' if err else ''
+    _login_msgs = {
+        'denied': ('Your Google account is not on the authorised list.', 'error'),
+        'access_requested': (
+            '<i class="fa-solid fa-paper-plane" style="margin-right:4px"></i> '
+            'Your access request has been sent to the administrator. '
+            'You\'ll receive an email when your access is approved.', 'warn'),
+        'access_pending': (
+            '<i class="fa-solid fa-clock" style="margin-right:4px"></i> '
+            'Your access request is still pending review by the administrator. '
+            'Please check back later.', 'warn'),
+        'access_rejected': (
+            '<i class="fa-solid fa-circle-xmark" style="margin-right:4px"></i> '
+            'Unfortunately your access request was not approved at this time. '
+            'If you believe this is an error, please contact the administrator.', 'reject'),
+    }
+    if err in _login_msgs:
+        msg, msg_class = _login_msgs[err]
+    elif err:
+        msg, msg_class = 'Sign-in error — please try again.', 'error'
+    else:
+        msg, msg_class = '', ''
     html = (_DASH_LOGIN_HTML
             .replace('__SB_URL__', SUPABASE_URL or '')
             .replace('__SB_ANON__', SUPABASE_ANON_KEY or '')
@@ -502,17 +520,48 @@ def auth_verify():
             except Exception:
                 pass
             return _jsonify_auth({'ok': True})
-        # Not in allowed list
+        # Not in allowed list — check for existing access request
+        _ua = request.headers.get('User-Agent', '')
+        try:
+            _ar = requests.get(f"{SUPABASE_URL}/rest/v1/access_requests",
+                               params={'email': f'eq.{email}', 'order': 'requested_at.desc', 'limit': '1',
+                                       'select': 'id,status'},
+                               headers={'apikey': SUPABASE_SERVICE_KEY,
+                                        'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}'},
+                               timeout=10)
+            _existing = _ar.json()[0] if _ar.ok and _ar.json() else None
+        except Exception:
+            _existing = None
+        if _existing and _existing.get('status') == 'pending':
+            # Already pending — don't send another email
+            _result = 'access_pending'
+            _error = 'access_pending'
+        else:
+            # No request or previously rejected — create new pending request
+            try:
+                requests.post(f"{SUPABASE_URL}/rest/v1/access_requests",
+                              json={'email': email, 'status': 'pending'},
+                              headers={'apikey': SUPABASE_SERVICE_KEY,
+                                       'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}',
+                                       'Prefer': 'return=minimal'},
+                              timeout=10)
+            except Exception:
+                pass
+            # Send email to admin (async)
+            threading.Thread(target=_send_access_request_email,
+                             args=(email, _ua), daemon=True).start()
+            _result = 'access_requested'
+            _error = 'access_requested'
         try:
             requests.post(f"{SUPABASE_URL}/rest/v1/login_audit",
-                          json={'email': email, 'provider': 'google', 'result': 'denied',
-                                'user_agent': request.headers.get('User-Agent', '')},
+                          json={'email': email, 'provider': 'google', 'result': _result,
+                                'user_agent': _ua},
                           headers={'apikey': SUPABASE_SERVICE_KEY,
                                    'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}'},
                           timeout=5)
         except Exception:
             pass
-        return _jsonify_auth({'ok': False, 'error': 'denied'})
+        return _jsonify_auth({'ok': False, 'error': _error})
     except Exception:
         return _jsonify_auth({'ok': False, 'error': 'db_error'})
 
@@ -5456,6 +5505,126 @@ def audit_log_page():
     return Response(AUDIT_LOG_TEMPLATE, mimetype='text/html')
 
 
+def _send_access_request_email(requester_email, user_agent):
+    """Send a fancy HTML email to the admin when someone requests access."""
+    if not SMTP_HOST or not SMTP_USER or not SMTP_PASS or not NOTIFY_EMAIL:
+        return
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    dashboard_url = request.host_url.rstrip('/') if request else "https://pspla-checker.azurewebsites.net"
+    user_access_url = f"{dashboard_url}/user-access"
+    now_str = datetime.now(timezone.utc).strftime('%d %b %Y at %H:%M UTC')
+    # Parse device info from user agent
+    device = 'Unknown device'
+    if user_agent:
+        if 'iPhone' in user_agent:
+            device = 'iPhone'
+        elif 'Android' in user_agent:
+            device = 'Android device'
+        elif 'Mac' in user_agent:
+            device = 'Mac'
+        elif 'Windows' in user_agent:
+            device = 'Windows PC'
+        elif 'Linux' in user_agent:
+            device = 'Linux'
+    html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#f0f4f8;font-family:Arial,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f8;padding:40px 20px">
+  <tr><td align="center">
+    <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08)">
+
+      <!-- Header -->
+      <tr>
+        <td style="background:linear-gradient(135deg,#4a1a2e 0%,#8e3a5e 100%);padding:36px 40px;text-align:center">
+          <div style="font-size:28px;margin-bottom:8px">🔔</div>
+          <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;letter-spacing:-0.3px">New Access Request</h1>
+          <p style="margin:8px 0 0;color:#f0b0c8;font-size:14px">Someone wants access to the PSPLA Dashboard</p>
+        </td>
+      </tr>
+
+      <!-- Body -->
+      <tr>
+        <td style="padding:36px 40px">
+          <p style="margin:0 0 24px;font-size:15px;color:#4a5568;line-height:1.6">
+            A new user has attempted to sign in and is requesting access to the PSPLA Licence Checker dashboard.
+          </p>
+
+          <!-- Request details box -->
+          <table width="100%" cellpadding="0" cellspacing="0" style="background:#fef6e4;border:1px solid #f6e05e;border-radius:8px;margin-bottom:28px">
+            <tr>
+              <td style="padding:20px 24px">
+                <table cellpadding="0" cellspacing="0" width="100%">
+                  <tr>
+                    <td style="padding:6px 0;font-size:13px;color:#975a16;font-weight:700;width:90px">Email</td>
+                    <td style="padding:6px 0;font-size:15px;color:#744210;font-weight:600">{requester_email}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:6px 0;font-size:13px;color:#975a16;font-weight:700">Requested</td>
+                    <td style="padding:6px 0;font-size:14px;color:#744210">{now_str}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:6px 0;font-size:13px;color:#975a16;font-weight:700">Device</td>
+                    <td style="padding:6px 0;font-size:14px;color:#744210">{device}</td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+
+          <!-- CTA button -->
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td align="center" style="padding-bottom:28px">
+                <a href="{user_access_url}" style="display:inline-block;background:linear-gradient(135deg,#2b6cb0 0%,#3182ce 100%);color:#ffffff;text-decoration:none;padding:14px 36px;border-radius:8px;font-size:15px;font-weight:700;letter-spacing:0.3px">
+                  Review Request
+                </a>
+              </td>
+            </tr>
+          </table>
+
+          <p style="margin:0;font-size:14px;color:#718096;line-height:1.6">
+            You can <strong>approve</strong> or <strong>reject</strong> this request from the User Access page. If approved, the user will receive a welcome email with login instructions.
+          </p>
+        </td>
+      </tr>
+
+      <!-- Footer -->
+      <tr>
+        <td style="background:#f7fafc;border-top:1px solid #e2e8f0;padding:20px 40px;text-align:center">
+          <p style="margin:0;font-size:12px;color:#a0aec0">PSPLA Licence Checker &nbsp;&middot;&nbsp; New Zealand &nbsp;&middot;&nbsp; Admin Notification</p>
+        </td>
+      </tr>
+
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>"""
+    plain = (f"New Access Request\n\n"
+             f"Email: {requester_email}\n"
+             f"Requested: {now_str}\n"
+             f"Device: {device}\n\n"
+             f"Review this request at: {user_access_url}\n\n"
+             f"You can approve or reject from the User Access page.")
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"Access Request — {requester_email} wants to join PSPLA Dashboard"
+        msg["From"] = SMTP_USER
+        msg["To"] = NOTIFY_EMAIL
+        msg.attach(MIMEText(plain, "plain"))
+        msg.attach(MIMEText(html, "html"))
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_USER, NOTIFY_EMAIL, msg.as_string())
+    except Exception as e:
+        print(f"[access request email] failed to send: {e}")
+
+
 def _send_welcome_email(to_email, to_name, added_by):
     """Send a welcome email to a newly added allowed user."""
     if not SMTP_HOST or not SMTP_USER or not SMTP_PASS:
@@ -6191,6 +6360,110 @@ def api_login_audit():
                               "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
     return jsonify(r.json() if r.ok else [])
 
+@app.route("/api/access-requests")
+def api_access_requests():
+    from flask import jsonify
+    if not _is_admin():
+        return jsonify({"ok": False, "error": "admin only"}), 403
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/access_requests",
+                     params={"select": "id,email,status,requested_at,reviewed_by,reviewed_at,reject_reason",
+                             "order": "requested_at.desc", "limit": "100"},
+                     headers={"apikey": SUPABASE_SERVICE_KEY,
+                              "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
+    return jsonify(r.json() if r.ok else [])
+
+@app.route("/api/access-requests/<rid>/approve", methods=["POST"])
+def api_access_request_approve(rid):
+    from flask import jsonify
+    if not _is_admin():
+        return jsonify({"ok": False, "error": "admin only"}), 403
+    admin_email = session.get("email", "admin")
+    # Get the request details
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/access_requests",
+                     params={"id": f"eq.{rid}", "select": "id,email,status"},
+                     headers={"apikey": SUPABASE_SERVICE_KEY,
+                              "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                     timeout=10)
+    if not r.ok or not r.json():
+        return jsonify({"ok": False, "error": "request not found"})
+    req = r.json()[0]
+    email = req["email"]
+    # Mark as approved
+    requests.patch(f"{SUPABASE_URL}/rest/v1/access_requests",
+                   params={"id": f"eq.{rid}"},
+                   json={"status": "approved", "reviewed_by": admin_email,
+                         "reviewed_at": datetime.now(timezone.utc).isoformat()},
+                   headers={"apikey": SUPABASE_SERVICE_KEY,
+                            "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                            "Prefer": "return=minimal"},
+                   timeout=10)
+    # Add to allowed_users (if not already there)
+    existing = requests.get(f"{SUPABASE_URL}/rest/v1/allowed_users",
+                            params={"email": f"eq.{email}", "select": "id"},
+                            headers={"apikey": SUPABASE_SERVICE_KEY,
+                                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                            timeout=10)
+    if not (existing.ok and existing.json()):
+        requests.post(f"{SUPABASE_URL}/rest/v1/allowed_users",
+                      json={"email": email, "name": "", "added_by": admin_email, "active": True},
+                      headers={"apikey": SUPABASE_SERVICE_KEY,
+                               "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                               "Prefer": "return=minimal"},
+                      timeout=10)
+    # Send welcome email
+    threading.Thread(target=_send_welcome_email, args=(email, "", admin_email), daemon=True).start()
+    # Audit log
+    try:
+        requests.post(f"{SUPABASE_URL}/rest/v1/login_audit",
+                      json={"email": admin_email, "provider": "admin",
+                            "result": "access_approved",
+                            "user_agent": f"Approved access for {email}"},
+                      headers={"apikey": SUPABASE_SERVICE_KEY,
+                               "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                      timeout=5)
+    except Exception:
+        pass
+    return jsonify({"ok": True})
+
+@app.route("/api/access-requests/<rid>/reject", methods=["POST"])
+def api_access_request_reject(rid):
+    from flask import jsonify
+    if not _is_admin():
+        return jsonify({"ok": False, "error": "admin only"}), 403
+    admin_email = session.get("email", "admin")
+    reason = (request.json or {}).get("reason", "")
+    # Get the request details
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/access_requests",
+                     params={"id": f"eq.{rid}", "select": "id,email"},
+                     headers={"apikey": SUPABASE_SERVICE_KEY,
+                              "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                     timeout=10)
+    if not r.ok or not r.json():
+        return jsonify({"ok": False, "error": "request not found"})
+    req_email = r.json()[0]["email"]
+    # Mark as rejected
+    requests.patch(f"{SUPABASE_URL}/rest/v1/access_requests",
+                   params={"id": f"eq.{rid}"},
+                   json={"status": "rejected", "reviewed_by": admin_email,
+                         "reviewed_at": datetime.now(timezone.utc).isoformat(),
+                         "reject_reason": reason or None},
+                   headers={"apikey": SUPABASE_SERVICE_KEY,
+                            "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                            "Prefer": "return=minimal"},
+                   timeout=10)
+    # Audit log
+    try:
+        requests.post(f"{SUPABASE_URL}/rest/v1/login_audit",
+                      json={"email": admin_email, "provider": "admin",
+                            "result": "access_rejected_admin",
+                            "user_agent": f"Rejected access for {req_email}"},
+                      headers={"apikey": SUPABASE_SERVICE_KEY,
+                               "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                      timeout=5)
+    except Exception:
+        pass
+    return jsonify({"ok": True})
+
 
 _USER_ACCESS_HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -6226,8 +6499,26 @@ tr:last-child td{border-bottom:none}
 .badge-inactive{background:#fde8e8;color:#c0392b}
 .badge-allowed{background:#d5f5e3;color:#1e8449}
 .badge-denied{background:#fde8e8;color:#c0392b}
+.badge-pending{background:#fef6e4;color:#d69e2e}
+.badge-approved{background:#d5f5e3;color:#1e8449}
+.badge-rejected{background:#fde8e8;color:#c0392b}
+.btn-approve{background:#27ae60;color:white;border:none;padding:5px 12px;border-radius:4px;font-size:12px;cursor:pointer;font-weight:600}
+.btn-approve:hover{background:#219a52}
+.btn-reject{background:none;border:1px solid #e74c3c;color:#e74c3c;padding:4px 12px;border-radius:4px;font-size:12px;cursor:pointer}
+.btn-reject:hover{background:#e74c3c;color:white}
 .badge-google{background:#e8f0fe;color:#1a73e8}
 .badge-password{background:#fef9e7;color:#d68910}
+.badge-admin{background:#f0e6f6;color:#8e44ad}
+.badge-access_requested{background:#fef6e4;color:#d69e2e}
+.badge-access_pending{background:#fef6e4;color:#d69e2e}
+.badge-access_approved{background:#d5f5e3;color:#1e8449}
+.badge-access_rejected_admin{background:#fde8e8;color:#c0392b}
+.badge-2fa_pending{background:#e8f0fe;color:#1a73e8}
+.badge-allowed_2fa{background:#d5f5e3;color:#1e8449}
+.badge-allowed_2fa_backup{background:#d5f5e3;color:#1e8449}
+.badge-2fa_failed{background:#fde8e8;color:#c0392b}
+.badge-2fa_lockout{background:#fde8e8;color:#c0392b}
+.badge-2fa_admin_reset{background:#fef6e4;color:#d69e2e}
 .ua-cell{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#888;font-size:11px}
 .loading{color:#999;font-size:13px;padding:20px 0}
 </style>
@@ -6252,6 +6543,17 @@ tr:last-child td{border-bottom:none}
       <thead><tr><th>Email</th><th>Name</th><th>Added by</th><th>Added</th><th>Last login</th><th>Status</th><th>Role</th><th>2FA</th><th></th></tr></thead>
       <tbody id="users-body"></tbody>
     </table>
+  </div>
+
+  <!-- Access Requests -->
+  <div class="card" id="requests-card" style="display:none">
+    <h2><i class="fa-solid fa-user-clock" style="color:#e67e22"></i> Access Requests</h2>
+    <div id="requests-loading" class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</div>
+    <table id="requests-table" style="display:none">
+      <thead><tr><th>Email</th><th>Requested</th><th>Status</th><th></th></tr></thead>
+      <tbody id="requests-body"></tbody>
+    </table>
+    <div id="requests-empty" style="display:none;color:#999;font-size:13px;padding:12px 0">No access requests.</div>
   </div>
 
   <!-- Login Audit -->
@@ -6375,8 +6677,63 @@ function loadAudit() {
         document.getElementById('audit-loading').textContent = 'Error loading audit log: ' + e.message;
     });
 }
+function loadAccessRequests() {
+    if (!IS_ADMIN) return;
+    fetch('/api/access-requests').then(function(r){return r.json();}).then(function(rows){
+        var card = document.getElementById('requests-card');
+        var el = document.getElementById('requests-loading');
+        var t = document.getElementById('requests-table');
+        var b = document.getElementById('requests-body');
+        var empty = document.getElementById('requests-empty');
+        if (!Array.isArray(rows)) rows = [];
+        card.style.display = '';
+        el.style.display = 'none';
+        b.innerHTML = '';
+        if (!rows.length) { empty.style.display = ''; t.style.display = 'none'; return; }
+        empty.style.display = 'none';
+        rows.forEach(function(req) {
+            var tr = document.createElement('tr');
+            if (req.status === 'rejected') tr.style.opacity = '0.5';
+            var actions = '';
+            if (req.status === 'pending') {
+                actions = '<button class="btn-approve" onclick="approveRequest(\\'' + req.id + '\\', \\'' + req.email + '\\')"><i class="fa-solid fa-check"></i> Approve</button> ' +
+                          '<button class="btn-reject" onclick="rejectRequest(\\'' + req.id + '\\', \\'' + req.email + '\\')"><i class="fa-solid fa-times"></i> Reject</button>';
+            } else if (req.status === 'rejected') {
+                actions = '<button class="btn-approve" onclick="approveRequest(\\'' + req.id + '\\', \\'' + req.email + '\\')" style="font-size:11px"><i class="fa-solid fa-check"></i> Approve anyway</button>';
+                if (req.reject_reason) actions += ' <span style="font-size:11px;color:#999" title="' + req.reject_reason.replace(/"/g,'') + '">(' + req.reject_reason.slice(0,30) + ')</span>';
+            } else if (req.status === 'approved') {
+                actions = '<span style="font-size:11px;color:#27ae60"><i class="fa-solid fa-check-circle"></i> by ' + (req.reviewed_by || 'admin') + '</span>';
+            }
+            tr.innerHTML = '<td><strong>' + req.email + '</strong></td>' +
+                '<td style="white-space:nowrap">' + fmt(req.requested_at) + '</td>' +
+                '<td><span class="badge badge-' + req.status + '">' + req.status + '</span></td>' +
+                '<td>' + actions + '</td>';
+            b.appendChild(tr);
+        });
+        t.style.display = '';
+    });
+}
+function approveRequest(id, email) {
+    if (!confirm('Approve access for ' + email + '? They will be added as an allowed user and receive a welcome email.')) return;
+    fetch('/api/access-requests/' + id + '/approve', {method:'POST'})
+    .then(function(r){return r.json();}).then(function(d){
+        if (d.ok) { loadAccessRequests(); loadUsers(); }
+        else alert('Failed to approve request.');
+    });
+}
+function rejectRequest(id, email) {
+    var reason = prompt('Reject access for ' + email + '?\n\nOptional reason (leave blank for none):');
+    if (reason === null) return;
+    fetch('/api/access-requests/' + id + '/reject', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({reason: reason})
+    }).then(function(r){return r.json();}).then(function(d){
+        if (d.ok) loadAccessRequests();
+        else alert('Failed to reject request.');
+    });
+}
 loadUsers();
 loadAudit();
+if (IS_ADMIN) loadAccessRequests();
 </script>
 </body>
 </html>"""
