@@ -2036,6 +2036,8 @@ HTML_TEMPLATE = """
                                     data-nzsa-has-alarm="{{ 'yes' if c.has_alarm_systems else 'no' }}"
                                     data-nzsa-fb-cctv="{{ 'yes' if c.fb_cctv_cameras else 'no' }}"
                                     data-nzsa-fb-alarm="{{ 'yes' if c.fb_alarm_systems else 'no' }}"
+                                    data-nzsa-has-monitoring="{{ 'yes' if c.has_alarm_monitoring else 'no' }}"
+                                    data-nzsa-fb-monitoring="{{ 'yes' if c.fb_alarm_monitoring else 'no' }}"
                                     data-nzsa-fb-url="{{ (c.facebook_url or '') | e }}"
                                     onclick="openNzsaReport(this)"
                                     style="padding:3px 12px; font-size:12px; background:#c0392b; color:white; border:none; border-radius:3px; cursor:pointer;">
@@ -3007,15 +3009,17 @@ HTML_TEMPLATE = """
                 psplaName:  d.nzsaPsplaName  || '',
                 hasCctv:    d.nzsaHasCctv  === 'yes',
                 hasAlarm:   d.nzsaHasAlarm === 'yes',
+                hasMonitoring: d.nzsaHasMonitoring === 'yes',
                 fbCctv:     d.nzsaFbCctv   === 'yes',
                 fbAlarm:    d.nzsaFbAlarm  === 'yes',
+                fbMonitoring: d.nzsaFbMonitoring === 'yes',
                 fbUrl:      d.nzsaFbUrl   || ''
             };
-            // Restore saved reporter details
+            // Restore saved reporter details (defaults: Anon Anon / anon@anon.co.nz)
             var ls = localStorage;
-            document.getElementById('nzsa-fname').value  = ls.getItem('nzsa-fname')  || '';
-            document.getElementById('nzsa-lname').value  = ls.getItem('nzsa-lname')  || '';
-            document.getElementById('nzsa-email').value  = ls.getItem('nzsa-email')  || '';
+            document.getElementById('nzsa-fname').value  = ls.getItem('nzsa-fname')  || 'Anon';
+            document.getElementById('nzsa-lname').value  = ls.getItem('nzsa-lname')  || 'Anon';
+            document.getElementById('nzsa-email').value  = ls.getItem('nzsa-email')  || 'anon@anon.co.nz';
             document.getElementById('nzsa-mobile').value = ls.getItem('nzsa-mobile') || '';
             // Display company info
             document.getElementById('nzsa-disp-name').textContent = _nzsaFormData.name || '-';
@@ -3026,28 +3030,50 @@ HTML_TEMPLATE = """
                 ? (_nzsaFormData.psplaName ? _nzsaFormData.psplaName + ' — ' : '') + _nzsaFormData.psplaStatus
                 : 'No licence found';
             document.getElementById('nzsa-disp-pspla').textContent = psplaText;
-            // Build evidence text
+            // Build evidence text — natural language describing what was found
             var svcs = [];
             if (_nzsaFormData.hasCctv || _nzsaFormData.fbCctv)   svcs.push('CCTV camera installation');
             if (_nzsaFormData.hasAlarm || _nzsaFormData.fbAlarm)  svcs.push('alarm system installation');
+            if (_nzsaFormData.hasMonitoring || _nzsaFormData.fbMonitoring) svcs.push('alarm monitoring services');
             if (!svcs.length) svcs.push('security services');
-            var svcStr = svcs.join(' and ');
-            var channels = [];
-            if (_nzsaFormData.website) channels.push('their website (' + _nzsaFormData.website + ')');
-            if (_nzsaFormData.fbUrl)   channels.push('Facebook (' + _nzsaFormData.fbUrl + ')');
-            var chanStr = channels.length ? ' on ' + channels.join(' and ') : '';
+            var svcStr = svcs.length > 1
+                ? svcs.slice(0, -1).join(', ') + ' and ' + svcs[svcs.length - 1]
+                : svcs[0];
+            var platforms = [];
+            if (_nzsaFormData.website) platforms.push('their website (' + _nzsaFormData.website + ')');
+            if (_nzsaFormData.fbUrl)   platforms.push('their Facebook page (' + _nzsaFormData.fbUrl + ')');
+            var platStr = platforms.length
+                ? ' on ' + (platforms.length > 1 ? platforms.join(' and ') : platforms[0])
+                : '';
             var locStr  = loc ? ' in ' + loc : '';
-            var evidence = _nzsaFormData.name + ' is advertising ' + svcStr + chanStr
-                + locStr + ' without holding a valid PSPLA licence.'
-                + ' A PSPLA licence check returned: ' + psplaText + '.'
-                + ' This report was identified through automated monitoring of NZ security companies'
-                + ' advertising camera and security installation services.';
+            var evidence = 'This company appears to be advertising ' + svcStr + platStr + locStr
+                + ', however I was unable to find a current PSPLA licence for them.'
+                + ' A search of the PSPLA register returned: ' + psplaText + '.'
+                + ' Could you please check whether this company holds a valid licence?';
             document.getElementById('nzsa-evidence').value = evidence;
+            // Hide any previous dry-run results
+            document.getElementById('nzsa-dry-result').style.display = 'none';
             // Show modal
             var modal = document.getElementById('nzsa-report-modal');
             modal.style.display = 'flex';
         }
 
+        function _nzsaValidate() {
+            var fname = document.getElementById('nzsa-fname').value.trim();
+            var lname = document.getElementById('nzsa-lname').value.trim();
+            var email = document.getElementById('nzsa-email').value.trim();
+            var mobile = document.getElementById('nzsa-mobile').value.trim();
+            var evidence = document.getElementById('nzsa-evidence').value.trim();
+            var missing = [];
+            if (!fname) missing.push('First name');
+            if (!lname) missing.push('Last name');
+            if (!email) missing.push('Email');
+            if (email && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) { alert('Please enter a valid email address.'); return false; }
+            if (!mobile) missing.push('Mobile');
+            if (!evidence) missing.push('Evidence');
+            if (missing.length) { alert('Required fields missing: ' + missing.join(', ')); return false; }
+            return true;
+        }
         function _nzsaPayload(dryRun) {
             var ls = localStorage;
             ls.setItem('nzsa-fname',  document.getElementById('nzsa-fname').value);
@@ -3067,6 +3093,7 @@ HTML_TEMPLATE = """
             };
         }
         function doTestNzsaForm() {
+            if (!_nzsaValidate()) return;
             var btn = document.getElementById('nzsa-test-btn');
             btn.textContent = 'Testing...'; btn.disabled = true;
             document.getElementById('nzsa-dry-result').style.display = 'none';
@@ -3092,6 +3119,7 @@ HTML_TEMPLATE = """
             });
         }
         function doOpenNzsaForm() {
+            if (!_nzsaValidate()) return;
             if (!confirm('This will submit the report to NZSA. Continue?')) return;
             var btn = document.querySelector('#nzsa-report-modal button[onclick="doOpenNzsaForm()"]');
             if (btn) { btn.textContent = 'Submitting...'; btn.disabled = true; }
@@ -3248,18 +3276,18 @@ HTML_TEMPLATE = """
      background:rgba(44,62,80,0.95); z-index:9999; align-items:center; justify-content:center; overflow-y:auto;">
     <div style="background:white; padding:28px; border-radius:12px; max-width:560px; width:92%; margin:20px auto; font-size:13px;">
         <h2 style="margin:0 0 4px; color:#c0392b; font-size:16px;"><i class="fa-solid fa-flag"></i> Report Unlicensed Operator to NZSA</h2>
-        <p style="color:#777; font-size:12px; margin:0 0 18px;">Opens the NZSA reporting form with fields pre-filled. Review everything before submitting.</p>
+        <p style="color:#777; font-size:12px; margin:0 0 18px;">Review the details below then submit the report directly to NZSA.</p>
         <div style="background:#f8f9fa; border:1px solid #dee2e6; border-radius:6px; padding:12px; margin-bottom:14px;">
             <div style="font-weight:bold; font-size:11px; color:#555; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Your Details <span style="font-weight:normal; color:#888;">(saved for next time)</span></div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                <div><label style="font-size:11px; color:#666; display:block; margin-bottom:2px;">First name</label>
-                    <input id="nzsa-fname" type="text" placeholder="First name" style="width:100%; padding:5px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px; box-sizing:border-box;"></div>
-                <div><label style="font-size:11px; color:#666; display:block; margin-bottom:2px;">Last name</label>
-                    <input id="nzsa-lname" type="text" placeholder="Last name" style="width:100%; padding:5px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px; box-sizing:border-box;"></div>
-                <div><label style="font-size:11px; color:#666; display:block; margin-bottom:2px;">Email</label>
-                    <input id="nzsa-email" type="email" placeholder="your@email.com" style="width:100%; padding:5px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px; box-sizing:border-box;"></div>
-                <div><label style="font-size:11px; color:#666; display:block; margin-bottom:2px;">Mobile</label>
-                    <input id="nzsa-mobile" type="text" placeholder="021 ..." style="width:100%; padding:5px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px; box-sizing:border-box;"></div>
+                <div><label style="font-size:11px; color:#666; display:block; margin-bottom:2px;">First name <span style="color:#c0392b;">*</span></label>
+                    <input id="nzsa-fname" type="text" placeholder="First name" required style="width:100%; padding:5px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px; box-sizing:border-box;"></div>
+                <div><label style="font-size:11px; color:#666; display:block; margin-bottom:2px;">Last name <span style="color:#c0392b;">*</span></label>
+                    <input id="nzsa-lname" type="text" placeholder="Last name" required style="width:100%; padding:5px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px; box-sizing:border-box;"></div>
+                <div><label style="font-size:11px; color:#666; display:block; margin-bottom:2px;">Email <span style="color:#c0392b;">*</span></label>
+                    <input id="nzsa-email" type="email" placeholder="your@email.com" required style="width:100%; padding:5px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px; box-sizing:border-box;"></div>
+                <div><label style="font-size:11px; color:#666; display:block; margin-bottom:2px;">Mobile <span style="color:#c0392b;">*</span></label>
+                    <input id="nzsa-mobile" type="text" placeholder="021 ..." required style="width:100%; padding:5px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px; box-sizing:border-box;"></div>
             </div>
         </div>
         <div style="background:#fff8f0; border:1px solid #fce4c3; border-radius:6px; padding:12px; margin-bottom:14px;">
@@ -3271,11 +3299,11 @@ HTML_TEMPLATE = """
         </div>
         <div style="margin-bottom:16px;">
             <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
-                <label style="font-weight:bold; font-size:11px; color:#555; text-transform:uppercase; letter-spacing:0.5px;">Evidence / Description</label>
+                <label style="font-weight:bold; font-size:11px; color:#555; text-transform:uppercase; letter-spacing:0.5px;">Evidence / Description <span style="color:#c0392b;">*</span></label>
                 <button onclick="copyNzsaEvidence()" id="nzsa-copy-btn" style="padding:2px 10px; font-size:11px; background:#2980b9; color:white; border:none; border-radius:3px; cursor:pointer;">Copy</button>
             </div>
             <p style="font-size:11px; color:#888; margin:0 0 6px;"><i class="fa-solid fa-circle-info"></i>&nbsp;This will be submitted as the evidence/description in the NZSA report.</p>
-            <textarea id="nzsa-evidence" style="width:100%; height:90px; font-size:12px; padding:6px 8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box; resize:vertical; line-height:1.5;"></textarea>
+            <textarea id="nzsa-evidence" required style="width:100%; height:90px; font-size:12px; padding:6px 8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box; resize:vertical; line-height:1.5;"></textarea>
         </div>
         <pre id="nzsa-dry-result" style="display:none; background:#f8f8f8; border:1px solid #ddd; border-radius:4px; padding:10px; font-size:11px; white-space:pre-wrap; margin-bottom:12px; max-height:200px; overflow:auto;"></pre>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
