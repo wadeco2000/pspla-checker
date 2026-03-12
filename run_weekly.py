@@ -20,8 +20,8 @@ from searcher import (
     write_status, clear_status, append_history, check_pause,
     RUNNING_FLAG, PAUSE_FLAG, SKIP_DOMAINS, NZ_REGIONS, SERPAPI_EXHAUSTED,
     is_directory_listing_url,
-    reset_session_log, get_session_log, send_search_email,
-    is_schedule_enabled,
+    reset_session_log, reset_token_usage, get_session_log, send_search_email,
+    record_search_start, is_schedule_enabled,
 )
 
 WEEKLY_TERMS = [
@@ -52,6 +52,8 @@ def run_weekly(triggered_by="manual"):
     if os.path.exists(PAUSE_FLAG):
         os.remove(PAUSE_FLAG)
     open(RUNNING_FLAG, "w").close()
+    reset_token_usage()
+    record_search_start("google-weekly", started_iso, triggered_by)
     total_found = 0
     total_new = 0
     found_urls = set()
