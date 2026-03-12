@@ -1,0 +1,24 @@
+{
+  "name": "PSPLA Checker",
+  "short_name": "PSPLA",
+  "description": "NZ Security Company Licence Checker by Alarm Watch",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1a2535",
+  "theme_color": "#1a2535",
+  "icons": [
+    {
+      "src": "/static/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

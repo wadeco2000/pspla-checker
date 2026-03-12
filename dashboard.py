@@ -210,8 +210,17 @@ app.secret_key = _hashlib.sha256(
 ).hexdigest()
 
 _AUTH_SKIP = {
-    'login_page', 'login_password', 'auth_callback', 'auth_verify', 'auth_logout'
+    'login_page', 'login_password', 'auth_callback', 'auth_verify', 'auth_logout',
+    'service_worker'
 }
+
+@app.route('/sw.js')
+def service_worker():
+    """Serve service worker from root scope so it can control all pages."""
+    return app.send_static_file('sw.js'), 200, {
+        'Content-Type': 'application/javascript',
+        'Service-Worker-Allowed': '/'
+    }
 
 def _is_admin():
     """True if the logged-in user has admin privileges."""
@@ -416,6 +425,12 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#1a2535">
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f1923">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
     <title>PSPLA Security Camera Checker</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer" />
     <style>
@@ -3574,6 +3589,7 @@ HTML_TEMPLATE = """
 </div>
 
 </div><!-- /page-content -->
+<script>if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js');}</script>
 </body>
 </html>
 """
