@@ -36,6 +36,8 @@ GITHUB_PAT = os.getenv("GITHUB_PAT")
 EXPORT_PASSWORD = os.getenv("EXPORT_PASSWORD") or os.getenv("PAGES_PASSWORD", "")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "wadeco2000/pspla-checker")
 DROPBOX_TOKEN = os.getenv("DROPBOX_TOKEN", "")
+RECAPTCHA_SITE_KEY = os.getenv("RECAPTCHA_SITE_KEY", "")
+RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY", "")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PAUSE_FLAG = os.path.join(BASE_DIR, "pause.flag")
@@ -217,7 +219,8 @@ app.secret_key = _hashlib.sha256(
 
 _AUTH_SKIP = {
     'login_page', 'login_password', 'auth_callback', 'auth_verify', 'auth_logout',
-    'service_worker', 'auth_2fa_page', 'auth_2fa_verify'
+    'service_worker', 'auth_2fa_page', 'auth_2fa_verify',
+    'auth_request_access_page', 'auth_request_access_submit'
 }
 
 @app.route('/sw.js')
@@ -420,6 +423,7 @@ _sb.auth.getSession().then(function(result){
         body:JSON.stringify({access_token:s.access_token,email:s.user.email})
     }).then(function(r){return r.json();}).then(function(d){
         if(d['2fa_required']){window.location.href='/auth/2fa';}
+        else if(d.error==='access_captcha'){window.location.href='/auth/request-access';}
         else{window.location.href=d.ok?'/':('/login?e='+encodeURIComponent(d.error||'denied'));}
     });
 });
@@ -568,25 +572,12 @@ def auth_verify():
         except Exception:
             _existing = None
         if _existing and _existing.get('status') == 'pending':
-            # Already pending — don't send another email
             _result = 'access_pending'
             _error = 'access_pending'
         else:
-            # No request or previously rejected — create new pending request
-            try:
-                requests.post(f"{SUPABASE_URL}/rest/v1/access_requests",
-                              json={'email': email, 'status': 'pending'},
-                              headers={'apikey': SUPABASE_SERVICE_KEY,
-                                       'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}',
-                                       'Prefer': 'return=minimal'},
-                              timeout=10)
-            except Exception:
-                pass
-            # Send email to admin (async)
-            threading.Thread(target=_send_access_request_email,
-                             args=(email, _ua), daemon=True).start()
-            _result = 'access_requested'
-            _error = 'access_requested'
+            # No existing request — show CAPTCHA before creating
+            _result = 'access_captcha'
+            _error = 'access_captcha'
         try:
             requests.post(f"{SUPABASE_URL}/rest/v1/login_audit",
                           json={'email': email, 'provider': 'google', 'result': _result,
@@ -596,6 +587,8 @@ def auth_verify():
                           timeout=5)
         except Exception:
             pass
+        # Store email temporarily so the request-access page knows who they are
+        session['access_request_email'] = email
         return _jsonify_auth({'ok': False, 'error': _error})
     except Exception:
         return _jsonify_auth({'ok': False, 'error': 'db_error'})
@@ -725,6 +718,162 @@ function verify2FA() {
 }
 </script>
 </body></html>"""
+
+# ── Access request with CAPTCHA ────────────────────────────────────────────────
+
+_DASH_REQUEST_ACCESS_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Request Access — PSPLA Dashboard</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer"/>
+<script src="https://www.google.com/recaptcha/api.js" async defer></script>
+<style>
+*{box-sizing:border-box}body{font-family:Arial,sans-serif;margin:0;background:#1a2233;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{background:#223;border-radius:12px;padding:36px 32px;width:420px;max-width:92vw;text-align:center;color:#ccd}
+.card h2{margin:0 0 6px;font-size:20px;color:#eef}
+.card .sub{color:#889;font-size:13px;margin-bottom:6px}
+.card .email{color:#e67e22;font-size:14px;font-weight:600;margin-bottom:20px}
+.icon-lock{font-size:40px;color:#e74c3c;margin-bottom:12px}
+.captcha-wrap{display:inline-block;margin:16px 0}
+.btn-request{display:block;width:100%;padding:12px;background:#27ae60;color:white;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-top:12px}
+.btn-request:hover{background:#219a52}
+.btn-request:disabled{opacity:.5;cursor:default}
+.msg{margin-top:14px;font-size:13px;min-height:18px}
+.msg.error{color:#e74c3c}.msg.success{color:#27ae60}.msg.warn{color:#f39c12}
+.back-link{color:#666;font-size:12px;text-decoration:none;margin-top:18px;display:inline-block}
+.back-link:hover{color:#aaa}
+.success-icon{font-size:48px;color:#27ae60;margin-bottom:12px}
+.info-text{color:#889;font-size:12px;margin-top:16px;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="card" id="request-card">
+<div class="icon-lock"><i class="fa-solid fa-user-lock"></i></div>
+<h2>Access Required</h2>
+<p class="sub">Your account is not yet authorised</p>
+<p class="email">__EMAIL__</p>
+<p style="color:#889;font-size:13px;margin:0 0 16px">Complete the check below to request access from the administrator.</p>
+<div class="captcha-wrap">
+    <div class="g-recaptcha" data-sitekey="__RECAPTCHA_KEY__" data-theme="dark" data-callback="onCaptchaSuccess"></div>
+</div>
+<button class="btn-request" id="btn-request" onclick="submitRequest()" disabled>
+    <i class="fa-solid fa-paper-plane"></i> Request Access
+</button>
+<div class="msg" id="msg"></div>
+<p class="info-text">The administrator will review your request and you'll be notified by email if approved.</p>
+<br><a href="/login" class="back-link"><i class="fa-solid fa-arrow-left"></i> Back to login</a>
+</div>
+<div class="card" id="success-card" style="display:none">
+<div class="success-icon"><i class="fa-solid fa-circle-check"></i></div>
+<h2 style="color:#27ae60">Request Sent!</h2>
+<p style="color:#aac;font-size:14px;margin:12px 0 0">Your access request has been sent to the administrator.</p>
+<p style="color:#889;font-size:13px;margin:8px 0 20px">You'll receive an email when your access is approved.</p>
+<a href="/login" class="btn-request" style="text-decoration:none;text-align:center;display:block"><i class="fa-solid fa-arrow-left"></i> Return to Login</a>
+</div>
+<script>
+function onCaptchaSuccess(token) {
+    document.getElementById('btn-request').disabled = false;
+}
+function submitRequest() {
+    var btn = document.getElementById('btn-request');
+    var token = grecaptcha.getResponse();
+    if (!token) { document.getElementById('msg').textContent = 'Please complete the CAPTCHA.'; return; }
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Sending...';
+    fetch('/auth/request-access', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({captcha: token})
+    }).then(function(r){return r.json();}).then(function(d){
+        if (d.ok) {
+            document.getElementById('request-card').style.display = 'none';
+            document.getElementById('success-card').style.display = '';
+        } else {
+            var m = document.getElementById('msg');
+            m.className = 'msg error';
+            m.textContent = d.error || 'Failed to submit request.';
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Request Access';
+            grecaptcha.reset();
+        }
+    }).catch(function(){
+        document.getElementById('msg').textContent = 'Connection error. Please try again.';
+        document.getElementById('msg').className = 'msg error';
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Request Access';
+        grecaptcha.reset();
+    });
+}
+</script>
+</body></html>"""
+
+@app.route('/auth/request-access')
+def auth_request_access_page():
+    email = session.get('access_request_email', '')
+    if not email:
+        return redirect(url_for('login_page'))
+    html = (_DASH_REQUEST_ACCESS_HTML
+            .replace('__EMAIL__', email)
+            .replace('__RECAPTCHA_KEY__', RECAPTCHA_SITE_KEY or ''))
+    return html
+
+@app.route('/auth/request-access', methods=['POST'])
+def auth_request_access_submit():
+    email = session.get('access_request_email', '')
+    if not email:
+        return _jsonify_auth({'ok': False, 'error': 'Session expired. Please try logging in again.'})
+    data = request.json or {}
+    captcha_token = data.get('captcha', '')
+    # Verify reCAPTCHA with Google
+    if RECAPTCHA_SECRET_KEY:
+        try:
+            cr = requests.post('https://www.google.com/recaptcha/api/siteverify',
+                               data={'secret': RECAPTCHA_SECRET_KEY, 'response': captcha_token},
+                               timeout=10)
+            if not cr.ok or not cr.json().get('success'):
+                return _jsonify_auth({'ok': False, 'error': 'CAPTCHA verification failed. Please try again.'})
+        except Exception:
+            return _jsonify_auth({'ok': False, 'error': 'CAPTCHA verification error. Please try again.'})
+    else:
+        # No reCAPTCHA configured — allow through (dev mode)
+        pass
+    # Check for existing pending request
+    try:
+        _ar = requests.get(f"{SUPABASE_URL}/rest/v1/access_requests",
+                           params={'email': f'eq.{email}', 'status': 'eq.pending',
+                                   'select': 'id', 'limit': '1'},
+                           headers={'apikey': SUPABASE_SERVICE_KEY,
+                                    'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}'},
+                           timeout=10)
+        if _ar.ok and _ar.json():
+            return _jsonify_auth({'ok': True})  # Already pending, don't create duplicate
+    except Exception:
+        pass
+    # Create new pending request
+    try:
+        requests.post(f"{SUPABASE_URL}/rest/v1/access_requests",
+                      json={'email': email, 'status': 'pending'},
+                      headers={'apikey': SUPABASE_SERVICE_KEY,
+                               'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}',
+                               'Prefer': 'return=minimal'},
+                      timeout=10)
+    except Exception:
+        return _jsonify_auth({'ok': False, 'error': 'Failed to create request. Please try again.'})
+    # Send email to admin (async)
+    _ua = request.headers.get('User-Agent', '')
+    threading.Thread(target=_send_access_request_email,
+                     args=(email, _ua), daemon=True).start()
+    # Audit log
+    try:
+        requests.post(f"{SUPABASE_URL}/rest/v1/login_audit",
+                      json={'email': email, 'provider': 'google', 'result': 'access_requested',
+                            'user_agent': _ua},
+                      headers={'apikey': SUPABASE_SERVICE_KEY,
+                               'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}'},
+                      timeout=5)
+    except Exception:
+        pass
+    session.pop('access_request_email', None)
+    return _jsonify_auth({'ok': True})
 
 @app.route('/auth/2fa')
 def auth_2fa_page():
