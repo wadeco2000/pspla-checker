@@ -217,6 +217,112 @@ app.secret_key = _hashlib.sha256(
     (PAGES_PASSWORD + (SUPABASE_SERVICE_KEY or "")).encode()
 ).hexdigest()
 
+# ── Security: session cookies ─────────────────────────────────────────────────
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=os.getenv("FLASK_ENV") != "development",  # True on Azure (HTTPS)
+)
+
+# ── Security: HTTP headers ────────────────────────────────────────────────────
+@app.after_request
+def _set_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
+    if request.is_secure:
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    # CSP: allow inline scripts/styles (needed for dashboard), plus CDNs used
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://www.google.com https://www.gstatic.com; "
+        "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
+        "font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com; "
+        "img-src 'self' data: https://*.supabase.co https://www.gstatic.com; "
+        "connect-src 'self' https://*.supabase.co; "
+        "frame-src https://www.google.com; "
+        "object-src 'none'; "
+        "base-uri 'self'"
+    )
+    return response
+
+# ── Security: CSRF protection ────────────────────────────────────────────────
+def _csrf_token():
+    """Get or create a CSRF token for the current session."""
+    if '_csrf_token' not in session:
+        session['_csrf_token'] = _secrets.token_hex(32)
+    return session['_csrf_token']
+
+def _check_csrf():
+    """Validate CSRF token on state-changing requests. Returns error response or None."""
+    if request.method in ('GET', 'HEAD', 'OPTIONS'):
+        return None
+    # Skip for auth endpoints (pre-login, no session yet)
+    if request.endpoint in _AUTH_SKIP:
+        return None
+    # Accept token from header (JS fetch) or form field
+    token = request.headers.get('X-CSRF-Token') or (request.form.get('_csrf_token') if request.form else None)
+    if not token or token != session.get('_csrf_token'):
+        return _jsonify_auth({'ok': False, 'error': 'CSRF validation failed'}), 403
+    return None
+
+app.jinja_env.globals['csrf_token'] = _csrf_token
+
+# ── Security: input length limits ─────────────────────────────────────────────
+_INPUT_MAX_LENGTHS = {
+    'correction': 2000,
+    'company_name': 200,
+    'email': 254,
+    'name': 200,
+    'phone': 50,
+    'website': 500,
+    'region': 100,
+    'reason': 500,
+    'notes': 2000,
+    'password': 128,
+}
+
+def _validate_input_lengths(data, fields=None):
+    """Check string values in data dict against max lengths. Returns error string or None."""
+    if not isinstance(data, dict):
+        return None
+    for key, val in data.items():
+        if not isinstance(val, str):
+            continue
+        limit = _INPUT_MAX_LENGTHS.get(key)
+        if fields and key not in fields:
+            continue
+        if limit and len(val) > limit:
+            return f"Field '{key}' exceeds maximum length of {limit} characters"
+    return None
+
+# ── Security: rate limiting ──────────────────────────────────────────────────
+# Simple in-memory rate limiter (no Redis dependency)
+_rate_limit_store = {}
+_rate_limit_lock = threading.Lock()
+
+def _rate_limit(key, max_requests, window_seconds):
+    """Returns True if rate limit exceeded, False if OK."""
+    now = _time.time()
+    with _rate_limit_lock:
+        if key not in _rate_limit_store:
+            _rate_limit_store[key] = []
+        # Purge old entries
+        _rate_limit_store[key] = [t for t in _rate_limit_store[key] if t > now - window_seconds]
+        if len(_rate_limit_store[key]) >= max_requests:
+            return True
+        _rate_limit_store[key].append(now)
+        return False
+
+def _check_rate_limit(category, max_requests, window_seconds):
+    """Rate limit by IP + category. Returns error response or None."""
+    ip = request.remote_addr or 'unknown'
+    key = f"{category}:{ip}"
+    if _rate_limit(key, max_requests, window_seconds):
+        return _jsonify_auth({'ok': False, 'error': 'Too many requests. Please try again later.'}), 429
+    return None
+
 _AUTH_SKIP = {
     'login_page', 'login_password', 'auth_callback', 'auth_verify', 'auth_logout',
     'service_worker', 'auth_2fa_page', 'auth_2fa_verify',
@@ -362,6 +468,10 @@ def _require_dashboard_auth():
         return redirect(url_for('auth_2fa_page'))
     if not session.get('authenticated'):
         return redirect(url_for('login_page'))
+    # ── CSRF check on all authenticated POST/DELETE/PATCH/PUT ──
+    csrf_err = _check_csrf()
+    if csrf_err:
+        return csrf_err
 
 _DASH_LOGIN_HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -471,6 +581,8 @@ def login_page():
 
 @app.route('/login/password', methods=['POST'])
 def login_password():
+    rl = _check_rate_limit('login', 5, 60)
+    if rl: return rl
     _local_addrs = ('127.0.0.1', '::1', '0.0.0.0', '::ffff:127.0.0.1')
     remote = request.remote_addr
     # Behind a reverse proxy (Azure/gunicorn), check X-Forwarded-For
@@ -494,6 +606,8 @@ def auth_callback():
 
 @app.route('/auth/verify', methods=['POST'])
 def auth_verify():
+    rl = _check_rate_limit('auth', 10, 60)
+    if rl: return rl
     data = request.json or {}
     access_token = data.get('access_token', '')
     email = data.get('email', '').lower().strip()
@@ -818,6 +932,8 @@ def auth_request_access_page():
 
 @app.route('/auth/request-access', methods=['POST'])
 def auth_request_access_submit():
+    rl = _check_rate_limit('access_request', 3, 60)
+    if rl: return rl
     email = session.get('access_request_email', '')
     if not email:
         return _jsonify_auth({'ok': False, 'error': 'Session expired. Please try logging in again.'})
@@ -883,6 +999,8 @@ def auth_2fa_page():
 
 @app.route('/auth/2fa/verify', methods=['POST'])
 def auth_2fa_verify():
+    rl = _check_rate_limit('2fa', 5, 60)
+    if rl: return rl
     if not session.get('2fa_pending'):
         return _jsonify_auth({'ok': False, 'error': 'no_pending_2fa'})
     data = request.json or {}
@@ -975,7 +1093,39 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="theme-color" content="#1a2535">
+    <script>
+    // Auto-attach CSRF token to all fetch() calls and HTML forms
+    (function(){
+        var _csrfToken = function(){ return document.querySelector('meta[name="csrf-token"]').content; };
+        // Patch fetch
+        var _origFetch = window.fetch;
+        window.fetch = function(url, opts) {
+            opts = opts || {};
+            var method = (opts.method || 'GET').toUpperCase();
+            if (method !== 'GET' && method !== 'HEAD') {
+                opts.headers = opts.headers || {};
+                if (opts.headers instanceof Headers) {
+                    opts.headers.set('X-CSRF-Token', _csrfToken());
+                } else {
+                    opts.headers['X-CSRF-Token'] = _csrfToken();
+                }
+            }
+            return _origFetch.call(this, url, opts);
+        };
+        // Inject hidden CSRF field into all POST forms
+        document.addEventListener('DOMContentLoaded', function(){
+            document.querySelectorAll('form[method="POST"],form[method="post"]').forEach(function(f){
+                if (!f.querySelector('input[name="_csrf_token"]')) {
+                    var inp = document.createElement('input');
+                    inp.type = 'hidden'; inp.name = '_csrf_token'; inp.value = _csrfToken();
+                    f.appendChild(inp);
+                }
+            });
+        });
+    })();
+    </script>
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f1923">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -4357,6 +4507,8 @@ HISTORY_TEMPLATE = """
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <script>(function(){var _f=window.fetch;window.fetch=function(u,o){o=o||{};var m=(o.method||'GET').toUpperCase();if(m!=='GET'&&m!=='HEAD'){o.headers=o.headers||{};o.headers['X-CSRF-Token']=document.querySelector('meta[name="csrf-token"]').content;}return _f.call(this,u,o);};})();</script>
     <title>Version History</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f4f4f4; }
@@ -4611,6 +4763,8 @@ def rollback(commit_hash):
 
 @app.route("/start-search", methods=["POST"])
 def start_search():
+    rl = _check_rate_limit('search_launch', 3, 60)
+    if rl: return rl
     try:
         _launch("searcher.py")
         return redirect(url_for("index", message="Full search started.", type="success"))
@@ -4620,6 +4774,8 @@ def start_search():
 
 @app.route("/start-weekly-search", methods=["POST"])
 def start_weekly_search():
+    rl = _check_rate_limit('search_launch', 3, 60)
+    if rl: return rl
     try:
         _launch("run_weekly.py")
         return redirect(url_for("index", message="Weekly scan started.", type="success"))
@@ -4639,6 +4795,8 @@ def search_progress_endpoint():
 
 @app.route("/start-facebook-search", methods=["POST"])
 def start_facebook_search():
+    rl = _check_rate_limit('search_launch', 3, 60)
+    if rl: return rl
     try:
         fresh = request.form.get("fresh") == "1"
         _launch("run_facebook.py", ["--fresh"] if fresh else [])
@@ -4649,6 +4807,8 @@ def start_facebook_search():
 
 @app.route("/start-directory-import", methods=["POST"])
 def start_directory_import():
+    rl = _check_rate_limit('search_launch', 3, 60)
+    if rl: return rl
     try:
         fresh = request.form.get("fresh") == "1"
         _launch("run_directories.py", ["--fresh"] if fresh else [])
@@ -5328,6 +5488,8 @@ def save_terms():
 
 @app.route("/start-partial-search", methods=["POST"])
 def start_partial_search():
+    rl = _check_rate_limit('search_launch', 3, 60)
+    if rl: return rl
     from flask import jsonify
     if os.path.exists(RUNNING_FLAG):
         return jsonify({"ok": False, "error": "A search is already running."}), 409
@@ -5350,6 +5512,8 @@ def start_partial_search():
 
 @app.route("/start-bulk-recheck", methods=["POST"])
 def start_bulk_recheck():
+    rl = _check_rate_limit('search_launch', 3, 60)
+    if rl: return rl
     from flask import jsonify
     if os.path.exists(RUNNING_FLAG):
         return jsonify({"ok": False, "error": "A search is already running."}), 409
@@ -5426,6 +5590,8 @@ SEARCH_HISTORY_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <script>(function(){var _f=window.fetch;window.fetch=function(u,o){o=o||{};var m=(o.method||'GET').toUpperCase();if(m!=='GET'&&m!=='HEAD'){o.headers=o.headers||{};o.headers['X-CSRF-Token']=document.querySelector('meta[name="csrf-token"]').content;}return _f.call(this,u,o);};})();</script>
     <title>Search History — PSPLA Checker</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer" />
     <style>
@@ -5934,6 +6100,10 @@ _DASH_PROFILE_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<script>
+(function(){var _f=window.fetch;window.fetch=function(u,o){o=o||{};var m=(o.method||'GET').toUpperCase();if(m!=='GET'&&m!=='HEAD'){o.headers=o.headers||{};o.headers['X-CSRF-Token']=document.querySelector('meta[name="csrf-token"]').content;}return _f.call(this,u,o);};})();
+</script>
 <title>My Account — PSPLA Dashboard</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer"/>
 <style>
@@ -6498,6 +6668,9 @@ def api_allowed_users_add():
     name = data.get("name", "").strip()
     if not email:
         return jsonify({"error": "email required"}), 400
+    len_err = _validate_input_lengths({'email': email, 'name': name})
+    if len_err:
+        return jsonify({"error": len_err}), 400
     added_by = session.get("email", "admin")
     r = requests.post(f"{SUPABASE_URL}/rest/v1/allowed_users",
                       json={"email": email, "name": name, "added_by": added_by,
@@ -6643,6 +6816,8 @@ def api_access_request_reject(rid):
         return jsonify({"ok": False, "error": "admin only"}), 403
     admin_email = session.get("email", "admin")
     reason = (request.json or {}).get("reason", "")
+    if reason and len(reason) > 500:
+        return jsonify({"ok": False, "error": "Reason too long (max 500 characters)"}), 400
     # Get the request details
     r = requests.get(f"{SUPABASE_URL}/rest/v1/access_requests",
                      params={"id": f"eq.{rid}", "select": "id,email"},
@@ -6680,6 +6855,10 @@ _USER_ACCESS_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<script>
+(function(){var _f=window.fetch;window.fetch=function(u,o){o=o||{};var m=(o.method||'GET').toUpperCase();if(m!=='GET'&&m!=='HEAD'){o.headers=o.headers||{};o.headers['X-CSRF-Token']=document.querySelector('meta[name="csrf-token"]').content;}return _f.call(this,u,o);};})();
+</script>
 <title>User Access — PSPLA Dashboard</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer"/>
 <style>
@@ -6952,6 +7131,8 @@ if (IS_ADMIN) loadAccessRequests();
 
 @app.route("/llm-log")
 def llm_log_page():
+    if not _is_admin():
+        return "Admin access required", 403
     log_path = os.path.join(BASE_DIR, "llm_debug.log")
     try:
         content = open(log_path, encoding="utf-8").read() if os.path.exists(log_path) else ""
@@ -6963,6 +7144,7 @@ def llm_log_page():
     return render_template_string("""<!DOCTYPE html>
 <html>
 <head>
+<meta name="csrf-token" content="{{ csrf_token() }}">
 <title>LLM Debug Log</title>
 <style>
   body { font-family: monospace; background:#1a1a2e; color:#e0e0e0; margin:0; padding:0; }
@@ -6992,6 +7174,7 @@ def llm_log_page():
     <input type="text" id="search" placeholder="Filter entries..." oninput="filterEntries()">
     <button onclick="scrollToBottom()">&#x2193; Latest</button>
     <form method="POST" action="/llm-log/clear" style="margin:0;" onsubmit="return confirm('Clear the log file?')">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
       <button class="danger" type="submit">&#x1F5D1; Clear Log</button>
     </form>
     <a href="/">&#x2190; Dashboard</a>
@@ -7060,6 +7243,8 @@ def _parse_llm_log(content):
 
 @app.route("/llm-log/clear", methods=["POST"])
 def llm_log_clear():
+    if not _is_admin():
+        return "Admin access required", 403
     log_path = os.path.join(BASE_DIR, "llm_debug.log")
     try:
         open(log_path, "w").close()
@@ -8807,6 +8992,9 @@ def update_company():
     update = {k: v for k, v in request.json.items() if k in allowed and v is not None}
     if not update:
         return jsonify({"error": "No valid fields to update"}), 400
+    len_err = _validate_input_lengths(update)
+    if len_err:
+        return jsonify({"error": len_err}), 400
     headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -8835,6 +9023,8 @@ def save_correction():
     correction = request.json.get("correction", "").strip()
     if not correction:
         return jsonify({"error": "No correction text provided"}), 400
+    if len(correction) > 2000:
+        return jsonify({"error": "Correction text too long (max 2000 characters)"}), 400
     try:
         from datetime import datetime as _dt
         from searcher import parse_and_save_correction, write_audit, apply_correction_and_recheck
