@@ -456,6 +456,8 @@ HTML_TEMPLATE = """
         .detail-row { display: none; }
         .detail-row.open { display: table-row; }
         .detail-row td { background: #f8f9fa; padding: 12px; }
+        @keyframes cardUpdated { 0% { background: #d4edda; } 100% { background: transparent; } }
+        .card-updated { animation: cardUpdated 2s ease-out; }
         .detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
         .detail-item label { font-weight: bold; color: #555; font-size: 11px; display: block; margin-bottom: 2px; }
         .detail-item span { font-size: 13px; }
@@ -1745,7 +1747,7 @@ HTML_TEMPLATE = """
                                 <div style="font-size:12px; font-weight:bold; color:#1a5276; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
                                     <i class="fa-solid fa-shield-halved" style="color:#2980b9;"></i> PSPLA Licence
                                 </div>
-                                <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; font-size:12px;">
+                                <div id="pspla-card-body-{{ c.id }}" style="display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; font-size:12px;">
                                     {% if c.pspla_name %}<div style="grid-column:1/-1;"><span style="color:#888;">Name:</span> <strong>{{ c.pspla_name }}</strong></div>{% endif %}
                                     {% if c.pspla_license_status %}<div><span style="color:#888;">Status:</span> {{ c.pspla_license_status }}</div>{% endif %}
                                     {% if c.pspla_license_number %}<div><span style="color:#888;">Number:</span> <a href="https://forms.justice.govt.nz/search/PSPLA/" target="_blank" onclick="copyAndOpen(event,'{{ c.pspla_license_number }}')">{{ c.pspla_license_number }}</a></div>{% endif %}
@@ -1776,7 +1778,7 @@ HTML_TEMPLATE = """
                                 <div style="font-size:12px; font-weight:bold; color:#2c3e50; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
                                     🏢 Companies Office
                                 </div>
-                                <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; font-size:12px;">
+                                <div id="co-card-body-{{ c.id }}" style="display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; font-size:12px;">
                                     {% if c.companies_office_name %}<div style="grid-column:1/-1;"><span style="color:#888;">Name:</span> <strong>{{ c.companies_office_name }}</strong>{% if c.co_status %} <em style="color:#888;">({{ c.co_status }})</em>{% endif %}</div>{% endif %}
                                     {% if c.nzbn %}<div><span style="color:#888;">NZBN:</span> {{ c.nzbn }}</div>{% endif %}
                                     {% if c.co_incorporated %}<div><span style="color:#888;">Incorporated:</span> {{ c.co_incorporated }}</div>{% endif %}
@@ -2320,13 +2322,29 @@ HTML_TEMPLATE = """
             .then(function(r) { return r.json(); })
             .then(function(d) {
                 if (d.found && d.url) {
-                    result.innerHTML = '<a href="' + d.url + '" target="_blank">' + d.url + '</a>';
+                    var h = '<a href="' + d.url + '" target="_blank">' + d.url + '</a>';
+                    var details = [];
+                    if (d.followers) details.push('&#128101; ' + d.followers + ' followers');
+                    if (d.category) details.push('&#127991;&#65039; ' + d.category);
+                    if (d.rating) details.push('&#11088; ' + d.rating);
+                    if (d.phone) details.push('&#128222; ' + d.phone);
+                    if (d.email) details.push('&#9993;&#65039; <a href="mailto:' + d.email + '">' + d.email + '</a>');
+                    if (d.address) details.push('&#128205; ' + d.address);
+                    if (details.length) {
+                        h += '<div style="border-top:1px solid #c3cef5;padding-top:6px;margin-top:4px;display:flex;flex-direction:column;gap:3px;color:#444;">';
+                        details.forEach(function(line){ h += '<div>' + line + '</div>'; });
+                        h += '</div>';
+                    }
+                    if (d.description) h += '<div style="color:#777;font-style:italic;margin-top:2px;font-size:11px;">' + (d.description.length > 120 ? d.description.substring(0,120) + '…' : d.description) + '</div>';
+                    result.innerHTML = h;
+                    _cardHighlight(result);
                     btnSaved(btn);
                 } else if (d.error) {
                     result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
                     btn.textContent = 'Re-check'; btn.disabled = false;
                 } else {
-                    result.innerHTML = '<em style="color:#aaa">not found</em>';
+                    result.innerHTML = '<em style="color:#aaa">Not found</em>';
+                    _cardHighlight(result);
                     btnSaved(btn, '#95a5a6', 'Not found');
                 }
                 _recheckTermStop();
@@ -2359,20 +2377,19 @@ HTML_TEMPLATE = """
                     result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
                     btn.textContent = 'Re-check'; btn.disabled = false;
                 } else if (d.member) {
-                    var txt = '<strong style="color:#27ae60;">Member</strong> — ' + d.member_name;
-                    if (d.accredited) { txt += ' <em>(Accredited' + (d.grade ? ': ' + d.grade : '') + ')</em>'; }
-                    if (d.contact_name || d.phone || d.email) {
-                        txt += '<br><small style="color:#555;">';
-                        if (d.contact_name) txt += '<strong>Contact:</strong> ' + d.contact_name;
-                        if (d.phone) txt += ' &nbsp;&#128222; ' + d.phone;
-                        if (d.email) txt += ' &nbsp;&#9993; <a href="mailto:' + d.email + '">' + d.email + '</a>';
-                        txt += '</small>';
-                    }
-                    if (d.overview) { txt += '<br><small style="color:#777;font-style:italic;">' + d.overview.substring(0, 200) + (d.overview.length > 200 ? '…' : '') + '</small>'; }
+                    var txt = '<strong style="color:#27ae60;">Member</strong>';
+                    if (d.member_name) txt += ' — ' + d.member_name;
+                    if (d.accredited) { txt += '<br><em style="color:#888; font-size:11px;">Accredited' + (d.grade ? ': ' + d.grade : '') + '</em>'; }
+                    if (d.contact_name) txt += '<br>&#128100; ' + d.contact_name;
+                    if (d.phone) txt += '<br>&#128222; ' + d.phone;
+                    if (d.email) txt += '<br>&#9993;&#65039; <a href="mailto:' + d.email + '">' + d.email + '</a>';
+                    if (d.overview) { txt += '<br><span style="color:#777;font-style:italic;font-size:11px;">' + d.overview.substring(0, 120) + (d.overview.length > 120 ? '…' : '') + '</span>'; }
                     result.innerHTML = txt;
+                    _cardHighlight(result);
                     btnSaved(btn);
                 } else {
-                    result.innerHTML = '<em style="color:#aaa">not found / not a member</em>';
+                    result.innerHTML = '<em style="color:#aaa">Not a member</em>';
+                    _cardHighlight(result);
                     btnSaved(btn, '#95a5a6', 'Not found');
                 }
                 _recheckTermStop();
@@ -2589,18 +2606,39 @@ HTML_TEMPLATE = """
                 if (d.error) {
                     result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
                     btn.textContent = 'Re-check'; btn.disabled = false;
-                } else if (d.licensed && d.individual_license && d.pspla_name) {
-                    result.innerHTML = '<strong style="color:#e67e22">Exp + Individual</strong> — company: ' + d.pspla_name + ' (' + (d.pspla_license_status || 'expired') + '), individual: ' + d.individual_license;
-                    btnSaved(btn, '#e67e22');
-                } else if (d.licensed && d.individual_license) {
-                    result.innerHTML = '<strong style="color:#e67e22">Individual Only</strong> — ' + d.individual_license;
-                    btnSaved(btn, '#e67e22');
-                } else if (d.licensed) {
-                    result.innerHTML = '<strong style="color:#27ae60">Licensed</strong> — ' + (d.pspla_name || '');
-                    btnSaved(btn);
                 } else {
-                    result.innerHTML = '<em style="color:#e74c3c">Not licensed</em>';
-                    btnSaved(btn, '#95a5a6');
+                    // Update card body
+                    var body = document.getElementById('pspla-card-body-' + id);
+                    if (body) {
+                        var h = '';
+                        h += _gridRow('Name', d.pspla_name ? '<strong>' + d.pspla_name + '</strong>' : null, true);
+                        h += _gridRow('Status', d.pspla_license_status);
+                        h += _gridRow('Number', d.pspla_license_number);
+                        h += _gridRow('Expires', d.pspla_license_expiry);
+                        h += _gridRow('Classes', d.pspla_license_classes);
+                        h += _gridRow('Start', d.pspla_license_start);
+                        h += _gridRow('Permit', d.pspla_permit_type);
+                        h += _gridRow('Type', d.license_type);
+                        h += _gridRow('Match', d.match_method);
+                        h += _gridRow('Individual', d.individual_license, true);
+                        if (!h) h = '<div style="grid-column:1/-1;color:#aaa;font-style:italic;">No licence found</div>';
+                        body.innerHTML = h;
+                        _cardHighlight(body);
+                    }
+                    // Update result status line
+                    if (d.licensed && d.individual_license && d.pspla_name) {
+                        result.innerHTML = '<strong style="color:#e67e22">Exp + Individual</strong>';
+                        btnSaved(btn, '#e67e22');
+                    } else if (d.licensed && d.individual_license) {
+                        result.innerHTML = '<strong style="color:#e67e22">Individual Only</strong>';
+                        btnSaved(btn, '#e67e22');
+                    } else if (d.licensed) {
+                        result.innerHTML = '<strong style="color:#27ae60">Licensed</strong>';
+                        btnSaved(btn);
+                    } else {
+                        result.innerHTML = '<em style="color:#e74c3c">Not licensed</em>';
+                        btnSaved(btn, '#95a5a6');
+                    }
                 }
                 _recheckTermStop();
             })
@@ -2623,6 +2661,17 @@ HTML_TEMPLATE = """
                 btn.style.background = '#555';
                 btn.disabled = false;
             }, 2000);
+        }
+        function _cardHighlight(el) {
+            if (!el) return;
+            el.classList.remove('card-updated');
+            void el.offsetWidth;
+            el.classList.add('card-updated');
+        }
+        function _gridRow(label, value, fullWidth) {
+            if (!value) return '';
+            var style = fullWidth ? ' style="grid-column:1/-1;"' : '';
+            return '<div' + style + '><span style="color:#888;">' + label + ':</span> ' + value + '</div>';
         }
 
         // ── Recheck terminal panel ─────────────────────────────────────────────
@@ -2708,6 +2757,7 @@ HTML_TEMPLATE = """
                     n.textContent = 'none detected';
                     row.insertBefore(n, insertBefore);
                 }
+                _cardHighlight(row);
                 btnSaved(btn, '#27ae60', 'Re-check');
                 _recheckTermStop();
             })
@@ -2733,17 +2783,33 @@ HTML_TEMPLATE = """
                 if (d.error) {
                     result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
                     btn.textContent = 'Re-check'; btn.disabled = false;
-                } else if (d.found) {
-                    var txt = '<strong style="color:#27ae60;">Found</strong> — ' + (d.co_name || '');
-                    if (d.co_status) txt += ' <em>(' + d.co_status + ')</em>';
-                    if (d.nzbn) txt += ' &nbsp; NZBN: ' + d.nzbn;
-                    if (d.co_incorporated) txt += '<br><small style="color:#555;">Incorporated: ' + d.co_incorporated + '</small>';
-                    if (d.director_name) txt += '<br><small style="color:#555;">Director: ' + d.director_name + '</small>';
-                    result.innerHTML = txt;
-                    btnSaved(btn);
                 } else {
-                    result.innerHTML = '<em style="color:#aaa">Not found on Companies Register</em>';
-                    btnSaved(btn, '#95a5a6', 'Not found');
+                    // Update card body
+                    var body = document.getElementById('co-card-body-' + id);
+                    if (body) {
+                        var h = '';
+                        if (d.found) {
+                            var nameHtml = '<strong>' + (d.co_name || '') + '</strong>';
+                            if (d.co_status) nameHtml += ' <em style="color:#888;">(' + d.co_status + ')</em>';
+                            h += _gridRow('Name', nameHtml, true);
+                            h += _gridRow('NZBN', d.nzbn);
+                            h += _gridRow('Incorporated', d.co_incorporated);
+                            if (d.co_website) h += '<div style="grid-column:1/-1;"><span style="color:#888;">CO Website:</span> <a href="' + d.co_website + '" target="_blank" style="color:#3498db;">' + d.co_website + '</a></div>';
+                            h += _gridRow('Directors', d.director_name, true);
+                            h += _gridRow('Address', d.address, true);
+                        } else {
+                            h = '<div style="grid-column:1/-1;color:#aaa;font-style:italic;">Not found on Companies Register</div>';
+                        }
+                        body.innerHTML = h;
+                        _cardHighlight(body);
+                    }
+                    if (d.found) {
+                        result.innerHTML = '<strong style="color:#27ae60;">Updated</strong>';
+                        btnSaved(btn);
+                    } else {
+                        result.innerHTML = '';
+                        btnSaved(btn, '#95a5a6', 'Not found');
+                    }
                 }
                 _recheckTermStop();
             })
@@ -2775,15 +2841,18 @@ HTML_TEMPLATE = """
                     result.innerHTML = '<em style="color:#e74c3c">Error: ' + d.error + '</em>';
                     btn.textContent = 'Re-check'; btn.disabled = false;
                 } else if (d.found) {
-                    var txt = '<strong style="color:#27ae60;">Found</strong>';
-                    if (d.google_rating) txt += ' &nbsp; &#9733; ' + d.google_rating + (d.google_reviews ? ' (' + d.google_reviews + ' reviews)' : '');
-                    if (d.google_phone) txt += '<br><small style="color:#555;">&#128222; ' + d.google_phone + '</small>';
-                    if (d.google_address) txt += '<br><small style="color:#555;">&#128205; ' + d.google_address + '</small>';
-                    if (d.google_email) txt += '<br><small style="color:#555;">&#9993; ' + d.google_email + '</small>';
+                    var txt = '';
+                    if (d.google_rating) txt += '<div>&#9733; ' + d.google_rating + (d.google_reviews ? ' <span style="color:#888;">(' + d.google_reviews + ' reviews)</span>' : '') + '</div>';
+                    if (d.google_phone) txt += '<div>&#128222; ' + d.google_phone + '</div>';
+                    if (d.google_email) txt += '<div>&#9993;&#65039; ' + d.google_email + '</div>';
+                    if (d.google_address) txt += '<div>&#128205; ' + d.google_address + '</div>';
+                    if (!txt) txt = '<em style="color:#aaa;">No details returned</em>';
                     result.innerHTML = txt;
+                    _cardHighlight(result);
                     btnSaved(btn);
                 } else {
                     result.innerHTML = '<em style="color:#aaa">No Google Business Profile found</em>';
+                    _cardHighlight(result);
                     btnSaved(btn, '#95a5a6', 'Not found');
                 }
                 _recheckTermStop();
@@ -6002,11 +6071,14 @@ def recheck_companies_office_for_company():
                     snapshot_before=snapshot)
         return jsonify({
             "found": bool(result.get("name")),
-            "co_name": result.get("name"),
+            "co_name": result.get("registered_name") or result.get("name"),
             "co_status": result.get("status"),
             "nzbn": result.get("nzbn"),
             "co_incorporated": result.get("incorporated"),
+            "co_number": result.get("company_number"),
+            "co_website": result.get("website"),
             "director_name": ", ".join(result.get("directors") or []) or None,
+            "address": result.get("address"),
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -6862,6 +6934,13 @@ def recheck_pspla_for_company():
             "pspla_name": pspla_name,
             "individual_license": individual_license,
             "pspla_license_status": result.get("pspla_license_status"),
+            "pspla_license_number": result.get("pspla_license_number"),
+            "pspla_license_expiry": result.get("pspla_license_expiry"),
+            "pspla_license_classes": result.get("pspla_license_classes"),
+            "pspla_license_start": result.get("pspla_license_start"),
+            "pspla_permit_type": result.get("pspla_permit_type"),
+            "license_type": result.get("license_type"),
+            "match_method": result.get("match_method"),
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
