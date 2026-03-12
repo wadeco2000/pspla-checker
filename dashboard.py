@@ -581,6 +581,61 @@ HTML_TEMPLATE = """
         html.dark .detail-row [style*="color:#1a5276"],html.dark .detail-row [style*="color:#2471a3"] { color:#5dade2 !important; }
         /* ── Panels ── */
         .panel-wrap { margin-bottom:16px; }
+
+        /* ── Hamburger button (hidden on desktop) ── */
+        .hamburger { display:none; flex-direction:column; justify-content:center; gap:5px; background:none; border:none; cursor:pointer; padding:8px; z-index:10; }
+        .hamburger span { display:block; width:22px; height:2px; background:#ccc; border-radius:2px; transition:transform .2s, opacity .2s; }
+        .hamburger.open span:nth-child(1) { transform:translateY(7px) rotate(45deg); }
+        .hamburger.open span:nth-child(2) { opacity:0; }
+        .hamburger.open span:nth-child(3) { transform:translateY(-7px) rotate(-45deg); }
+
+        /* ── Responsive: Tablet & Phone (≤768px) ── */
+        @media (max-width: 768px) {
+            .hamburger { display:flex; }
+            .navbar { height:auto; flex-wrap:wrap; padding:8px 12px; }
+            .nav-menus { display:none; width:100%; flex-direction:column; order:10; }
+            .nav-menus.open { display:flex; }
+            .nav-item { width:100%; }
+            .nav-btn { width:100%; justify-content:flex-start; padding:10px 15px; }
+            .dropdown { position:static; width:100%; min-width:0; box-shadow:none; border:none; border-top:1px solid rgba(255,255,255,.05); }
+            .navbar-right { display:none; }
+
+            .stats { gap:6px; }
+            .stat-box { min-width:70px; padding:6px 8px; }
+            .stat-box h2 { font-size:16px; }
+            .stat-box p { font-size:9px; }
+
+            .filters { flex-direction:column; gap:6px; }
+            .filters select, .filters input[type="text"] { width:100% !important; box-sizing:border-box; }
+            .filters button { width:100%; }
+
+            .table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+            #companyTable { min-width:900px; }
+
+            .detail-top-grid { grid-template-columns:1fr !important; }
+            .detail-cards-grid { grid-template-columns:1fr 1fr !important; }
+            .detail-electrician { max-width:100% !important; }
+
+            .nzsa-form-grid { grid-template-columns:1fr !important; }
+
+            .panel-wrap > div { padding:12px !important; }
+        }
+
+        /* ── Responsive: Phone only (≤480px) ── */
+        @media (max-width: 480px) {
+            .navbar { padding:6px 10px; }
+            .brand-title { font-size:14px; }
+            .brand-sub { font-size:9px; }
+            .brand-logo { height:28px !important; }
+
+            .stat-box { min-width:60px; padding:5px 6px; }
+            .stat-box h2 { font-size:14px; }
+
+            .detail-cards-grid { grid-template-columns:1fr !important; }
+
+            #companyTable { font-size:11px; }
+            #companyTable th, #companyTable td { padding:5px 3px; }
+        }
     </style>
 <script>(function(){if(localStorage.getItem("pspla-dark")==="1")document.documentElement.classList.add("dark");})()</script>
 </head>
@@ -594,6 +649,11 @@ HTML_TEMPLATE = """
       <span class="brand-sub">by Alarm Watch</span>
     </div>
   </a>
+
+  <!-- Hamburger (mobile only) -->
+  <button class="hamburger" onclick="this.classList.toggle('open');document.querySelector('.nav-menus').classList.toggle('open');" aria-label="Menu">
+    <span></span><span></span><span></span>
+  </button>
 
   <!-- Menus -->
   <div class="nav-menus">
@@ -1622,6 +1682,7 @@ HTML_TEMPLATE = """
         <button class="btn btn-dark" onclick="window.location.reload()">Refresh</button>
     </div>
 
+    <div class="table-wrap">
     <table id="companyTable" style="table-layout:fixed; width:100%;">
         <colgroup>
             <col style="width:28px">        <!-- checkbox -->
@@ -1740,7 +1801,7 @@ HTML_TEMPLATE = """
                     <div style="padding:4px 0;">
 
                         <!-- TOP ROW: PSPLA + Companies Office -->
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
+                        <div class="detail-top-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
 
                             <!-- PSPLA Licence Card -->
                             <div style="background:#eaf3fb; border:1px solid #aed4f0; border-radius:8px; padding:12px;">
@@ -1802,7 +1863,7 @@ HTML_TEMPLATE = """
                         <!-- ELECTRICIAN LICENCE ROW (only if individual PSPLA licence found) -->
                         {% if c.individual_license %}
                         <div style="margin-bottom:12px;">
-                            <div style="background:#f0fbf4; border:1px solid #a3d9b1; border-radius:8px; padding:12px; max-width:50%;">
+                            <div class="detail-electrician" style="background:#f0fbf4; border:1px solid #a3d9b1; border-radius:8px; padding:12px; max-width:50%;">
                                 <div style="font-size:12px; font-weight:bold; color:#1a6b35; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
                                     <i class="fa-solid fa-bolt" style="color:#27ae60;"></i> Electrician Licence (MBIE)
                                 </div>
@@ -1829,7 +1890,7 @@ HTML_TEMPLATE = """
                         {% endif %}
 
                         <!-- SECOND ROW: Facebook + NZSA + Google + LinkedIn -->
-                        <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:12px;">
+                        <div class="detail-cards-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:12px;">
 
                             <!-- Facebook Card -->
                             <div style="background:#f0f4ff; border:1px solid #c3cef5; border-radius:8px; padding:12px;">
@@ -2096,6 +2157,7 @@ HTML_TEMPLATE = """
             {% endfor %}
         </tbody>
     </table>
+    </div><!-- /table-wrap -->
 
     <script>
         var _statMode = '';
@@ -3353,7 +3415,7 @@ HTML_TEMPLATE = """
         <p style="color:#777; font-size:12px; margin:0 0 18px;">Review the details below then submit the report directly to NZSA.</p>
         <div style="background:#f8f9fa; border:1px solid #dee2e6; border-radius:6px; padding:12px; margin-bottom:14px;">
             <div style="font-weight:bold; font-size:11px; color:#555; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px;">Your Details <span style="font-weight:normal; color:#888;">(saved for next time)</span></div>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+            <div class="nzsa-form-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
                 <div><label style="font-size:11px; color:#666; display:block; margin-bottom:2px;">First name <span style="color:#c0392b;">*</span></label>
                     <input id="nzsa-fname" type="text" placeholder="First name" required style="width:100%; padding:5px 8px; border:1px solid #ccc; border-radius:4px; font-size:12px; box-sizing:border-box;"></div>
                 <div><label style="font-size:11px; color:#666; display:block; margin-bottom:2px;">Last name <span style="color:#c0392b;">*</span></label>
