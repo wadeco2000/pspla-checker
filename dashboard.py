@@ -3462,7 +3462,7 @@ def index():
             search_paused = os.path.exists(PAUSE_FLAG)
 
     git_version = getattr(app, '_cached_git_version', None)
-    _cache_age = time.time() - getattr(app, '_cached_git_version_at', 0)
+    _cache_age = _time.time() - getattr(app, '_cached_git_version_at', 0)
     if not git_version or _cache_age > 300:  # refresh every 5 minutes
         git_version = "unknown"
         # Try GitHub API first (works on Azure), fall back to local git
@@ -3487,7 +3487,7 @@ def index():
             except Exception:
                 pass
         app._cached_git_version = git_version
-        app._cached_git_version_at = time.time()
+        app._cached_git_version_at = _time.time()
 
     # Read live status for server-side progress bar pre-population
     init_status = {}
@@ -7279,7 +7279,7 @@ def _search_process_alive():
             pass  # fall through to file checks
     # Fallback 1: RUNNING_FLAG exists and is less than 8 hours old
     if os.path.exists(RUNNING_FLAG):
-        age = _time.time() - os.path.getmtime(RUNNING_FLAG)
+        age = __time.time() - os.path.getmtime(RUNNING_FLAG)
         if age < 28800:
             return True
         # Flag is stale — clean up
@@ -7291,7 +7291,7 @@ def _search_process_alive():
     # Fallback 2: search_status.json was written within the last 90 seconds
     # (the search scripts write it on every region+term iteration — reliable heartbeat)
     if os.path.exists(STATUS_FILE):
-        age = _time.time() - os.path.getmtime(STATUS_FILE)
+        age = __time.time() - os.path.getmtime(STATUS_FILE)
         if age < 90:
             return True
     return False
