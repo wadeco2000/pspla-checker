@@ -24,6 +24,7 @@ from searcher import (
     write_audit, write_status, clear_status, append_history, record_search_start, check_pause,
     reset_session_log, get_session_log, send_search_email, _push_search_status,
     patch_company, enrich_existing_record,
+    reset_token_usage, reset_serp_query_count,
     SUPABASE_URL, SUPABASE_KEY,
     RUNNING_FLAG, PAUSE_FLAG,
 )
@@ -503,6 +504,8 @@ def run_recheck(triggered_by="manual"):
 
     started_iso = datetime.now(timezone.utc).isoformat()
     reset_session_log()
+    reset_token_usage()
+    reset_serp_query_count()
 
     check_label = " + ".join(CHECK_LABELS.get(c, c) for c in checks)
     scope_label = "all companies" if company_ids == "all" else f"{len(company_ids)} selected"

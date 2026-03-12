@@ -17,6 +17,7 @@ from searcher import (
     append_history, record_search_start, RUNNING_FLAG, PAUSE_FLAG,
     reset_session_log, reset_token_usage, get_session_log, send_search_email,
     clear_fb_progress, is_schedule_enabled,
+    reset_serp_query_count,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -47,6 +48,7 @@ if __name__ == "__main__":
         os.remove(PAUSE_FLAG)
     reset_session_log()
     reset_token_usage()
+    reset_serp_query_count()
     open(RUNNING_FLAG, "w").close()
     record_search_start("facebook", started_iso, triggered_by)
     try:

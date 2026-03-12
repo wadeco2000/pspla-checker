@@ -22,6 +22,7 @@ from searcher import (
     is_directory_listing_url,
     reset_session_log, reset_token_usage, get_session_log, send_search_email,
     record_search_start, is_schedule_enabled,
+    reset_serp_query_count,
 )
 
 WEEKLY_TERMS = [
@@ -53,6 +54,7 @@ def run_weekly(triggered_by="manual"):
         os.remove(PAUSE_FLAG)
     open(RUNNING_FLAG, "w").close()
     reset_token_usage()
+    reset_serp_query_count()
     record_search_start("google-weekly", started_iso, triggered_by)
     total_found = 0
     total_new = 0

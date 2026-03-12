@@ -422,8 +422,22 @@ def is_directory_listing_url(url):
 
 SERPAPI_EXHAUSTED = "SERPAPI_EXHAUSTED"
 
+# SerpAPI call counter — tracks queries used per search run
+_serp_query_count = 0
+
+
+def get_serp_query_count():
+    return _serp_query_count
+
+
+def reset_serp_query_count():
+    global _serp_query_count
+    _serp_query_count = 0
+
 
 def google_search(query, num_results=100, time_filter=None):
+    global _serp_query_count
+    _serp_query_count += 1
     url = "https://serpapi.com/search"
     params = {
         "api_key": SERPAPI_KEY,
@@ -517,7 +531,9 @@ def get_google_business_profile(company_name, region=""):
         queries_to_try.append(f'{short_name}{region_suffix}')
 
     data = {}
+    global _serp_query_count
     for query in queries_to_try:
+        _serp_query_count += 1
         try:
             response = requests.get(
                 "https://serpapi.com/search",
@@ -570,6 +586,7 @@ def get_google_business_profile(company_name, region=""):
                     if not isinstance(ai_term, str):
                         continue
                     print(f"  [Google profile] AI suggests: {ai_term!r}")
+                    _serp_query_count += 1
                     try:
                         ai_resp = requests.get(
                             "https://serpapi.com/search",
@@ -5284,6 +5301,12 @@ def send_search_email(search_type, started_iso, total_found, total_new, triggere
     except Exception:
         duration_str = "unknown"
 
+    # Gather API usage stats
+    token_data = get_token_usage()
+    total_tokens = token_data.get("input", 0) + token_data.get("output", 0)
+    token_cost = token_data.get("estimated_cost_usd", 0)
+    serp_queries = get_serp_query_count()
+
     edits_str = f"{total_edits} edits made" if total_edits is not None else ""
     if is_recheck:
         subject = f"PSPLA Checker — {label} complete — {total_edits if total_edits is not None else total_new} edits made"
@@ -5307,6 +5330,13 @@ def send_search_email(search_type, started_iso, total_found, total_new, triggere
     ]
     if total_edits is not None:
         lines.append(f"Edits made:       {total_edits}")
+    lines += [
+        "",
+        f"API Usage:",
+        f"  SerpAPI queries:  {serp_queries}",
+        f"  Claude tokens:    {total_tokens:,} ({token_data.get('input', 0):,} in / {token_data.get('output', 0):,} out)",
+        f"  Claude cost:      ~${token_cost:.2f} USD",
+    ]
     lines.append("")
 
     if not is_recheck and new_companies:
@@ -5327,6 +5357,12 @@ def send_search_email(search_type, started_iso, total_found, total_new, triggere
     # Build HTML body
     checks_row = f"<tr><td style='padding:2px 12px 2px 0;color:#666'>Checks run</td><td>{checks_label}</td></tr>" if checks_label else ""
     edits_row = f"<tr><td style='padding:2px 12px 2px 0;color:#666'>Edits made</td><td><b>{total_edits}</b></td></tr>" if total_edits is not None else ""
+    api_rows = (
+        f"<tr><td colspan='2' style='padding:8px 0 2px 0;color:#2c3e50;font-weight:bold'>API Usage</td></tr>"
+        f"<tr><td style='padding:2px 12px 2px 0;color:#666'>SerpAPI queries</td><td>{serp_queries}</td></tr>"
+        f"<tr><td style='padding:2px 12px 2px 0;color:#666'>Claude tokens</td><td>{total_tokens:,} ({token_data.get('input', 0):,} in / {token_data.get('output', 0):,} out)</td></tr>"
+        f"<tr><td style='padding:2px 12px 2px 0;color:#666'>Claude cost</td><td>~${token_cost:.2f} USD</td></tr>"
+    )
 
     rows_html = ""
     if not is_recheck and new_companies:
@@ -5367,6 +5403,7 @@ def send_search_email(search_type, started_iso, total_found, total_new, triggere
 <tr><td style='padding:2px 12px 2px 0;color:#666'>{found_label}</td><td>{total_found}</td></tr>
 <tr><td style='padding:2px 12px 2px 0;color:#666'>{new_label}</td><td>{total_new}</td></tr>
 {edits_row}
+{api_rows}
 </table>
 {new_section}
 </body></html>"""
@@ -5862,6 +5899,7 @@ def run_search(triggered_by="manual"):
     record_search_start("full", started_iso, triggered_by)
     reset_session_log()
     reset_token_usage()
+    reset_serp_query_count()
 
     # Sanity check — abort if the database is missing any required columns
     print("  Checking database schema...")

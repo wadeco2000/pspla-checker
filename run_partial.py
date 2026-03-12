@@ -22,7 +22,7 @@ from searcher import (
     is_directory_listing_url,
     reset_session_log, get_session_log, send_search_email,
     load_partial_progress, save_partial_progress, clear_partial_progress,
-    reset_token_usage,
+    reset_token_usage, reset_serp_query_count,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -54,6 +54,7 @@ def run_partial(triggered_by="manual", fresh=False):
     started_iso = datetime.now(timezone.utc).isoformat()
     reset_session_log()
     reset_token_usage()
+    reset_serp_query_count()
     print("=" * 60)
     print(f"  PSPLA Partial Search")
     print(f"  Regions: {len(regions)}  |  Terms: {len(google_terms)}  |  Facebook: {include_facebook}  |  NZ-wide FB: {include_nationwide}")

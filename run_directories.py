@@ -20,6 +20,7 @@ from searcher import (
     clear_status, append_history, record_search_start,
     reset_session_log, get_session_log, send_search_email,
     clear_dir_progress, reset_token_usage, is_schedule_enabled,
+    reset_serp_query_count,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -57,6 +58,7 @@ if __name__ == "__main__":
         os.remove(PAUSE_FLAG)
     reset_session_log()
     reset_token_usage()
+    reset_serp_query_count()
     open(RUNNING_FLAG, "w").close()
     record_search_start("directories", started_iso, triggered_by)
 
