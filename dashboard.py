@@ -3555,12 +3555,39 @@ def index():
 
 @app.route("/debug")
 def debug():
-    companies = get_companies()
-    output = ""
-    for c in companies[:5]:
-        val = c.get("pspla_licensed")
-        output += f"{c.get('company_name')}: pspla_licensed={val!r} type={type(val).__name__}<br>"
-    return output
+    from flask import jsonify
+    info = {
+        "GITHUB_PAT_set": bool(GITHUB_PAT),
+        "GITHUB_PAT_length": len(GITHUB_PAT) if GITHUB_PAT else 0,
+        "GITHUB_PAT_prefix": (GITHUB_PAT[:8] + "...") if GITHUB_PAT else None,
+        "GITHUB_REPO": GITHUB_REPO,
+    }
+    # Test the GitHub API call
+    if GITHUB_PAT and GITHUB_REPO:
+        try:
+            r = requests.get(
+                f"https://api.github.com/repos/{GITHUB_REPO}/commits/main",
+                headers={"Authorization": f"token {GITHUB_PAT}", "Accept": "application/vnd.github.v3+json"},
+                timeout=5,
+            )
+            info["github_api_status"] = r.status_code
+            if r.ok:
+                gc = r.json()
+                info["latest_commit"] = gc["sha"][:7]
+                info["commit_date"] = gc["commit"]["committer"]["date"]
+            else:
+                info["github_api_error"] = r.text[:300]
+        except Exception as e:
+            info["github_api_exception"] = str(e)
+    # Test local git
+    try:
+        gh = subprocess.run(["git", "log", "-1", "--format=%h"], capture_output=True, text=True, cwd=BASE_DIR)
+        info["local_git_returncode"] = gh.returncode
+        info["local_git_output"] = gh.stdout.strip()
+        info["local_git_stderr"] = gh.stderr.strip()[:200]
+    except Exception as e:
+        info["local_git_exception"] = str(e)
+    return jsonify(info)
 
 
 HISTORY_TEMPLATE = """
