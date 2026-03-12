@@ -8343,11 +8343,11 @@ html.dark .thinking-status{color:#5d6d7e}
   <a href="/" class="back-btn"><i class="fa-solid fa-arrow-left"></i> Dashboard</a>
 </header>
 <div class="kb-stats">
-  <span><i class="fa-solid fa-database"></i> <strong>482</strong> PSPLA decisions (2019–2026)</span>
-  <span><i class="fa-solid fa-newspaper"></i> <strong>92</strong> news &amp; media sources</span>
-  <span><i class="fa-solid fa-file-lines"></i> PSPLA Act 2010</span>
-  <span><i class="fa-solid fa-file-lines"></i> NZSA Position Statement (July 2025)</span>
-  <span><i class="fa-solid fa-file-lines"></i> Electrical Workers Registration Act</span>
+  <span style="opacity:.7"><i class="fa-solid fa-database"></i> <strong>482</strong> PSPLA decisions (2019–2026)</span>
+  <span style="opacity:.7"><i class="fa-solid fa-newspaper"></i> <strong>92</strong> news &amp; media sources</span>
+  <span><i class="fa-solid fa-file-lines"></i> <a href="https://www.legislation.govt.nz/act/public/2010/0064/latest/DLM1594508.html" target="_blank">PSPLA Act 2010</a></span>
+  <span><i class="fa-solid fa-file-lines"></i> <a href="https://security.org.nz/about-nzsa/nzsa-position-statements/" target="_blank">NZSA Position Statement (July 2025)</a></span>
+  <span><i class="fa-solid fa-file-lines"></i> <a href="https://www.legislation.govt.nz/act/public/2006/0027/latest/DLM375802.html" target="_blank">Electrical Workers Registration Act</a></span>
   <span><i class="fa-solid fa-arrow-up-right-from-square"></i> <a href="https://www.justice.govt.nz/tribunals/licences-certificates/pspla/decisions/" target="_blank">Full decisions register</a></span>
 </div>
 <div class="chat-wrap">
