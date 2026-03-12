@@ -3048,7 +3048,6 @@ HTML_TEMPLATE = """
             var locStr  = loc ? ' in ' + loc : '';
             var evidence = 'This company appears to be advertising ' + svcStr + platStr + locStr
                 + ', however I was unable to find a current PSPLA licence for them.'
-                + ' A search of the PSPLA register returned: ' + psplaText + '.'
                 + ' Could you please check whether this company holds a valid licence?';
             document.getElementById('nzsa-evidence').value = evidence;
             // Hide any previous dry-run results
