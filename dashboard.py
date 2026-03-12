@@ -2238,6 +2238,7 @@ HTML_TEMPLATE = """
 
         function sortTable() {
             const sel = document.getElementById('sortSelect').value;
+            try { localStorage.setItem('pspla-sort', sel); } catch(e) {}
             const tbody = document.querySelector('#companyTable tbody');
             const rows = Array.from(document.querySelectorAll('.company-row'));
             rows.sort(function(a, b) {
@@ -2257,6 +2258,20 @@ HTML_TEMPLATE = """
                 if (detailRow) tbody.appendChild(detailRow);
             });
         }
+
+        // ── Restore saved sort preference ────────────────────────────────────
+        (function() {
+            try {
+                var saved = localStorage.getItem('pspla-sort');
+                if (saved) {
+                    var sel = document.getElementById('sortSelect');
+                    if (sel && sel.querySelector('option[value="' + saved + '"]')) {
+                        sel.value = saved;
+                        sortTable();
+                    }
+                }
+            } catch(e) {}
+        })();
 
         // ── Compute client-side stat counts ─────────────────────────────────────
         (function() {
