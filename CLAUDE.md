@@ -25,7 +25,7 @@ Owned and operated by Wade. The goal is to build a comprehensive list of every N
 | File | Purpose |
 |------|---------|
 | `searcher.py` | Core engine — all search, scrape, match, verify, save logic (~6000 lines) |
-| `dashboard.py` | Flask web UI + all API endpoints (~9000+ lines) |
+| `dashboard.py` | Flask web UI + all API endpoints (~10500+ lines) |
 | `run_weekly.py` | Entry point: Google weekly light scan (last 7 days, 5 broad terms) |
 | `run_facebook.py` | Entry point: Facebook-only search pass |
 | `run_directories.py` | Entry point: NZSA + LinkedIn directory import |
@@ -72,6 +72,8 @@ NOTIFY_EMAIL=...
 FACEBOOK_APP_ID=...
 FACEBOOK_APP_SECRET=...
 TOTP_ENCRYPTION_KEY=...                  # Fernet key for encrypting TOTP 2FA secrets at rest (optional — derives from PAGES_PASSWORD+SERVICE_KEY if absent)
+RECAPTCHA_SITE_KEY=...                   # Google reCAPTCHA v2 site key (for access request CAPTCHA page)
+RECAPTCHA_SECRET_KEY=...                 # Google reCAPTCHA v2 secret key (server-side validation)
 ```
 
 **Key separation:** `dashboard.py` and `searcher.py` use `SUPABASE_SERVICE_KEY` (bypasses RLS). The public site JS uses the anon `SUPABASE_KEY` which is subject to RLS. Never swap these.
@@ -299,6 +301,8 @@ Searches run via GitHub Actions workflows in `.github/workflows/`. Each workflow
 | `/account/2fa/disable` | POST: disable 2FA (requires current code) |
 | `/account/2fa/backup-codes` | GET: view backup codes |
 | `/account/2fa/regenerate-backup` | POST: regenerate backup codes |
+| `/auth/request-access` | GET: CAPTCHA page for unauthorized users to request access |
+| `/auth/request-access` | POST: validate reCAPTCHA, create access request, send admin email |
 
 ---
 
@@ -311,7 +315,7 @@ Searches run via GitHub Actions workflows in `.github/workflows/`. Each workflow
 2. `session['is_admin']` set from `allowed_users.is_admin` column during Google login
 3. Email matches `NOTIFY_EMAIL` env var → always admin
 
-**Admin-only actions:** Add/remove users, toggle admin status. New users default to `is_admin=false`.
+**Admin-only actions:** All destructive and sensitive operations are admin-only (30+ endpoints). This includes: all search launches, stop/pause/resume, rollback, delete company, clear DB, dedupe, publish, backup, export CSV, save corrections, all individual rechecks, NZSA reports, save search terms, toggle schedule, LLM log view/clear. Non-admin users can only view the main table. New users default to `is_admin=false`.
 
 **Two-Factor Authentication (2FA):**
 - Optional TOTP-based 2FA per user, compatible with Google Authenticator, Microsoft Authenticator, DUO
@@ -321,6 +325,8 @@ Searches run via GitHub Actions workflows in `.github/workflows/`. Each workflow
 - 8 backup codes generated on setup (format: XXXXX-XXXXX), stored encrypted
 - Login flow: Google OAuth → if `totp_enabled` → `session['2fa_pending']=True` → redirect to `/auth/2fa` → verify code → complete login
 - Rate limiting: 5 failed attempts → session cleared, forced re-login
+- **Remember device:** "Remember this device for 30 days" checkbox. Uses HMAC-signed cookie (`2fa_remember`) with `app.secret_key`. Token format: `email|expiry|signature`. Validated on next login — skips 2FA if valid.
+- **Auto-submit:** When all 6 digits are typed, verification starts automatically (no button click needed). Uses `autoSubmitting` flag to prevent double-submit.
 - Password login (localhost) bypasses 2FA entirely
 - Admin can reset a user's 2FA from User Access page
 
@@ -331,8 +337,9 @@ Searches run via GitHub Actions workflows in `.github/workflows/`. Each workflow
 - Avatar displayed in navbar (small circle next to sign-out) and User Access page
 
 **Access Request System:**
-- Unauthorized Google users who try to login trigger an access request workflow
-- First attempt: creates `pending` record in `access_requests`, sends fancy HTML email to admin, shows friendly message
+- Unauthorized Google users who try to login are redirected to a CAPTCHA-gated access request page
+- Flow: `/auth/verify` returns `access_captcha` → redirect to `/auth/request-access` → user completes reCAPTCHA v2 → click "Request Access" → server validates CAPTCHA with Google → creates `pending` record in `access_requests` → sends fancy HTML email to admin
+- **reCAPTCHA v2** ("I'm not a robot" checkbox): requires `RECAPTCHA_SITE_KEY` and `RECAPTCHA_SECRET_KEY` env vars. Server-side validation via `https://www.google.com/recaptcha/api/siteverify`. If keys not set, CAPTCHA widget hidden and validation skipped (graceful degradation).
 - Repeat attempts while pending: shows "still pending" message, no duplicate email
 - After rejection: shows soft letdown message, allows re-request (creates new pending + new email)
 - Admin reviews requests on User Access page → Approve (adds to `allowed_users`, sends welcome email) or Reject (with optional reason)
@@ -444,6 +451,9 @@ All LLM calls: intercepted by `_LoggingAnthropicClient` → logged to `llm_debug
 - **Sort persistence** — `localStorage.setItem('pspla-sort', sel)` saves sort selection, restored on page load via IIFE.
 - **Partial auth boundary** — `session['2fa_pending']` blocks all protected routes via `@before_request` until 2FA is completed.
 - **TOTP encryption** — secrets encrypted with Fernet before storage; `_totp_fernet()` creates cipher from env key or derives one.
+- **CSRF fetch wrapper** — global `fetch()` monkey-patch in `<script>` block auto-attaches CSRF token header to all non-GET requests. Forms get hidden field via `DOMContentLoaded`.
+- **In-memory rate limiting** — `_rate_limit_store` dict with per-IP+category sliding window. No external deps (Redis). Suitable for single-instance Azure deployment.
+- **Safe error logging** — `_safe_error(e)` logs to stderr, returns generic message to user. Never exposes paths, tracebacks, or internal details.
 
 ---
 
@@ -522,6 +532,61 @@ Dashboard is responsive with CSS media queries at two breakpoints:
 - `.nzsa-form-grid` — NZSA report modal name fields
 
 **No desktop changes** — all responsive rules are inside `@media` blocks.
+
+---
+
+## Security Hardening (added 13 Mar 2026)
+
+Comprehensive security hardening applied across the dashboard:
+
+**CSRF Protection:**
+- Session-based CSRF tokens generated via `_csrf_token()`, stored in `session['_csrf_token']`
+- Token injected into all pages via `<meta name="csrf-token">` tag
+- Global `fetch()` wrapper auto-attaches `X-CSRF-Token` header to all non-GET requests
+- `DOMContentLoaded` listener auto-injects hidden `_csrf_token` field into all POST forms
+- `_check_csrf()` validates token on all authenticated state-changing requests (POST/DELETE/PATCH/PUT)
+- Auth endpoints (`_AUTH_SKIP`) exempt — no session exists pre-login
+- Applied to: main dashboard, user access page, profile page, LLM log page, version history, search history
+
+**Rate Limiting:**
+- In-memory rate limiter (`_rate_limit_store` dict + threading lock) — no Redis needed for single Azure instance
+- `_check_rate_limit(category, max_requests, window_seconds)` returns 429 response if exceeded
+- Limits: login 5/min, auth 10/min, 2FA 5/min, access requests 3/min, search launches 3/min
+- Per-IP tracking via `request.remote_addr`
+
+**HTTP Security Headers** (`@app.after_request`):
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: SAMEORIGIN`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Permissions-Policy: camera=(), microphone=(), geolocation=()`
+- `Strict-Transport-Security: max-age=31536000; includeSubDomains` (HTTPS only)
+- `Content-Security-Policy`: restrictive policy allowing `'self'`, inline scripts/styles (needed for dashboard), CDNs (jsdelivr, cloudflare, Google reCAPTCHA, Google Fonts), Supabase Storage for images
+
+**Session Cookie Hardening:**
+- `SESSION_COOKIE_HTTPONLY=True` — no JS access to session cookie
+- `SESSION_COOKIE_SAMESITE='Lax'` — CSRF mitigation
+- `SESSION_COOKIE_SECURE=True` on production (HTTPS) — cookie only sent over TLS
+
+**Input Length Validation:**
+- `_validate_input_lengths(data)` checks string fields against `_INPUT_MAX_LENGTHS` dict
+- Limits: correction 2000, company_name 200, email 254, name 200, phone 50, website 500, region 100, reason 500, password 128
+- Applied to: `/update-company`, `/save-correction`, `/api/allowed-users` POST, `/api/access-requests/.../reject`
+
+**Admin-Only Endpoint Guards:**
+- `_is_admin()` check added to 30+ endpoints (see Admin-only actions in User Access section)
+- JSON endpoints return `{"ok": false, "error": "admin only"}` with 403
+- HTML/redirect endpoints show "Admin access required" flash message
+- `/llm-log` and `/llm-log/clear` restricted to admin
+
+**Error Sanitisation:**
+- Global `@app.errorhandler(500)` and `@app.errorhandler(404)` — return safe messages, never stack traces
+- `_safe_error(e, fallback)` helper logs real error to `sys.stderr` (visible in Azure Log Stream), returns generic fallback string to user
+- All `str(e)` in HTTP responses replaced with `_safe_error(e)` calls
+- All redirect error messages sanitised (no exception details in URL params)
+
+**CORS:** Not configured (Flask default = same-origin policy). No `flask-cors` or `Access-Control-*` headers.
+
+**Logging safety:** No passwords, tokens, API keys, or secrets logged. LLM debug log contains prompts/responses (AI reasoning only). Login audit logs email, provider, result, user-agent — no credentials.
 
 ---
 
