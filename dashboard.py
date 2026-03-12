@@ -588,6 +588,8 @@ HTML_TEMPLATE = """
         .hamburger.open span:nth-child(1) { transform:translateY(7px) rotate(45deg); }
         .hamburger.open span:nth-child(2) { opacity:0; }
         .hamburger.open span:nth-child(3) { transform:translateY(-7px) rotate(-45deg); }
+        /* ── Table scroll wrapper ── */
+        .table-wrap { width:100%; }
 
         /* ── Responsive: Tablet & Phone (≤768px) ── */
         @media (max-width: 768px) {
@@ -599,14 +601,15 @@ HTML_TEMPLATE = """
             .nav-btn { width:100%; justify-content:flex-start; padding:10px 15px; }
             .dropdown { position:static; width:100%; min-width:0; box-shadow:none; border:none; border-top:1px solid rgba(255,255,255,.05); }
             .navbar-right { display:none; }
+            .page-content { padding:10px; }
 
             .stats { gap:6px; }
-            .stat-box { min-width:70px; padding:6px 8px; }
+            .stat-box { min-width:70px; padding:6px 8px; flex:1 1 70px; }
             .stat-box h2 { font-size:16px; }
             .stat-box p { font-size:9px; }
 
             .filters { flex-direction:column; gap:6px; }
-            .filters select, .filters input[type="text"] { width:100% !important; box-sizing:border-box; }
+            .filters select, .filters input[type="text"], .filters input[type="search"] { width:100% !important; box-sizing:border-box; }
             .filters button { width:100%; }
 
             .table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
@@ -630,8 +633,10 @@ HTML_TEMPLATE = """
 
             .stat-box { min-width:60px; padding:5px 6px; }
             .stat-box h2 { font-size:14px; }
+            .stat-box p { font-size:10px; }
 
             .detail-cards-grid { grid-template-columns:1fr !important; }
+            .detail-row td { padding:8px !important; }
 
             #companyTable { font-size:11px; }
             #companyTable th, #companyTable td { padding:5px 3px; }
