@@ -25,7 +25,7 @@ Owned and operated by Wade. The goal is to build a comprehensive list of every N
 | File | Purpose |
 |------|---------|
 | `searcher.py` | Core engine — all search, scrape, match, verify, save logic (~6000 lines) |
-| `dashboard.py` | Flask web UI + all API endpoints (~8400 lines) |
+| `dashboard.py` | Flask web UI + all API endpoints (~9000+ lines) |
 | `run_weekly.py` | Entry point: Google weekly light scan (last 7 days, 5 broad terms) |
 | `run_facebook.py` | Entry point: Facebook-only search pass |
 | `run_directories.py` | Entry point: NZSA + LinkedIn directory import |
@@ -71,6 +71,7 @@ SMTP_PASS=...
 NOTIFY_EMAIL=...
 FACEBOOK_APP_ID=...
 FACEBOOK_APP_SECRET=...
+TOTP_ENCRYPTION_KEY=...                  # Fernet key for encrypting TOTP 2FA secrets at rest (optional — derives from PAGES_PASSWORD+SERVICE_KEY if absent)
 ```
 
 **Key separation:** `dashboard.py` and `searcher.py` use `SUPABASE_SERVICE_KEY` (bypasses RLS). The public site JS uses the anon `SUPABASE_KEY` which is subject to RLS. Never swap these.
@@ -283,7 +284,21 @@ Searches run via GitHub Actions workflows in `.github/workflows/`. Each workflow
 | `/api/allowed-users` | GET: list users. POST: add user (admin only) |
 | `/api/allowed-users/<id>` | DELETE: remove user (admin only) |
 | `/api/allowed-users/<id>/toggle-admin` | POST: toggle `is_admin` flag (admin only) |
+| `/api/allowed-users/<id>/reset-2fa` | POST: admin resets user's 2FA (admin only) |
 | `/api/login-audit` | GET: last 200 login attempts |
+| `/api/access-requests` | GET: list all access requests (admin only) |
+| `/api/access-requests/<id>/approve` | POST: approve request → add to allowed_users, send welcome email |
+| `/api/access-requests/<id>/reject` | POST: reject request, optional reason |
+| `/auth/2fa` | GET: 2FA code entry page during login |
+| `/auth/2fa/verify` | POST: verify TOTP code during login |
+| `/account/profile` | GET: My Account profile page (avatar + 2FA) |
+| `/account/profile/upload-avatar` | POST: upload avatar image to Supabase Storage |
+| `/account/profile/clear-avatar` | POST: remove avatar |
+| `/account/2fa/setup` | POST: generate TOTP secret + QR code |
+| `/account/2fa/confirm-setup` | POST: verify first code to enable 2FA |
+| `/account/2fa/disable` | POST: disable 2FA (requires current code) |
+| `/account/2fa/backup-codes` | GET: view backup codes |
+| `/account/2fa/regenerate-backup` | POST: regenerate backup codes |
 
 ---
 
@@ -298,9 +313,35 @@ Searches run via GitHub Actions workflows in `.github/workflows/`. Each workflow
 
 **Admin-only actions:** Add/remove users, toggle admin status. New users default to `is_admin=false`.
 
+**Two-Factor Authentication (2FA):**
+- Optional TOTP-based 2FA per user, compatible with Google Authenticator, Microsoft Authenticator, DUO
+- Enabled via My Account → Profile page
+- Uses `pyotp` for TOTP generation/verification (RFC 6238, 30-second window with ±1 tolerance)
+- TOTP secrets encrypted at rest with Fernet (`TOTP_ENCRYPTION_KEY` env var, or derived from `PAGES_PASSWORD`+`SUPABASE_SERVICE_KEY`)
+- 8 backup codes generated on setup (format: XXXXX-XXXXX), stored encrypted
+- Login flow: Google OAuth → if `totp_enabled` → `session['2fa_pending']=True` → redirect to `/auth/2fa` → verify code → complete login
+- Rate limiting: 5 failed attempts → session cleared, forced re-login
+- Password login (localhost) bypasses 2FA entirely
+- Admin can reset a user's 2FA from User Access page
+
+**Profile & Avatar:**
+- My Account page (`/account/profile`) with avatar upload and 2FA management
+- Avatar stored in Supabase Storage `avatars` bucket (public)
+- Upload: client reads file as base64 data URL → POST to server → decode → upload to Supabase Storage with `x-upsert: true`
+- Avatar displayed in navbar (small circle next to sign-out) and User Access page
+
+**Access Request System:**
+- Unauthorized Google users who try to login trigger an access request workflow
+- First attempt: creates `pending` record in `access_requests`, sends fancy HTML email to admin, shows friendly message
+- Repeat attempts while pending: shows "still pending" message, no duplicate email
+- After rejection: shows soft letdown message, allows re-request (creates new pending + new email)
+- Admin reviews requests on User Access page → Approve (adds to `allowed_users`, sends welcome email) or Reject (with optional reason)
+- Audit trail: `login_audit` records `access_requested`, `access_pending`, `access_rejected` results
+
 **Supabase tables:**
-- `allowed_users` — `id, email, name, added_by, added_at, active, last_login, last_provider, is_admin`
+- `allowed_users` — `id, email, name, added_by, added_at, active, last_login, last_provider, is_admin, totp_secret, totp_enabled, totp_backup_codes, totp_enabled_at, avatar_url`
 - `login_audit` — `id, email, provider, result, attempted_at, user_agent`
+- `access_requests` — `id, email, status (pending/approved/rejected), requested_at, reviewed_by, reviewed_at, reject_reason`
 
 ---
 
@@ -310,6 +351,7 @@ Navbar with dropdown menus:
 - **Searches**: Full Search, Weekly Scan, Facebook Search (+Fresh), Directory Import (+Fresh), Partial Search (panel), Bulk Recheck (panel), Search Terms (panel), Scheduled Searches (panel)
 - **Database**: Dedupe DB, Review Near-Matches, Publish Live, View Live Site, Export CSV, Backup Now, Clear DB
 - **History & Logs**: Version History, Search History, LLM Log, Audit Log, API Credits
+- **My Account** link (user-gear icon) → Profile page with avatar + 2FA management
 
 **Collapsible panels** below navbar (toggle via dropdown buttons):
 - `panel-terms` — edit Google/Facebook search terms
@@ -399,6 +441,9 @@ All LLM calls: intercepted by `_LoggingAnthropicClient` → logged to `llm_debug
 - **Region-boosted PSPLA sorting** — PSPLA names containing website region words ranked first.
 - **`_LoggingAnthropicClient`** — intercepts all LLM calls, logs to `llm_debug.log`.
 - **CSV exports** — always use `sorted(companies[0].keys())` for columns, never a hardcoded list.
+- **Sort persistence** — `localStorage.setItem('pspla-sort', sel)` saves sort selection, restored on page load via IIFE.
+- **Partial auth boundary** — `session['2fa_pending']` blocks all protected routes via `@before_request` until 2FA is completed.
+- **TOTP encryption** — secrets encrypted with Fernet before storage; `_totp_fernet()` creates cipher from env key or derives one.
 
 ---
 

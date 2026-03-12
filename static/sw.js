@@ -32,6 +32,9 @@ self.addEventListener('fetch', event => {
   // Skip non-GET requests (form submissions, API calls)
   if (event.request.method !== 'GET') return;
 
+  // Skip non-http(s) schemes (chrome-extension://, etc.)
+  if (!event.request.url.startsWith('http')) return;
+
   // Skip Supabase API calls — never cache these
   if (event.request.url.includes('supabase.co')) return;
 

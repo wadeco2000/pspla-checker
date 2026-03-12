@@ -5880,7 +5880,7 @@ function enableSetup() {
             '<div class="manual-key">' + d.secret_manual + '</div></div>' +
             '<p style="font-size:13px;color:#555">Enter the 6-digit code from your app to confirm setup:</p>' +
             '<div class="confirm-row">' +
-            '<input type="text" id="confirm-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="000000" onkeydown="if(event.key===\'Enter\')confirmSetup()">' +
+            '<input type="text" id="confirm-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="000000" onkeydown="if(event.key===&#39;Enter&#39;)confirmSetup()">' +
             '<button class="btn btn-enable" id="btn-confirm" onclick="confirmSetup()">Confirm</button></div>' +
             '<div id="setup-msg"></div>';
         document.getElementById('actions').style.display = 'none';
