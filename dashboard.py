@@ -2614,6 +2614,10 @@ HTML_TEMPLATE = """
                             <div style="background:#eaf3fb; border:1px solid #aed4f0; border-radius:8px; padding:12px;">
                                 <div style="font-size:12px; font-weight:bold; color:#1a5276; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
                                     <i class="fa-solid fa-shield-halved" style="color:#2980b9;"></i> PSPLA Licence
+                                    <a href="https://forms.justice.govt.nz/search/PSPLA/" target="_blank" title="Search the PSPLA Register"
+                                       style="margin-left:auto; font-size:10px; color:#2980b9; font-weight:normal; text-decoration:none; display:inline-flex; align-items:center; gap:3px;">
+                                        <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:9px;"></i> Register
+                                    </a>
                                 </div>
                                 <div id="pspla-card-body-{{ c.id }}" style="display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; font-size:12px;">
                                     {% if c.pspla_name %}<div style="grid-column:1/-1;"><span style="color:#888;">Name:</span> <strong>{{ c.pspla_name }}</strong></div>{% endif %}
@@ -2738,6 +2742,10 @@ HTML_TEMPLATE = """
                                 <div style="font-size:12px; font-weight:bold; color:#c0392b; margin-bottom:8px; display:flex; align-items:center; gap:5px;">
                                     <span style="background:#c0392b; color:white; font-size:10px; padding:1px 5px; border-radius:3px; font-weight:bold;">NZSA</span>
                                     Membership
+                                    <a href="https://security.org.nz/membership/find-a-member/" target="_blank" title="Search the NZSA Member Directory"
+                                       style="margin-left:auto; font-size:10px; color:#c0392b; font-weight:normal; text-decoration:none; display:inline-flex; align-items:center; gap:3px;">
+                                        <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:9px;"></i> Directory
+                                    </a>
                                 </div>
                                 <div id="nzsa-result-{{ c.id }}" style="font-size:12px; margin-bottom:6px;">
                                     {% if c.nzsa_member == 'true' %}
@@ -2884,6 +2892,20 @@ HTML_TEMPLATE = """
                             </div>
                         </div>
 
+                        <!-- COMPANY HISTORY LOG -->
+                        <div style="border-top:1px solid #ddd; padding-top:10px; margin-bottom:8px;">
+                            <label style="font-weight:bold; color:#555; font-size:11px; display:block; margin-bottom:6px;">
+                                <i class="fa-solid fa-clock-rotate-left" style="color:#7f8c8d;"></i> Company History
+                            </label>
+                            <div id="company-history-{{ c.id }}" style="font-size:11px;">
+                                <button onclick="loadCompanyHistory('{{ c.id }}', this.dataset.name)"
+                                        data-name="{{ (c.company_name or '') | e }}"
+                                        style="padding:2px 10px; font-size:11px; background:#7f8c8d; color:white; border:none; border-radius:3px; cursor:pointer;">
+                                    Load history
+                                </button>
+                            </div>
+                        </div>
+
                         <!-- EDIT / DELETE / CORRECTION -->
                         <div style="border-top:1px solid #ddd; padding-top:10px; margin-top:4px;">
                             <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
@@ -2987,6 +3009,17 @@ HTML_TEMPLATE = """
             else if (type === 'fb_cam_unlicensed') { document.getElementById('fbServiceFilter').value = 'fb_cctv'; _statMode = 'not_licensed'; }
             filterTable();
         }
+
+        // Pre-fill search from URL ?search= parameter (e.g. from audit log links)
+        (function() {
+            var params = new URLSearchParams(window.location.search);
+            var q = params.get('search');
+            if (q) {
+                document.getElementById('searchBox').value = q;
+                // Clean URL without reloading
+                window.history.replaceState({}, '', '/');
+            }
+        })();
 
         function filterTable() {
             const search = document.getElementById('searchBox').value.toLowerCase();
@@ -3563,6 +3596,9 @@ HTML_TEMPLATE = """
             var style = fullWidth ? ' style="grid-column:1/-1;"' : '';
             return '<div' + style + '><span style="color:#888;">' + label + ':</span> ' + value + '</div>';
         }
+        function escHtml(s) {
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
 
         // ── Recheck terminal panel ─────────────────────────────────────────────
         var _recheckTermTimer = null;
@@ -3871,6 +3907,53 @@ HTML_TEMPLATE = """
                 })
                 .catch(function(e) {
                     container.innerHTML = '<span style="color:#c0392b; font-size:11px;">Error loading AI decisions: ' + e + '</span>';
+                });
+        }
+
+        function loadCompanyHistory(id, name) {
+            var container = document.getElementById('company-history-' + id);
+            container.innerHTML = '<span style="color:#888">Loading history...</span>';
+            fetch('/company-history?name=' + encodeURIComponent(name))
+                .then(function(r) { return r.json(); })
+                .then(function(rows) {
+                    if (!rows || !rows.length) {
+                        container.innerHTML = '<span style="color:#aaa; font-size:11px;">No history recorded for this company.</span>';
+                        return;
+                    }
+                    var badgeColors = {
+                        'added': '#27ae60', 'updated': '#2980b9', 'deleted': '#e74c3c',
+                        'email': '#8e44ad', 'correction': '#d35400', 'rollback': '#7f8c8d',
+                        'llm_decision': '#2980b9', 'backup': '#7f8c8d'
+                    };
+                    var html = '<div style="max-height:300px; overflow-y:auto; border:1px solid #eee; border-radius:4px; margin-top:4px;">';
+                    html += '<table style="width:100%; border-collapse:collapse; font-size:11px;">';
+                    html += '<thead><tr style="background:#f4f4f4; position:sticky; top:0;">';
+                    html += '<th style="padding:4px 6px; text-align:left; font-size:10px; color:#666;">Time (NZ)</th>';
+                    html += '<th style="padding:4px 6px; text-align:left; font-size:10px; color:#666;">Action</th>';
+                    html += '<th style="padding:4px 6px; text-align:left; font-size:10px; color:#666;">Changes</th>';
+                    html += '<th style="padding:4px 6px; text-align:left; font-size:10px; color:#666;">By</th>';
+                    html += '</tr></thead><tbody>';
+                    rows.forEach(function(r) {
+                        var ts = '-';
+                        if (r.timestamp) {
+                            var d = new Date(r.timestamp);
+                            ts = d.toLocaleString('en-NZ', {timeZone:'Pacific/Auckland', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'});
+                        }
+                        var bc = badgeColors[r.action] || '#999';
+                        var notes = r.notes ? '<br><small style="color:#aaa">' + escHtml(r.notes).substring(0, 200) + '</small>' : '';
+                        html += '<tr style="border-bottom:1px solid #f0f0f0;">';
+                        html += '<td style="padding:4px 6px; color:#888; white-space:nowrap;">' + ts + '</td>';
+                        html += '<td style="padding:4px 6px;"><span style="display:inline-block; border-radius:3px; padding:1px 6px; font-size:10px; color:white; font-weight:bold; background:' + bc + ';">' + escHtml(r.action || '') + '</span></td>';
+                        html += '<td style="padding:4px 6px; color:#555; max-width:300px; word-break:break-word;">' + escHtml(r.changes || '') + notes + '</td>';
+                        html += '<td style="padding:4px 6px; color:#999;">' + escHtml(r.triggered_by || '') + '</td>';
+                        html += '</tr>';
+                    });
+                    html += '</tbody></table></div>';
+                    html += '<div style="color:#aaa; font-size:10px; margin-top:3px;">' + rows.length + ' entries</div>';
+                    container.innerHTML = html;
+                })
+                .catch(function(e) {
+                    container.innerHTML = '<span style="color:#c0392b; font-size:11px;">Error loading history: ' + e + '</span>';
                 });
         }
 
@@ -4581,6 +4664,51 @@ def index():
     )
 
 
+_SUB_NAVBAR = """
+<style>
+.sub-nav{background:#2c3e50;padding:8px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-family:Arial,sans-serif;}
+.sub-nav a.sn-brand{display:flex;align-items:center;gap:8px;text-decoration:none;color:white;font-weight:bold;font-size:15px;}
+.sub-nav a.sn-brand span{font-size:10px;color:#7fb3d8;display:block;font-weight:normal;}
+.sub-nav .sn-links{display:flex;gap:4px;flex-wrap:wrap;margin-left:auto;}
+.sub-nav .sn-links a{color:#bdc3c7;text-decoration:none;font-size:12px;padding:4px 10px;border-radius:3px;transition:background .15s;}
+.sub-nav .sn-links a:hover{background:rgba(255,255,255,0.1);color:white;}
+.sub-nav .sn-links a.sn-active{background:rgba(255,255,255,0.15);color:white;font-weight:600;}
+.sub-nav .sn-sep{color:#4a6278;font-size:10px;user-select:none;align-self:center;}
+@media(max-width:768px){.sub-nav{padding:8px 12px;gap:8px;}.sub-nav .sn-links{gap:2px;}.sub-nav .sn-links a{font-size:11px;padding:3px 6px;}}
+</style>
+<nav class="sub-nav">
+  <a class="sn-brand" href="/">
+    <div>PSPLA Checker<span>by Alarm Watch</span></div>
+  </a>
+  <div class="sn-links">
+    <a href="/">Dashboard</a>
+    <span class="sn-sep">|</span>
+    <a href="/search-history">Search History</a>
+    <a href="/audit-log">Audit Log</a>
+    <a href="/release-notes">Release Notes</a>
+    <span class="sn-sep">|</span>
+    <a href="/history">Version History</a>
+    <a href="/llm-log">LLM Log</a>
+    <a href="/user-access">User Access</a>
+    <span class="sn-sep">|</span>
+    <a href="/duplicates">Duplicates</a>
+    <a href="/suspect-records">Suspects</a>
+    <a href="/review-duplicates">Near-Matches</a>
+    <span class="sn-sep">|</span>
+    <a href="/account/profile">My Account</a>
+  </div>
+</nav>
+"""
+
+
+def _sub_navbar_for(active_page):
+    """Return the sub-navbar HTML with the active page highlighted."""
+    return _SUB_NAVBAR.replace(
+        f'href="/{active_page}"',
+        f'href="/{active_page}" class="sn-active"'
+    )
+
+
 HISTORY_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
@@ -4590,10 +4718,9 @@ HISTORY_TEMPLATE = """
     <script>(function(){var _f=window.fetch;window.fetch=function(u,o){o=o||{};var m=(o.method||'GET').toUpperCase();if(m!=='GET'&&m!=='HEAD'){o.headers=o.headers||{};o.headers['X-CSRF-Token']=document.querySelector('meta[name="csrf-token"]').content;}return _f.call(this,u,o);};})();</script>
     <title>Version History</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f4f4f4; }
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f4f4f4; }
+        .content { padding: 20px; }
         h1 { color: #2c3e50; }
-        .back { color: #2980b9; text-decoration: none; font-size: 14px; }
-        .back:hover { text-decoration: underline; }
         table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px;
                 overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-top: 20px; }
         th { background: #2c3e50; color: white; padding: 10px 14px; text-align: left; }
@@ -4616,7 +4743,8 @@ HISTORY_TEMPLATE = """
     </style>
 </head>
 <body>
-    <a href="/" class="back">&larr; Back to Dashboard</a>
+    {{ sub_navbar|safe }}
+    <div class="content">
     <h1>Version History</h1>
     <div class="warning">
         <strong>Rollback</strong> creates a revert commit and triggers a new deploy to Azure.
@@ -4685,6 +4813,7 @@ HISTORY_TEMPLATE = """
             });
     }
     </script>
+    </div>
 </body>
 </html>
 """
@@ -4731,7 +4860,8 @@ def history():
         except Exception as e:
             print(f"Git log error: {e}")
 
-    return render_template_string(HISTORY_TEMPLATE, commits=commits, source=source, repo=repo)
+    return render_template_string(HISTORY_TEMPLATE, commits=commits, source=source, repo=repo,
+                                   sub_navbar=_sub_navbar_for("history"))
 
 
 @app.route("/rollback/<commit_hash>", methods=["POST"])
@@ -5734,10 +5864,7 @@ SEARCH_HISTORY_TEMPLATE = """<!DOCTYPE html>
     </style>
 </head>
 <body>
-<div class="page-header">
-    <h1><i class="fa-solid fa-clock-rotate-left"></i> Search History</h1>
-    <a href="/" class="back"><i class="fa-solid fa-arrow-left"></i> Back to Dashboard</a>
-</div>
+{{ sub_navbar|safe }}
 <div class="content">
     <div class="stat-row" id="stats"></div>
     <div class="filter-row">
@@ -5952,7 +6079,7 @@ fetch('/search-history-data')
 
 @app.route("/search-history")
 def search_history():
-    return render_template_string(SEARCH_HISTORY_TEMPLATE)
+    return render_template_string(SEARCH_HISTORY_TEMPLATE, sub_navbar=_sub_navbar_for("search-history"))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -6049,16 +6176,14 @@ RELEASE_NOTES_TEMPLATE = """<!DOCTYPE html>
     </style>
 </head>
 <body>
-<div class="page-header">
-    <h1><i class="fa-solid fa-newspaper"></i> Release Notes</h1>
-    <div style="display:flex;gap:8px;align-items:center;">
+{{ sub_navbar|safe }}
+<div class="content">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+        <h1 style="margin:0;font-size:18px;color:#2c3e50;"><i class="fa-solid fa-newspaper"></i> Release Notes</h1>
         {% if is_admin %}
         <button class="btn btn-success btn-sm" onclick="openAddModal()"><i class="fa-solid fa-plus"></i> Add Release</button>
         {% endif %}
-        <a href="/"><i class="fa-solid fa-arrow-left"></i> Dashboard</a>
     </div>
-</div>
-<div class="content">
     <div id="generating" class="generating" style="display:none;">
         <i class="fa-solid fa-spinner"></i>
         <p style="margin-top:12px;color:#666;">Analysing commit history with AI...<br><small>This may take a minute.</small></p>
@@ -6257,7 +6382,8 @@ def release_notes_page():
         pass
     return render_template_string(RELEASE_NOTES_TEMPLATE,
                                  releases_json=json.dumps(notes),
-                                 is_admin=_is_admin())
+                                 is_admin=_is_admin(),
+                                 sub_navbar=_sub_navbar_for("release-notes"))
 
 
 @app.route("/generate-release-notes", methods=["POST"])
@@ -6418,6 +6544,24 @@ def audit_log_data():
     return jsonify(resp.json() if resp.ok else [])
 
 
+@app.route("/company-history")
+def company_history():
+    from flask import jsonify
+    company_name = request.args.get("name", "")
+    if not company_name:
+        return jsonify([])
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    encoded = requests.utils.quote(company_name)
+    resp = requests.get(
+        f"{SUPABASE_URL}/rest/v1/AuditLog"
+        f"?select=id,timestamp,action,company_name,changes,triggered_by,notes"
+        f"&company_name=eq.{encoded}"
+        f"&order=timestamp.desc&limit=200",
+        headers=headers, timeout=15
+    )
+    return jsonify(resp.json() if resp.ok else [])
+
+
 @app.route("/company-ai-decisions")
 def company_ai_decisions():
     from flask import jsonify
@@ -6437,7 +6581,7 @@ def company_ai_decisions():
 
 @app.route("/audit-log")
 def audit_log_page():
-    return render_template_string(AUDIT_LOG_TEMPLATE)
+    return render_template_string(AUDIT_LOG_TEMPLATE, sub_navbar=_sub_navbar_for("audit-log"))
 
 
 def _send_access_request_email(requester_email, user_agent, dashboard_url=None):
@@ -6721,10 +6865,7 @@ body{font-family:Arial,sans-serif;margin:0;background:#f4f4f4;color:#333}
 </style>
 </head>
 <body>
-<div class="page-header">
-  <h1><i class="fa-solid fa-user-gear"></i> My Account</h1>
-  <a href="/" class="back-link"><i class="fa-solid fa-arrow-left"></i> Back to Dashboard</a>
-</div>
+{{ sub_navbar|safe }}
 <div class="content">
 
   <!-- Profile card -->
@@ -6990,7 +7131,7 @@ def account_profile_page():
                 .replace('__STATUS_LABEL__', 'Disabled')
                 .replace('__STATUS_SUB__', 'Add an extra layer of security to your account')
                 .replace('__ACTIONS__', actions))
-    return _R(html, mimetype='text/html')
+    return render_template_string(html, sub_navbar=_sub_navbar_for("account/profile"))
 
 @app.route('/account/profile/upload-avatar', methods=['POST'])
 def account_upload_avatar():
@@ -7208,7 +7349,8 @@ def account_2fa_regen_backup():
 @app.route("/user-access")
 def user_access_page():
     return render_template_string(
-        _USER_ACCESS_HTML.replace('__IS_ADMIN__', 'true' if _is_admin() else 'false')
+        _USER_ACCESS_HTML.replace('__IS_ADMIN__', 'true' if _is_admin() else 'false'),
+        sub_navbar=_sub_navbar_for("user-access")
     )
 
 @app.route("/api/allowed-users", methods=["GET"])
@@ -7477,10 +7619,7 @@ tr:last-child td{border-bottom:none}
 </style>
 </head>
 <body>
-<div class="page-header">
-  <h1><i class="fa-solid fa-users"></i> User Access</h1>
-  <a href="/" class="back-link"><i class="fa-solid fa-arrow-left"></i> Back to Dashboard</a>
-</div>
+{{ sub_navbar|safe }}
 <div class="content">
 
   <!-- Allowed Users -->
@@ -7730,6 +7869,7 @@ def llm_log_page():
 </style>
 </head>
 <body>
+{{ sub_navbar|safe }}
 <div class="toolbar">
   <h1>&#x1F916; LLM Debug Log</h1>
   <span style="color:#888; font-size:12px;">Showing last {{ entries|length }} of {{ total_count }} entries</span>
@@ -7740,7 +7880,6 @@ def llm_log_page():
       <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
       <button class="danger" type="submit">&#x1F5D1; Clear Log</button>
     </form>
-    <a href="/">&#x2190; Dashboard</a>
   </div>
 </div>
 <div class="log" id="log">
@@ -7770,7 +7909,7 @@ function scrollToBottom() {
 window.onload = function() { scrollToBottom(); };
 </script>
 </body>
-</html>""", entries=entries, total_count=total_count)
+</html>""", entries=entries, total_count=total_count, sub_navbar=_sub_navbar_for("llm-log"))
 
 
 def _parse_llm_log(content):
@@ -7822,9 +7961,9 @@ AUDIT_LOG_TEMPLATE = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <title>Audit Log</title>
 <style>
-body { font-family: Arial, sans-serif; font-size: 13px; padding: 20px; background: #f5f5f5; }
+body { font-family: Arial, sans-serif; font-size: 13px; padding: 0; margin: 0; background: #f5f5f5; }
+.content { padding: 20px; }
 h1 { color: #2c3e50; margin-bottom: 6px; }
-.back { margin-bottom: 16px; display: inline-block; color: #2980b9; text-decoration: none; }
 .controls { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
 .controls input, .controls select { padding: 5px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
 .controls input { width: 220px; }
@@ -7850,7 +7989,8 @@ tr:hover td { background: #fafafa; }
 </style>
 </head>
 <body>
-<a class="back" href="/">&#8592; Back to dashboard</a>
+{{ sub_navbar|safe }}
+<div class="content">
 <h1>&#x1F4CB; Audit Log</h1>
 <div class="controls">
   <input id="filterName" type="text" placeholder="Filter by company..." oninput="render()">
@@ -7919,7 +8059,7 @@ function render() {
     html += '<tr>'
       + '<td class="ts">' + ts + '</td>'
       + '<td><span class="badge ' + badgeCls + '">' + escHtml(r.action||'') + '</span></td>'
-      + '<td class="co">' + escHtml(r.company_name||'-') + '</td>'
+      + '<td class="co">' + (r.company_name ? '<a href="/?search=' + encodeURIComponent(r.company_name) + '" style="color:inherit; text-decoration:underline; text-decoration-style:dotted; cursor:pointer;" title="View in dashboard">' + escHtml(r.company_name) + '</a>' : '-') + '</td>'
       + '<td class="changes">' + escHtml(r.changes||'') + notes + '</td>'
       + '<td class="tby">' + escHtml(r.triggered_by||'') + '</td>'
       + '<td>' + (r.action === 'updated' ? '<button onclick="doRollback(' + r.id + ')" style="padding:2px 8px;font-size:11px;background:#922b21;color:white;border:none;border-radius:3px;cursor:pointer;white-space:nowrap">Revert</button>' : '') + '</td>'
@@ -8027,6 +8167,7 @@ KEY PATTERNS:
   </div>
 </div>
 
+</div>
 </body>
 </html>
 """
@@ -9338,7 +9479,8 @@ def duplicates_page():
     # Only groups with 2+ records and a non-empty domain
     dup_groups = {d: recs for d, recs in groups.items() if d and len(recs) >= 2}
 
-    return render_template_string(DUPLICATES_TEMPLATE, dup_groups=dup_groups)
+    return render_template_string(DUPLICATES_TEMPLATE, dup_groups=dup_groups,
+                                   sub_navbar=_sub_navbar_for("duplicates"))
 
 
 DUPLICATES_TEMPLATE = """<!DOCTYPE html>
@@ -9347,9 +9489,9 @@ DUPLICATES_TEMPLATE = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <title>Duplicate Companies</title>
 <style>
-body { font-family: Arial, sans-serif; font-size: 13px; padding: 20px; background: #f5f5f5; }
+body { font-family: Arial, sans-serif; font-size: 13px; padding: 0; margin: 0; background: #f5f5f5; }
+.content { padding: 20px; }
 h1 { color: #2c3e50; }
-.back { margin-bottom: 16px; display: inline-block; color: #2980b9; text-decoration: none; }
 .group { background: white; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 18px; padding: 14px; }
 .group h3 { margin: 0 0 10px; font-size: 14px; color: #555; }
 table { width: 100%; border-collapse: collapse; }
@@ -9360,7 +9502,8 @@ td { padding: 6px 8px; border-top: 1px solid #eee; vertical-align: top; }
 </style>
 </head>
 <body>
-<a class="back" href="/">← Back to dashboard</a>
+{{ sub_navbar|safe }}
+<div class="content">
 <h1>Duplicate Records (same website domain)</h1>
 <p>{{ dup_groups|length }} domain(s) with multiple entries. Delete the unwanted record using the ✕ button.</p>
 {% for domain, recs in dup_groups.items() %}
@@ -9403,6 +9546,7 @@ function deleteDup(id, name) {
     });
 }
 </script>
+</div>
 </body>
 </html>
 """
@@ -9477,7 +9621,8 @@ def suspect_records():
     # Sort: most reasons first
     suspects.sort(key=lambda x: -len(x["reasons"]))
 
-    return render_template_string(SUSPECTS_TEMPLATE, suspects=suspects)
+    return render_template_string(SUSPECTS_TEMPLATE, suspects=suspects,
+                                   sub_navbar=_sub_navbar_for("suspect-records"))
 
 
 SUSPECTS_TEMPLATE = """<!DOCTYPE html>
@@ -9486,9 +9631,9 @@ SUSPECTS_TEMPLATE = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <title>Suspect Records</title>
 <style>
-body { font-family: Arial, sans-serif; font-size: 13px; padding: 20px; background: #f5f5f5; }
+body { font-family: Arial, sans-serif; font-size: 13px; padding: 0; margin: 0; background: #f5f5f5; }
+.content { padding: 20px; }
 h1 { color: #c0392b; }
-.back { margin-bottom: 16px; display: inline-block; color: #2980b9; text-decoration: none; }
 .card { background: white; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 14px; padding: 14px; }
 .card.kept { opacity: 0.4; border-color: #27ae60; }
 .card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -9507,7 +9652,8 @@ h1 { color: #c0392b; }
 </style>
 </head>
 <body>
-<a class="back" href="/">← Back to dashboard</a>
+{{ sub_navbar|safe }}
+<div class="content">
 <h1>&#9888; Suspect Records</h1>
 <p class="count">{{ suspects|length }} record(s) flagged for review. Check each one and Delete or Keep.</p>
 
@@ -9568,6 +9714,7 @@ function deleteRecord(id, name) {
   .catch(function() { alert('Delete request failed.'); });
 }
 </script>
+</div>
 </body>
 </html>
 """
