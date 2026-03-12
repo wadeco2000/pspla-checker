@@ -997,8 +997,9 @@ def auth_request_access_submit():
         return _jsonify_auth({'ok': False, 'error': 'Failed to create request. Please try again.'})
     # Send email to admin (async)
     _ua = request.headers.get('User-Agent', '')
+    _host_url = request.host_url.rstrip('/')
     threading.Thread(target=_send_access_request_email,
-                     args=(email, _ua), daemon=True).start()
+                     args=(email, _ua, _host_url), daemon=True).start()
     # Audit log
     try:
         requests.post(f"{SUPABASE_URL}/rest/v1/login_audit",
@@ -1338,8 +1339,16 @@ HTML_TEMPLATE = """
             .nav-item { width:100%; }
             .nav-btn { width:100%; justify-content:flex-start; padding:10px 15px; }
             .dropdown { position:static; width:100%; min-width:0; box-shadow:none; border:none; border-top:1px solid rgba(255,255,255,.05); }
-            .navbar-right { display:none; }
+            /* Show navbar-right but rearrange for mobile */
+            .navbar-right { display:flex !important; flex-wrap:wrap; gap:6px; align-items:center; width:100%; order:5; padding:6px 0; }
+            .navbar-right .credits-bar { display:none; }
+            .navbar-right #btns-running { display:contents; }
+            .navbar-right .running-pill { order:1; }
+            .navbar-right form { order:2; }
             .page-content { padding:10px; }
+
+            /* Mobile status bar — compact running controls + credits */
+            .mobile-status-bar { display:flex !important; }
 
             .stats { gap:6px; }
             .stat-box { min-width:70px; padding:6px 8px; flex:1 1 70px; }
@@ -1352,10 +1361,24 @@ HTML_TEMPLATE = """
 
             .table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
             #companyTable { min-width:900px; }
+            /* Sticky company name column */
+            #companyTable th:nth-child(2),
+            #companyTable td.company-cell {
+                position:sticky; left:0; z-index:2;
+                background:#1a2332; /* matches dark theme */
+                box-shadow:2px 0 4px rgba(0,0,0,0.15);
+            }
+            html:not(.dark) #companyTable th:nth-child(2),
+            html:not(.dark) #companyTable td.company-cell {
+                background:#fff;
+            }
 
             .detail-top-grid { grid-template-columns:1fr !important; }
-            .detail-cards-grid { grid-template-columns:1fr 1fr !important; }
+            .detail-cards-grid { grid-template-columns:1fr !important; }
             .detail-electrician { max-width:100% !important; }
+            /* Make detail card content more compact on mobile */
+            .detail-row td div[style*="border-radius"] { font-size:12px !important; }
+            .detail-row td div[style*="border-radius"] p { font-size:11px !important; margin:3px 0 !important; }
 
             .nzsa-form-grid { grid-template-columns:1fr !important; }
 
@@ -1378,7 +1401,12 @@ HTML_TEMPLATE = """
 
             #companyTable { font-size:11px; }
             #companyTable th, #companyTable td { padding:5px 3px; }
+            /* Keep sticky company cell on phone too */
+            #companyTable td.company-cell { max-width:140px; }
         }
+
+        /* Mobile status bar — hidden on desktop */
+        .mobile-status-bar { display:none; }
     </style>
 <script>(function(){if(localStorage.getItem("pspla-dark")==="1")document.documentElement.classList.add("dark");})()</script>
 </head>
@@ -1640,6 +1668,23 @@ HTML_TEMPLATE = """
     <span id="btns-idle" style="display:none;"></span>
   </div>
 </nav>
+<!-- Mobile status bar — visible only on mobile -->
+<div class="mobile-status-bar" style="background:#1a2332;padding:8px 12px;display:none;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.05);">
+  <div style="display:flex;gap:10px;align-items:center;font-size:11px;">
+    <span id="m-credit-serp" style="color:#8898aa;"><i class="fa-solid fa-magnifying-glass"></i> <b>–</b></span>
+    <span id="m-credit-tokens" style="color:#8898aa;"><i class="fa-solid fa-robot"></i> <b>–</b></span>
+  </div>
+  <span id="m-btns-running" style="display:{{ 'contents' if search_running else 'none' }};">
+    <div style="display:inline-flex;align-items:center;gap:4px;">
+      <div class="pulse-dot" style="width:6px;height:6px;"></div>
+      <span style="font-size:11px;color:#2ecc71;font-weight:600;">Running</span>
+    </div>
+    <form method="POST" action="/stop-search" onsubmit="return confirm('Stop the running search?')" style="margin:0;display:inline;">
+      <button style="background:#c0392b;color:white;border:none;border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;"><i class="fa-solid fa-stop"></i> Stop</button>
+    </form>
+  </span>
+</div>
+
 <div class="page-content">
 
     {% set _s = init_status %}
@@ -1763,6 +1808,7 @@ HTML_TEMPLATE = """
         var btnsIdle = document.getElementById('btns-idle');
         var btnPause = document.getElementById('btn-pause');
         var btnResume = document.getElementById('btn-resume');
+        var mBtnsRunning = document.getElementById('m-btns-running');
 
         function poll() {
             fetch('/search-status')
@@ -1771,11 +1817,13 @@ HTML_TEMPLATE = """
                     if (!s.running) {
                         wrap.style.display = 'none';
                         if (btnsRunning) btnsRunning.style.display = 'none';
+                        if (mBtnsRunning) mBtnsRunning.style.display = 'none';
                         if (btnsIdle) btnsIdle.style.display = 'contents';
                         return;
                     }
                     wrap.style.display = 'block';
                     if (btnsRunning) btnsRunning.style.display = 'contents';
+                    if (mBtnsRunning) mBtnsRunning.style.display = 'contents';
                     if (btnsIdle) btnsIdle.style.display = 'none';
                     if (btnPause) btnPause.style.display = s.paused ? 'none' : 'inline';
                     if (btnResume) btnResume.style.display = s.paused ? 'inline' : 'none';
@@ -1873,17 +1921,20 @@ HTML_TEMPLATE = """
     // ── API Credits widget ───────────────────────────────────────────────────
     function updateTokenWidget(tokens) {
         var el = document.getElementById('credit-tokens');
-        if (!el || !tokens) return;
+        var mEl = document.getElementById('m-credit-tokens');
+        if (!tokens) return;
         var inp = (tokens.input || 0).toLocaleString();
         var out = (tokens.output || 0).toLocaleString();
         var cost = tokens.estimated_cost_usd != null ? ' (~$' + tokens.estimated_cost_usd.toFixed(3) + ' USD)' : '';
         var total = (tokens.input || 0) + (tokens.output || 0);
         if (total === 0) {
-            el.innerHTML = '<i class="fa-solid fa-robot"></i> Claude: <span style="font-weight:bold;color:#aaa;">no usage this session</span>';
+            if (el) el.innerHTML = '<i class="fa-solid fa-robot"></i> Claude: <span style="font-weight:bold;color:#aaa;">no usage this session</span>';
+            if (mEl) mEl.innerHTML = '<i class="fa-solid fa-robot"></i> <b style="color:#aaa;">0 tokens</b>';
         } else {
-            el.innerHTML = '<i class="fa-solid fa-robot"></i> Claude: <span style="font-weight:bold;color:#a29bfe;">'
+            if (el) el.innerHTML = '<i class="fa-solid fa-robot"></i> Claude: <span style="font-weight:bold;color:#a29bfe;">'
                 + total.toLocaleString() + ' tokens' + cost + '</span>'
                 + ' <span style="color:#888;font-size:11px;">(' + inp + ' in / ' + out + ' out)</span>';
+            if (mEl) mEl.innerHTML = '<i class="fa-solid fa-robot"></i> <b style="color:#a29bfe;">' + total.toLocaleString() + ' tkn</b>';
         }
     }
 
@@ -1893,9 +1944,11 @@ HTML_TEMPLATE = """
             .then(function(d) {
                 // SerpAPI
                 var serpEl = document.getElementById('credit-serp');
+                var mSerpEl = document.getElementById('m-credit-serp');
                 if (serpEl) {
                     if (d.serp_error) {
                         serpEl.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> SerpAPI: <span style="color:#e74c3c;font-weight:bold;">' + d.serp_error + '</span>';
+                        if (mSerpEl) mSerpEl.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> <b style="color:#e74c3c;">err</b>';
                     } else {
                         var left  = d.serp_searches_left != null ? d.serp_searches_left.toLocaleString() : '?';
                         var month = d.serp_searches_month != null ? d.serp_searches_month.toLocaleString() : '?';
@@ -1906,6 +1959,7 @@ HTML_TEMPLATE = """
                             + left + ' searches left</span>'
                             + ' <span style="color:#888;font-size:11px;">(' + used + ' used of ' + month + ' this month'
                             + (pct != null ? ', ' + pct + '%' : '') + ')</span>';
+                        if (mSerpEl) mSerpEl.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> <b style="color:' + color + ';">' + left + '</b>';
                     }
                 }
                 // Claude tokens
@@ -5932,14 +5986,15 @@ def audit_log_page():
     return Response(AUDIT_LOG_TEMPLATE, mimetype='text/html')
 
 
-def _send_access_request_email(requester_email, user_agent):
+def _send_access_request_email(requester_email, user_agent, dashboard_url=None):
     """Send a fancy HTML email to the admin when someone requests access."""
     if not SMTP_HOST or not SMTP_USER or not SMTP_PASS or not NOTIFY_EMAIL:
         return
     import smtplib
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
-    dashboard_url = request.host_url.rstrip('/') if request else "https://pspla-checker.azurewebsites.net"
+    if not dashboard_url:
+        dashboard_url = "https://pspla-checker.azurewebsites.net"
     user_access_url = f"{dashboard_url}/user-access"
     now_str = datetime.now(timezone.utc).strftime('%d %b %Y at %H:%M UTC')
     # Parse device info from user agent
@@ -9310,11 +9365,106 @@ _search_proc = None   # module-level reference to the running subprocess
 _was_running = False  # tracks previous poll state for crash detection
 
 
+def _send_crash_notification_email(search_type, started_iso):
+    """Send email to admin when a search crashes without completing."""
+    if not SMTP_HOST or not SMTP_USER or not SMTP_PASS or not NOTIFY_EMAIL:
+        return
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    now_str = datetime.now(timezone.utc).strftime('%d %b %Y at %H:%M UTC')
+    started_str = started_iso[:19].replace('T', ' ') + ' UTC' if started_iso else 'Unknown'
+    type_label = (search_type or 'Unknown').replace('-', ' ').title()
+    html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#f0f4f8;font-family:Arial,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f8;padding:40px 20px">
+  <tr><td align="center">
+    <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.08)">
+      <tr>
+        <td style="background:linear-gradient(135deg,#7f1d1d 0%,#dc2626 100%);padding:36px 40px;text-align:center">
+          <div style="font-size:28px;margin-bottom:8px">&#x26A0;&#xFE0F;</div>
+          <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700">Search Crashed</h1>
+          <p style="margin:8px 0 0;color:#fca5a5;font-size:14px">A search process exited unexpectedly</p>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:36px 40px">
+          <table width="100%" cellpadding="0" cellspacing="0" style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;margin-bottom:28px">
+            <tr>
+              <td style="padding:20px 24px">
+                <table cellpadding="0" cellspacing="0" width="100%">
+                  <tr>
+                    <td style="padding:6px 0;font-size:13px;color:#991b1b;font-weight:700;width:100px">Search type</td>
+                    <td style="padding:6px 0;font-size:15px;color:#7f1d1d;font-weight:600">{type_label}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:6px 0;font-size:13px;color:#991b1b;font-weight:700">Started</td>
+                    <td style="padding:6px 0;font-size:14px;color:#7f1d1d">{started_str}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:6px 0;font-size:13px;color:#991b1b;font-weight:700">Crashed</td>
+                    <td style="padding:6px 0;font-size:14px;color:#7f1d1d">{now_str}</td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+          <p style="margin:0;font-size:14px;color:#718096;line-height:1.6">
+            The search process exited without writing a completion record. Check the search log in the dashboard for details.
+          </p>
+        </td>
+      </tr>
+      <tr>
+        <td style="background:#f7fafc;border-top:1px solid #e2e8f0;padding:20px 40px;text-align:center">
+          <p style="margin:0;font-size:12px;color:#a0aec0">PSPLA Licence Checker &middot; Crash Notification</p>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>"""
+    plain = (f"Search Crashed\n\nType: {type_label}\nStarted: {started_str}\n"
+             f"Crashed: {now_str}\n\nCheck the search log for details.")
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"PSPLA Search Crashed — {type_label}"
+        msg["From"] = SMTP_USER
+        msg["To"] = NOTIFY_EMAIL
+        msg.attach(MIMEText(plain, "plain"))
+        msg.attach(MIMEText(html, "html"))
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_USER, NOTIFY_EMAIL, msg.as_string())
+        print("  [Crash email] Sent crash notification to admin.")
+    except Exception as e:
+        print(f"  [Crash email] Failed to send: {e}")
+
+
 def _detect_and_mark_crashes():
     """Mark stale 'running' search history entries as 'crashed'.
     Called when the dashboard detects a search process just died without writing a final entry."""
     from searcher import STATE_BACKEND
     now_iso = datetime.now(timezone.utc).isoformat()
+    # Try to read search type from search_start.json for crash email
+    _crash_type = None
+    _crash_started = None
+    try:
+        if os.path.exists(START_FILE):
+            with open(START_FILE) as f:
+                _start_data = json.load(f)
+            _crash_type = _start_data.get("type")
+            _crash_started = _start_data.get("started")
+    except Exception:
+        pass
+    # Send crash notification email (in background thread)
+    import threading
+    threading.Thread(target=_send_crash_notification_email,
+                     args=(_crash_type, _crash_started), daemon=True).start()
 
     # Supabase: update any stale 'running' entries in search_runs table
     if STATE_BACKEND == "supabase":
@@ -9385,7 +9535,7 @@ def _search_process_alive():
             pass  # fall through to file checks
     # Fallback 1: RUNNING_FLAG exists and is less than 8 hours old
     if os.path.exists(RUNNING_FLAG):
-        age = __time.time() - os.path.getmtime(RUNNING_FLAG)
+        age = _time.time() - os.path.getmtime(RUNNING_FLAG)
         if age < 28800:
             return True
         # Flag is stale — clean up
@@ -9397,7 +9547,7 @@ def _search_process_alive():
     # Fallback 2: search_status.json was written within the last 90 seconds
     # (the search scripts write it on every region+term iteration — reliable heartbeat)
     if os.path.exists(STATUS_FILE):
-        age = __time.time() - os.path.getmtime(STATUS_FILE)
+        age = _time.time() - os.path.getmtime(STATUS_FILE)
         if age < 90:
             return True
     return False
@@ -9408,6 +9558,12 @@ def _launch(script, args=None, triggered_by="manual"):
     global _search_proc
     if _search_process_alive():
         return
+    # Double-launch guard: if running.flag was just created (< 5 seconds ago), skip
+    if os.path.exists(RUNNING_FLAG):
+        age = _time.time() - os.path.getmtime(RUNNING_FLAG)
+        if age < 5:
+            print(f"  [Launch blocked] running.flag is only {age:.1f}s old — likely double-submit")
+            return
     # Map script filename to search type label
     _type_map = {
         "searcher.py": "full", "run_weekly.py": "google-weekly",
