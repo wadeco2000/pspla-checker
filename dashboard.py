@@ -323,6 +323,27 @@ def _check_rate_limit(category, max_requests, window_seconds):
         return _jsonify_auth({'ok': False, 'error': 'Too many requests. Please try again later.'}), 429
     return None
 
+# ── Security: global error handlers ──────────────────────────────────────────
+@app.errorhandler(500)
+def _handle_500(e):
+    import traceback
+    traceback.print_exc()  # log full trace to stderr/Azure logs
+    if request.accept_mimetypes.accept_json and not request.accept_mimetypes.accept_html:
+        return _jsonify_auth({'ok': False, 'error': 'An internal error occurred.'}), 500
+    return "An internal error occurred. Please try again later.", 500
+
+@app.errorhandler(404)
+def _handle_404(e):
+    if request.accept_mimetypes.accept_json and not request.accept_mimetypes.accept_html:
+        return _jsonify_auth({'ok': False, 'error': 'Not found'}), 404
+    return "Page not found.", 404
+
+def _safe_error(e, fallback="An error occurred"):
+    """Return a safe error message, logging the real error to stderr."""
+    import sys
+    print(f"[ERROR] {e}", file=sys.stderr)
+    return fallback
+
 _AUTH_SKIP = {
     'login_page', 'login_password', 'auth_callback', 'auth_verify', 'auth_logout',
     'service_worker', 'auth_2fa_page', 'auth_2fa_verify',
@@ -4657,6 +4678,8 @@ def history():
 
 @app.route("/rollback/<commit_hash>", methods=["POST"])
 def rollback(commit_hash):
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     from flask import jsonify
     # Validate hash (7 or 40 hex chars)
     if not all(c in "0123456789abcdef" for c in commit_hash) or len(commit_hash) not in (7, 40):
@@ -4738,7 +4761,7 @@ def rollback(commit_hash):
             return jsonify({"ok": True, "commit": new_commit_sha[:7]})
 
         except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 500
+            return jsonify({"ok": False, "error": _safe_error(e)}), 500
 
     # Fallback: local git reset (laptop mode)
     if len(commit_hash) != 7:
@@ -4757,30 +4780,36 @@ def rollback(commit_hash):
         except Exception:
             pass
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": _safe_error(e)}), 500
     return jsonify({"ok": True})
 
 
 @app.route("/start-search", methods=["POST"])
 def start_search():
+    if not _is_admin():
+        return redirect(url_for("index", message="Admin access required.", type="error"))
     rl = _check_rate_limit('search_launch', 3, 60)
     if rl: return rl
     try:
         _launch("searcher.py")
         return redirect(url_for("index", message="Full search started.", type="success"))
     except Exception as e:
-        return redirect(url_for("index", message=f"Failed to start search: {e}", type="error"))
+        _safe_error(e, "Failed to start search")
+        return redirect(url_for("index", message="Failed to start search. Check server logs.", type="error"))
 
 
 @app.route("/start-weekly-search", methods=["POST"])
 def start_weekly_search():
+    if not _is_admin():
+        return redirect(url_for("index", message="Admin access required.", type="error"))
     rl = _check_rate_limit('search_launch', 3, 60)
     if rl: return rl
     try:
         _launch("run_weekly.py")
         return redirect(url_for("index", message="Weekly scan started.", type="success"))
     except Exception as e:
-        return redirect(url_for("index", message=f"Failed: {e}", type="error"))
+        _safe_error(e, "Failed to start weekly search")
+        return redirect(url_for("index", message="Failed to start weekly search. Check server logs.", type="error"))
 
 
 @app.route("/search-progress")
@@ -4790,11 +4819,13 @@ def search_progress_endpoint():
     try:
         return jsonify(get_all_progress())
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": _safe_error(e)}), 500
 
 
 @app.route("/start-facebook-search", methods=["POST"])
 def start_facebook_search():
+    if not _is_admin():
+        return redirect(url_for("index", message="Admin access required.", type="error"))
     rl = _check_rate_limit('search_launch', 3, 60)
     if rl: return rl
     try:
@@ -4802,11 +4833,14 @@ def start_facebook_search():
         _launch("run_facebook.py", ["--fresh"] if fresh else [])
         return redirect(url_for("index", message="Facebook search started.", type="success"))
     except Exception as e:
-        return redirect(url_for("index", message=f"Failed to start Facebook search: {e}", type="error"))
+        _safe_error(e, "Failed to start Facebook search")
+        return redirect(url_for("index", message="Failed to start Facebook search. Check server logs.", type="error"))
 
 
 @app.route("/start-directory-import", methods=["POST"])
 def start_directory_import():
+    if not _is_admin():
+        return redirect(url_for("index", message="Admin access required.", type="error"))
     rl = _check_rate_limit('search_launch', 3, 60)
     if rl: return rl
     try:
@@ -4814,7 +4848,8 @@ def start_directory_import():
         _launch("run_directories.py", ["--fresh"] if fresh else [])
         return redirect(url_for("index", message="Directory import started (NZSA + LinkedIn).", type="success"))
     except Exception as e:
-        return redirect(url_for("index", message=f"Failed to start directory import: {e}", type="error"))
+        _safe_error(e, "Failed to start directory import")
+        return redirect(url_for("index", message="Failed to start directory import. Check server logs.", type="error"))
 
 
 @app.route("/dedupe-db", methods=["POST"])
@@ -4825,6 +4860,8 @@ def dedupe_db():
     Merges all non-null fields from duplicates into keeper — nothing is lost.
     Writes an audit entry for every merge.
     """
+    if not _is_admin():
+        return redirect(url_for("index", message="Admin access required.", type="error"))
     if _search_process_alive():
         return redirect(url_for("index", message="Cannot dedupe while a search is running — stop it first.", type="error"))
     import re as _re
@@ -5064,11 +5101,14 @@ def dedupe_db():
     except Exception as e:
         import traceback as _tb
         print(f"  [Dedupe error] {e}\n{_tb.format_exc()}")
-        return redirect(url_for("index", message=f"Dedupe error: {e}", type="error"))
+        _safe_error(e, "Dedupe error")
+        return redirect(url_for("index", message="Dedupe error. Check server logs.", type="error"))
 
 
 @app.route("/backup-db", methods=["POST"])
 def backup_db():
+    if not _is_admin():
+        return redirect(url_for("index", message="Admin access required.", type="error"))
     companies = get_companies()
     if not companies:
         return redirect(url_for("index", message="Nothing to back up — database is empty.", type="error"))
@@ -5137,6 +5177,8 @@ def backup_db():
 
 @app.route("/clear-db", methods=["POST"])
 def clear_db():
+    if not _is_admin():
+        return redirect(url_for("index", message="Admin access required.", type="error"))
     # Password check
     if EXPORT_PASSWORD and request.form.get("clear_password") != EXPORT_PASSWORD:
         return redirect(url_for("index", message="Incorrect password — database not cleared.", type="error"))
@@ -5225,11 +5267,14 @@ def clear_db():
         else:
             return redirect(url_for("index", message=f"Backup done but delete failed: {response.text[:200]}", type="error"))
     except Exception as e:
-        return redirect(url_for("index", message=f"Backup done but error during delete: {e}", type="error"))
+        _safe_error(e, "Backup done but error during delete")
+        return redirect(url_for("index", message="Backup done but error during delete. Check server logs.", type="error"))
 
 
 @app.route("/export.csv", methods=["POST"])
 def export_csv():
+    if not _is_admin():
+        return redirect(url_for("index", message="Admin access required.", type="error"))
     if EXPORT_PASSWORD and request.form.get("export_password") != EXPORT_PASSWORD:
         return redirect(url_for("index", message="Incorrect export password.", type="error"))
     companies = get_companies()
@@ -5249,6 +5294,8 @@ def export_csv():
 
 @app.route("/publish", methods=["POST"])
 def publish():
+    if not _is_admin():
+        return redirect(url_for("index", message="Admin access required.", type="error"))
     if not GITHUB_PAT:
         return redirect(url_for("index", message="GITHUB_PAT not set in .env — cannot trigger publish.", type="error"))
     try:
@@ -5267,7 +5314,8 @@ def publish():
         else:
             return redirect(url_for("index", message=f"GitHub API error: {resp.status_code} {resp.text[:200]}", type="error"))
     except Exception as e:
-        return redirect(url_for("index", message=f"Publish error: {e}", type="error"))
+        _safe_error(e, "Publish error")
+        return redirect(url_for("index", message="Publish error. Check server logs.", type="error"))
 
 
 @app.route("/search-running-info")
@@ -5403,7 +5451,7 @@ def api_credits():
             else:
                 result["serp_error"] = f"HTTP {r.status_code}"
         except Exception as e:
-            result["serp_error"] = str(e)
+            result["serp_error"] = _safe_error(e, "Failed to fetch SerpAPI usage")
     else:
         result["serp_error"] = "SERPAPI_KEY not set"
 
@@ -5412,7 +5460,7 @@ def api_credits():
         from searcher import get_token_usage
         result["tokens"] = get_token_usage()
     except Exception as e:
-        result["tokens"] = {"error": str(e)}
+        result["tokens"] = {"error": _safe_error(e, "Failed to fetch token usage")}
 
     return jsonify(result)
 
@@ -5457,7 +5505,7 @@ def open_terminal():
         )
         return jsonify({"ok": True})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)})
+        return jsonify({"ok": False, "error": _safe_error(e)})
 
 
 @app.route("/search-terms")
@@ -5468,6 +5516,8 @@ def get_search_terms():
 
 @app.route("/save-terms", methods=["POST"])
 def save_terms():
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     from flask import jsonify
     try:
         data = request.get_json()
@@ -5483,11 +5533,13 @@ def save_terms():
         _sync_config_store("search_terms", existing)
         return jsonify({"ok": True})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": _safe_error(e)}), 500
 
 
 @app.route("/start-partial-search", methods=["POST"])
 def start_partial_search():
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     rl = _check_rate_limit('search_launch', 3, 60)
     if rl: return rl
     from flask import jsonify
@@ -5507,11 +5559,13 @@ def start_partial_search():
         _launch("run_partial.py", ["--fresh"] if fresh else [])
         return jsonify({"ok": True})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": _safe_error(e)}), 500
 
 
 @app.route("/start-bulk-recheck", methods=["POST"])
 def start_bulk_recheck():
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     rl = _check_rate_limit('search_launch', 3, 60)
     if rl: return rl
     from flask import jsonify
@@ -6476,7 +6530,7 @@ def account_upload_avatar():
         if not r.ok:
             return _jsonify_auth({'ok': False, 'error': f'Storage upload failed: {r.status_code}'})
     except Exception as e:
-        return _jsonify_auth({'ok': False, 'error': f'Upload error: {str(e)}'})
+        return _jsonify_auth({'ok': False, 'error': _safe_error(e, 'Upload failed')})
     # Build public URL
     public_url = f"{SUPABASE_URL}/storage/v1/object/public/avatars/{filename}"
     # Save URL to allowed_users
@@ -7137,7 +7191,7 @@ def llm_log_page():
     try:
         content = open(log_path, encoding="utf-8").read() if os.path.exists(log_path) else ""
     except Exception as e:
-        content = f"Error reading log: {e}"
+        content = _safe_error(e, "Error reading log file")
     all_entries = _parse_llm_log(content)
     total_count = len(all_entries)
     entries = all_entries[-100:]  # show last 100 only
@@ -7471,6 +7525,8 @@ KEY PATTERNS:
 
 @app.route("/toggle-schedule", methods=["POST"])
 def toggle_schedule():
+    if not _is_admin():
+        return redirect(url_for("index", message="Admin access required.", type="error"))
     from searcher import _upsert_search_state
     currently_enabled = _get_schedule_enabled()
     if currently_enabled:
@@ -7492,6 +7548,8 @@ def toggle_schedule():
 
 @app.route("/pause-search", methods=["POST"])
 def pause_search():
+    if not _is_admin():
+        return redirect(url_for("index", message="Admin access required.", type="error"))
     from searcher import _upsert_search_state
     open(PAUSE_FLAG, "w").close()
     _upsert_search_state({"paused": True})
@@ -7500,6 +7558,8 @@ def pause_search():
 
 @app.route("/resume-search", methods=["POST"])
 def resume_search():
+    if not _is_admin():
+        return redirect(url_for("index", message="Admin access required.", type="error"))
     from searcher import _upsert_search_state
     if os.path.exists(PAUSE_FLAG):
         os.remove(PAUSE_FLAG)
@@ -7633,6 +7693,8 @@ def _kill_search_processes():
 
 @app.route("/stop-search", methods=["POST"])
 def stop_search():
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     from searcher import _upsert_search_state
     # Set stop_requested so remote/cloud searches can stop gracefully
     _upsert_search_state({"stop_requested": True})
@@ -7668,6 +7730,8 @@ def _fetch_company_snapshot(company_id):
 @app.route("/find-facebook", methods=["POST"])
 def find_facebook_for_company():
     """Look up a Facebook page URL, scrape its profile data, and save all fb_* fields."""
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     from flask import jsonify
     company_id = request.json.get("id")
     company_name = request.json.get("name", "")
@@ -7712,7 +7776,7 @@ def find_facebook_for_company():
         print(f"[Facebook] No Facebook page found")
         return jsonify({"found": False})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": _safe_error(e)}), 500
     finally:
         _rl.__exit__(None, None, None)
 
@@ -7720,6 +7784,8 @@ def find_facebook_for_company():
 @app.route("/recheck-companies-office", methods=["POST"])
 def recheck_companies_office_for_company():
     """Re-run Companies Office lookup for a single company and save the result."""
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     from flask import jsonify
     company_id = request.json.get("id")
     company_name = request.json.get("name", "")
@@ -7824,7 +7890,7 @@ def recheck_companies_office_for_company():
             "address": result.get("address"),
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": _safe_error(e)}), 500
     finally:
         _rl.__exit__(None, None, None)
 
@@ -7832,6 +7898,8 @@ def recheck_companies_office_for_company():
 @app.route("/recheck-google-profile", methods=["POST"])
 def recheck_google_profile_for_company():
     """Re-run Google Business Profile lookup for a single company and save the result."""
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     from flask import jsonify
     company_id = request.json.get("id")
     company_name = request.json.get("name", "")
@@ -7878,7 +7946,7 @@ def recheck_google_profile_for_company():
             "google_email": result.get("email"),
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": _safe_error(e)}), 500
     finally:
         _rl.__exit__(None, None, None)
 
@@ -7886,6 +7954,8 @@ def recheck_google_profile_for_company():
 @app.route("/full-recheck", methods=["POST"])
 def full_recheck_for_company():
     """Re-run all checks (CO, Facebook, Google, PSPLA, NZSA) for a single company and save everything."""
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     from flask import jsonify
     company_id = request.json.get("id")
     company_name = request.json.get("name", "")
@@ -8041,7 +8111,7 @@ def full_recheck_for_company():
                     snapshot_before=snapshot)
         return jsonify({"ok": True, "summary": summary})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": _safe_error(e)}), 500
     finally:
         _rl.__exit__(None, None, None)
 
@@ -8050,6 +8120,8 @@ def full_recheck_for_company():
 def recheck_llm_sense():
     """Use Claude Sonnet to sense-check all associations on a record and clear any that
     are clearly wrong (NZSA, PSPLA, Facebook, LinkedIn, Companies Office)."""
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     from flask import jsonify
     import anthropic as _anthropic
     import json as _json
@@ -8286,7 +8358,7 @@ Set a value to true ONLY if you are confident the association is for a different
 
     except Exception as e:
         print(f"[LLM Sense] Error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": _safe_error(e)}), 500
     finally:
         _rl.__exit__(None, None, None)
 
@@ -8294,6 +8366,8 @@ Set a value to true ONLY if you are confident the association is for a different
 @app.route("/recheck-nzsa", methods=["POST"])
 def recheck_nzsa_for_company():
     """Re-check NZSA membership for a single company and save the result."""
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     from flask import jsonify
     company_id = request.json.get("id")
     company_name = request.json.get("name", "")
@@ -8344,7 +8418,7 @@ def recheck_nzsa_for_company():
                     snapshot_before=snapshot)
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": _safe_error(e)}), 500
     finally:
         _rl.__exit__(None, None, None)
 
@@ -8362,7 +8436,7 @@ def util_electrician_search():
         results = check_electrician_licence_all(f"{fname} {lname}")
         return jsonify({"results": results, "count": len(results)})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": _safe_error(e)}), 500
 
 
 @app.route("/util/nzsa-search", methods=["POST"])
@@ -8377,7 +8451,7 @@ def util_nzsa_search():
         result = check_nzsa(name)
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": _safe_error(e)}), 500
 
 
 @app.route("/util/pspla-search", methods=["POST"])
@@ -8419,12 +8493,14 @@ def util_pspla_search():
             })
         return jsonify({"results": results})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": _safe_error(e)}), 500
 
 
 @app.route("/recheck-electrician", methods=["POST"])
 def recheck_electrician_for_company():
     """Re-check MBIE Electrical Workers register — tries individual licence name then CO directors."""
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     from flask import jsonify
     company_id   = request.json.get("id")
     name         = request.json.get("name", "").strip()       # individual_license name
@@ -8470,7 +8546,7 @@ def recheck_electrician_for_company():
                     snapshot_before=snapshot)
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": _safe_error(e)}), 500
     finally:
         _rl.__exit__(None, None, None)
 
@@ -8478,6 +8554,8 @@ def recheck_electrician_for_company():
 @app.route("/recheck-services", methods=["POST"])
 def recheck_services_for_company():
     """Re-scrape the company website and detect alarm/CCTV/monitoring services."""
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     from flask import jsonify
     company_id = request.json.get("id")
     website_url = request.json.get("website", "")
@@ -8509,7 +8587,7 @@ def recheck_services_for_company():
         )
         return jsonify({"ok": True, **services})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": _safe_error(e)}), 500
     finally:
         _rl.__exit__(None, None, None)
 
@@ -8517,6 +8595,8 @@ def recheck_services_for_company():
 @app.route("/find-linkedin", methods=["POST"])
 def find_linkedin_for_company():
     """Look up a LinkedIn company page for a single company by ID and save it."""
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     from flask import jsonify
     company_id = request.json.get("id")
     company_name = request.json.get("name", "")
@@ -8599,7 +8679,7 @@ def find_linkedin_for_company():
         print(f"[LinkedIn] No LinkedIn page found")
         return jsonify({"found": False})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": _safe_error(e)}), 500
     finally:
         _rl.__exit__(None, None, None)
 
@@ -8607,6 +8687,8 @@ def find_linkedin_for_company():
 @app.route("/recheck-pspla", methods=["POST"])
 def recheck_pspla_for_company():
     """Re-run PSPLA check for a single company by ID and save the result."""
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     from flask import jsonify
     company_id = request.json.get("id")
     company_name = request.json.get("name", "")
@@ -8722,7 +8804,7 @@ def recheck_pspla_for_company():
             "match_method": result.get("match_method"),
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": _safe_error(e)}), 500
     finally:
         _rl.__exit__(None, None, None)
 
@@ -8985,6 +9067,8 @@ function deleteRecord(id, name) {
 @app.route("/update-company", methods=["POST"])
 def update_company():
     """Update editable fields on a company record."""
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     company_id = request.json.get("id")
     if not company_id:
         return jsonify({"error": "No id provided"}), 400
@@ -9008,7 +9092,7 @@ def update_company():
         )
         return jsonify({"ok": True})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": _safe_error(e)}), 500
 
 
 CORRECTIONS_FILE = os.path.join(BASE_DIR, "corrections.md")
@@ -9017,6 +9101,8 @@ CORRECTIONS_FILE = os.path.join(BASE_DIR, "corrections.md")
 @app.route("/save-correction", methods=["POST"])
 def save_correction():
     """Save a correction note, parse with Claude, block false match, auto-recheck, learn."""
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     from flask import jsonify
     company_id = request.json.get("id")
     company_name = request.json.get("company_name", "Unknown")
@@ -9088,12 +9174,14 @@ def save_correction():
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": _safe_error(e)}), 500
 
 
 @app.route("/confirm-recheck", methods=["POST"])
 def confirm_recheck():
     """User approved or rejected the proposed PSPLA match after a correction."""
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     from flask import jsonify
     from searcher import write_audit
     company_id  = request.json.get("id")
@@ -9130,11 +9218,13 @@ def confirm_recheck():
                     snapshot_before=snapshot)
         return jsonify({"ok": True, "approved": approved})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": _safe_error(e)}), 500
 
 
 @app.route("/rollback-to-snapshot", methods=["POST"])
 def rollback_to_snapshot():
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     from flask import jsonify
     import json as _json_rb
     audit_id = request.json.get("audit_id")
@@ -9174,12 +9264,14 @@ def rollback_to_snapshot():
                     triggered_by="manual (dashboard)")
         return jsonify({"ok": True, "company_id": company_id, "company_name": company_name})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": _safe_error(e)}), 500
 
 
 @app.route("/delete-company", methods=["POST"])
 def delete_company():
     """Delete a single company record by ID."""
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     from flask import jsonify
     company_id = request.json.get("id")
     if not company_id:
@@ -9211,7 +9303,7 @@ def delete_company():
             return jsonify({"ok": True})
         return jsonify({"error": f"Supabase returned {resp.status_code}"}), 500
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": _safe_error(e)}), 500
 
 
 _search_proc = None   # module-level reference to the running subprocess
@@ -9392,6 +9484,8 @@ def _nzsa_build_payload(data):
 
 @app.route("/open-nzsa-report", methods=["POST"])
 def open_nzsa_report():
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
     from flask import jsonify
     try:
         data = request.get_json(force=True) or {}
