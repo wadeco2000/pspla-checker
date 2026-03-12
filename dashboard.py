@@ -6437,8 +6437,7 @@ def company_ai_decisions():
 
 @app.route("/audit-log")
 def audit_log_page():
-    from flask import Response
-    return Response(AUDIT_LOG_TEMPLATE, mimetype='text/html')
+    return render_template_string(AUDIT_LOG_TEMPLATE)
 
 
 def _send_access_request_email(requester_email, user_agent, dashboard_url=None):
@@ -7208,9 +7207,9 @@ def account_2fa_regen_backup():
 # ── User Access page ───────────────────────────────────────────────────────────
 @app.route("/user-access")
 def user_access_page():
-    from flask import Response as _R
-    html = _USER_ACCESS_HTML.replace('__IS_ADMIN__', 'true' if _is_admin() else 'false')
-    return _R(html, mimetype='text/html')
+    return render_template_string(
+        _USER_ACCESS_HTML.replace('__IS_ADMIN__', 'true' if _is_admin() else 'false')
+    )
 
 @app.route("/api/allowed-users", methods=["GET"])
 def api_allowed_users_get():
