@@ -197,12 +197,23 @@ def _upsert_search_state(updates):
         payload.update(updates)
         if "updated_at" not in payload:
             payload["updated_at"] = datetime.now(timezone.utc).isoformat()
-        requests.post(
+        resp = requests.post(
             f"{SUPABASE_URL}/rest/v1/SearchStatus",
             headers=_SUPABASE_HEADERS, json=payload, timeout=8
         )
-    except Exception:
-        pass  # never let state push break a search
+        if resp.status_code not in (200, 201):
+            print(f"  [state-push] HTTP {resp.status_code}: {resp.text[:200]}", file=sys.stderr)
+    except Exception as e:
+        print(f"  [state-push] error: {e}", file=sys.stderr)
+
+
+def is_schedule_enabled():
+    """Check whether scheduled searches are enabled (via Supabase or local flag)."""
+    state = _read_search_state("schedule_enabled")
+    if state:
+        return bool(state.get("schedule_enabled", True))
+    # Fallback to local file
+    return os.path.exists(os.path.join(BASE_DIR, "schedule_enabled.flag"))
 
 
 def _read_search_state(columns="*"):
@@ -4178,7 +4189,11 @@ def write_status(phase, region, term, region_idx, term_idx, total_regions, total
         if os.path.exists(_sf):
             with open(_sf) as _sfh:
                 _stype = json.load(_sfh).get("type", "")
-        _log = "\n".join(get_session_log()[-60:])
+        _log_lines = get_session_log()[-60:]
+        _log = "\n".join(_log_lines)
+        # Truncate log to avoid exceeding column limits
+        if len(_log) > 50000:
+            _log = _log[-50000:]
         _prog = f"{data.get('total_found', 0)} companies found"
         if data.get('region'):
             _prog += f" — {data['region']}"
@@ -4191,7 +4206,14 @@ def write_status(phase, region, term, region_idx, term_idx, total_regions, total
             "last_heartbeat": datetime.now(timezone.utc).isoformat(),
         })
     except Exception:
-        pass
+        # Fallback: at minimum keep heartbeat alive
+        try:
+            _upsert_search_state({
+                "is_running": True,
+                "last_heartbeat": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
+            pass
 
 
 def clear_status():
@@ -6012,4 +6034,7 @@ def run_search(triggered_by="manual"):
 if __name__ == "__main__":
     import sys
     triggered_by = "scheduled" if "--scheduled" in sys.argv else "manual"
+    if triggered_by == "scheduled" and not is_schedule_enabled():
+        print("  Scheduled searches are disabled — exiting.")
+        raise SystemExit(0)
     run_search(triggered_by=triggered_by)

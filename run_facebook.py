@@ -16,7 +16,7 @@ from searcher import (
     run_facebook_search, check_schema, clear_status,
     append_history, record_search_start, RUNNING_FLAG, PAUSE_FLAG,
     reset_session_log, reset_token_usage, get_session_log, send_search_email,
-    clear_fb_progress,
+    clear_fb_progress, is_schedule_enabled,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,6 +27,11 @@ PAUSE_FLAG = os.path.join(BASE_DIR, "pause.flag")
 if __name__ == "__main__":
     triggered_by = "scheduled" if "--scheduled" in sys.argv else "manual"
     fresh = "--fresh" in sys.argv
+
+    if triggered_by == "scheduled" and not is_schedule_enabled():
+        print("  Scheduled searches are disabled — exiting.")
+        raise SystemExit(0)
+
     started_iso = datetime.now(timezone.utc).isoformat()
 
     print("=" * 60)

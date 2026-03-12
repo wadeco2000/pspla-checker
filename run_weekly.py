@@ -21,6 +21,7 @@ from searcher import (
     RUNNING_FLAG, PAUSE_FLAG, SKIP_DOMAINS, NZ_REGIONS, SERPAPI_EXHAUSTED,
     is_directory_listing_url,
     reset_session_log, get_session_log, send_search_email,
+    is_schedule_enabled,
 )
 
 WEEKLY_TERMS = [
@@ -151,4 +152,7 @@ def run_weekly(triggered_by="manual"):
 
 if __name__ == "__main__":
     triggered_by = "scheduled" if "--scheduled" in sys.argv else "manual"
+    if triggered_by == "scheduled" and not is_schedule_enabled():
+        print("  Scheduled searches are disabled — exiting.")
+        raise SystemExit(0)
     run_weekly(triggered_by)

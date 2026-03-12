@@ -48,6 +48,20 @@ START_FILE = os.path.join(BASE_DIR, "search_start.json")
 BACKUP_LOG_FILE = os.path.join(BASE_DIR, "backup_log.txt")
 RECHECK_LOG_FILE = os.path.join(BASE_DIR, "recheck_log.txt")
 
+def _get_schedule_enabled():
+    """Check if scheduled searches are enabled (Supabase or local flag)."""
+    from searcher import STATE_BACKEND
+    if STATE_BACKEND == "supabase":
+        try:
+            from searcher import _read_search_state
+            state = _read_search_state("schedule_enabled")
+            if state:
+                return bool(state.get("schedule_enabled", True))
+        except Exception:
+            pass
+    return os.path.exists(SCHEDULE_FLAG)
+
+
 # ── Recheck log capture ────────────────────────────────────────────────────────
 # Tees sys.stdout to recheck_log.txt during individual recheck endpoint calls
 # so all print() output from searcher.py is visible in the dashboard terminal.
@@ -1417,8 +1431,8 @@ HTML_TEMPLATE = """
           </form>
         </div>
         <p style="color:#666; font-size:12px; margin:0 0 12px;">
-          When enabled, searches run automatically on the schedule below.
-          The dashboard process must be running on your PC (tray icon visible) — the browser tab does not need to be open.
+          When enabled, searches run automatically via GitHub Actions on the schedule below.
+          No local process needs to be running.
         </p>
         <table style="width:100%; font-size:13px; border-collapse:collapse;">
           <thead>
@@ -1446,9 +1460,15 @@ HTML_TEMPLATE = """
             </tr>
           </tbody>
         </table>
-        <p style="color:#e67e22; font-size:11px; margin:12px 0 0;">
+        <p style="color:#e67e22; font-size:11px; margin:8px 0 0;">
           <i class="fa-solid fa-triangle-exclamation"></i>
           If a search is already running when a scheduled job fires, it will be skipped automatically.
+        </p>
+        <p style="margin:8px 0 0;">
+          <a href="https://github.com/{{ github_repo }}/actions" target="_blank"
+             style="font-size:12px; color:#3498db; text-decoration:none;">
+            <i class="fa-brands fa-github" style="margin-right:4px;"></i>View workflow runs on GitHub
+          </a>
         </p>
       </div>
     </div>
@@ -3476,11 +3496,12 @@ def index():
         message_type=message_type,
         search_running=search_alive,
         search_paused=search_paused,
-        schedule_enabled=os.path.exists(SCHEDULE_FLAG),
+        schedule_enabled=_get_schedule_enabled(),
         init_status=init_status,
         init_terms=init_terms,
         init_log_lines=init_log_lines,
         git_version=git_version,
+        github_repo=os.getenv("GITHUB_REPO", "wadeco2000/pspla-checker"),
     )
 
 

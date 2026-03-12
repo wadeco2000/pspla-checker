@@ -19,7 +19,7 @@ from searcher import (
     run_nzsa_import, run_linkedin_import, check_schema,
     clear_status, append_history, record_search_start,
     reset_session_log, get_session_log, send_search_email,
-    clear_dir_progress, reset_token_usage,
+    clear_dir_progress, reset_token_usage, is_schedule_enabled,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -34,6 +34,11 @@ if __name__ == "__main__":
     linkedin_only = "--linkedin-only" in sys.argv
     fresh = "--fresh" in sys.argv
     limit = 5 if test_mode else None
+
+    # Check if scheduled searches are enabled (for --scheduled runs)
+    if triggered_by == "scheduled" and not is_schedule_enabled():
+        print("  Scheduled searches are disabled — exiting.")
+        raise SystemExit(0)
 
     started_iso = datetime.now(timezone.utc).isoformat()
 
