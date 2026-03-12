@@ -3479,7 +3479,14 @@ def index():
                 )
                 if _gv.ok:
                     _gc = _gv.json()
-                    _gdate = _gc["commit"]["committer"]["date"][:16].replace("T", " ")
+                    from datetime import datetime as _dt, timezone as _tz
+                    try:
+                        _utc = _dt.fromisoformat(_gc["commit"]["committer"]["date"].replace("Z", "+00:00"))
+                        from zoneinfo import ZoneInfo as _ZI
+                        _nz = _utc.astimezone(_ZI("Pacific/Auckland"))
+                        _gdate = _nz.strftime("%Y-%m-%d %H:%M")
+                    except Exception:
+                        _gdate = _gc["commit"]["committer"]["date"][:16].replace("T", " ")
                     git_version = f"{_gc['sha'][:7]} {_gdate}"
             except Exception:
                 pass
