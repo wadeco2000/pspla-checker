@@ -543,7 +543,8 @@ def run_recheck(triggered_by="manual"):
             # Push to Supabase every 15 companies for public site live status
             if idx == 1 or idx % 15 == 0:
                 try:
-                    _log = "\n".join(get_session_log()[-60:])
+                    from searcher import get_terminal_log
+                    _log = "\n".join(get_terminal_log(200))
                     _push_search_status(
                         True,
                         search_type="bulk-recheck",
