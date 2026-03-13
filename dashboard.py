@@ -6601,7 +6601,7 @@ def _send_access_request_email(requester_email, user_agent, dashboard_url=None):
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
     if not dashboard_url:
-        dashboard_url = "https://pspla-checker.azurewebsites.net"
+        dashboard_url = f"https://{_CUSTOM_DOMAIN}"
     user_access_url = f"{dashboard_url}/user-access"
     now_str = datetime.now(timezone.utc).strftime('%d %b %Y at %H:%M UTC')
     # Parse device info from user agent
