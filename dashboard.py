@@ -2885,51 +2885,37 @@ HTML_TEMPLATE = """
                             </span>
                         </div>
 
-                        <!-- RE-CHECK + AI SENSE CHECK (compact row) -->
-                        <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
-                            <div style="background:#2c3e50; border-radius:6px; padding:6px 12px; display:flex; align-items:center; gap:8px; flex:1; min-width:250px;">
+                        <!-- RE-CHECK + AI SENSE CHECK + AI REASONING (single row) -->
+                        <div style="display:flex; gap:6px; margin-bottom:8px; flex-wrap:wrap;">
+                            <div style="background:#2c3e50; border-radius:6px; padding:5px 10px; display:flex; align-items:center; gap:6px; flex:1; min-width:200px;">
                                 <span style="color:white; font-size:11px; font-weight:bold; white-space:nowrap;">🔄 Full Re-check</span>
                                 <span id="full-recheck-result-{{ c.id }}" style="font-size:11px; color:#ecf0f1; flex:1;"></span>
                                 <button onclick="fullRecheck({{ c.id }})" id="full-recheck-btn-{{ c.id }}"
                                         data-name="{{ (c.company_name or '') | e }}"
                                         data-website="{{ (c.website_url or '') | e }}"
                                         data-region="{{ (c.region or '') | e }}"
-                                        style="padding:3px 12px; font-size:11px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold; white-space:nowrap;">
-                                    Re-check all sources
+                                        style="padding:3px 10px; font-size:11px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold; white-space:nowrap;">
+                                    Re-check all
                                 </button>
                             </div>
-                            <div style="background:#4a235a; border-radius:6px; padding:6px 12px; display:flex; align-items:center; gap:8px; flex:1; min-width:200px;">
+                            <div style="background:#4a235a; border-radius:6px; padding:5px 10px; display:flex; align-items:center; gap:6px;">
                                 <span style="color:white; font-size:11px; font-weight:bold; white-space:nowrap;">🤖 AI Sense Check</span>
-                                <span id="llm-sense-result-{{ c.id }}" style="font-size:11px; color:#ecf0f1; flex:1;"></span>
+                                <span id="llm-sense-result-{{ c.id }}" style="font-size:11px; color:#ecf0f1;"></span>
                                 <button onclick="recheckLlmSense({{ c.id }})" id="llm-sense-btn-{{ c.id }}"
-                                        style="padding:3px 12px; font-size:11px; background:#8e44ad; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold; white-space:nowrap;">
-                                    AI Sense Check
+                                        style="padding:3px 10px; font-size:11px; background:#8e44ad; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold; white-space:nowrap;">
+                                    Run
                                 </button>
                             </div>
-                        </div>
-
-                        <!-- AI DECISIONS + COMPANY HISTORY (compact row) -->
-                        <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; align-items:center; border-top:1px solid #ddd; padding-top:8px;">
-                            <span style="font-weight:bold; color:#555; font-size:11px;">AI Matching Decisions</span>
-                            <div id="ai-decisions-{{ c.id }}" style="font-size:11px; display:inline;">
+                            <div id="ai-decisions-{{ c.id }}" style="display:flex; align-items:center;">
                                 <button onclick="loadAIDecisions('{{ c.id }}', this.dataset.name)"
                                         data-name="{{ (c.company_name or '') | e }}"
-                                        style="padding:2px 10px; font-size:11px; background:#2980b9; color:white; border:none; border-radius:3px; cursor:pointer;">
-                                    Load AI reasoning
-                                </button>
-                            </div>
-                            <span style="color:#ccc;">|</span>
-                            <span style="font-weight:bold; color:#555; font-size:11px;"><i class="fa-solid fa-clock-rotate-left" style="color:#7f8c8d;"></i> Company History</span>
-                            <div id="company-history-{{ c.id }}" style="font-size:11px; display:inline;">
-                                <button onclick="loadCompanyHistory('{{ c.id }}', this.dataset.name)"
-                                        data-name="{{ (c.company_name or '') | e }}"
-                                        style="padding:2px 10px; font-size:11px; background:#7f8c8d; color:white; border:none; border-radius:3px; cursor:pointer;">
-                                    Load history
+                                        style="padding:5px 10px; font-size:11px; background:#2980b9; color:white; border:none; border-radius:6px; cursor:pointer; white-space:nowrap;">
+                                    🧠 Load AI reasoning
                                 </button>
                             </div>
                         </div>
 
-                        <!-- EDIT / DELETE / CORRECTION -->
+                        <!-- ACTION BUTTONS ROW: Edit / Corrections / Report / History / Delete -->
                         <div style="border-top:1px solid #ddd; padding-top:8px; margin-top:4px;">
                             <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
                                 <button onclick="toggleEditForm({{ c.id }})"
@@ -2958,6 +2944,10 @@ HTML_TEMPLATE = """
                                     style="padding:3px 12px; font-size:12px; background:#c0392b; color:white; border:none; border-radius:3px; cursor:pointer;">
                                     🚩 Report to NZSA
                                 </button>
+                                <button onclick="toggleCompanyHistory('{{ c.id }}', '{{ (c.company_name or '') | e }}')"
+                                        style="padding:3px 12px; font-size:12px; background:#7f8c8d; color:white; border:none; border-radius:3px; cursor:pointer;">
+                                    <i class="fa-solid fa-clock-rotate-left"></i> History
+                                </button>
                                 {% if is_admin %}
                                 <button data-cid="{{ c.id }}" data-cname="{{ (c.company_name or '') | e }}"
                                         onclick="deleteCompany(this.dataset.cid, this.dataset.cname)"
@@ -2971,6 +2961,8 @@ HTML_TEMPLATE = """
                                 </button>
                                 {% endif %}
                             </div>
+                            <!-- Company History (togglable, hidden by default) -->
+                            <div id="company-history-{{ c.id }}" style="display:none; font-size:11px; margin-bottom:8px;"></div>
 
                             <div id="edit-form-{{ c.id }}" style="display:none; background:#f9f0ff; border:1px solid #c39bd3; border-radius:5px; padding:10px; margin-bottom:8px;">
                                 <strong style="font-size:12px; color:#6c3483;">Edit Record Fields</strong>
@@ -3940,9 +3932,20 @@ HTML_TEMPLATE = """
                 });
         }
 
+        function toggleCompanyHistory(id, name) {
+            var container = document.getElementById('company-history-' + id);
+            if (container.style.display !== 'none' && container.innerHTML.trim()) {
+                container.style.display = 'none';
+                return;
+            }
+            container.style.display = 'block';
+            if (container.dataset.loaded) return;
+            container.innerHTML = '<span style="color:#888">Loading history...</span>';
+            container.dataset.loaded = '1';
+            loadCompanyHistory(id, name);
+        }
         function loadCompanyHistory(id, name) {
             var container = document.getElementById('company-history-' + id);
-            container.innerHTML = '<span style="color:#888">Loading history...</span>';
             fetch('/company-history?name=' + encodeURIComponent(name))
                 .then(function(r) { return r.json(); })
                 .then(function(rows) {
