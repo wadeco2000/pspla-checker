@@ -481,6 +481,15 @@ def _verify_backup_code(email, submitted_code):
 
 # ── End TOTP helpers ──────────────────────────────────────────────────────────
 
+_CUSTOM_DOMAIN = os.getenv("CUSTOM_DOMAIN", "psplachecker.co.nz")
+
+@app.before_request
+def _redirect_to_custom_domain():
+    """Redirect old Azure default hostname to the custom domain."""
+    host = request.host.split(":")[0]
+    if _CUSTOM_DOMAIN and host.endswith(".azurewebsites.net"):
+        return redirect(request.url.replace(host, _CUSTOM_DOMAIN, 1), code=301)
+
 @app.before_request
 def _require_dashboard_auth():
     if request.endpoint in _AUTH_SKIP or (request.endpoint or '').startswith('static'):
