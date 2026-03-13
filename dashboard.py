@@ -1370,17 +1370,27 @@ HTML_TEMPLATE = """
 
             .table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
             #companyTable { min-width:900px; }
+            /* Hide checkbox column on mobile */
+            #companyTable th:nth-child(1),
+            #companyTable td:first-child,
+            #companyTable colgroup col:first-child { display:none; }
             /* Sticky company name column */
             #companyTable th:nth-child(2),
             #companyTable td.company-cell {
                 position:sticky; left:0; z-index:2;
-                background:#1a2332; /* matches dark theme */
+                background:#1a2332;
                 box-shadow:2px 0 4px rgba(0,0,0,0.15);
+                min-width:150px;
             }
             html:not(.dark) #companyTable th:nth-child(2),
             html:not(.dark) #companyTable td.company-cell {
                 background:#fff;
             }
+
+            /* Collapsible filters on mobile — search box always visible */
+            .filters select, .filters button { display:none !important; }
+            .filters.filters-open select, .filters.filters-open button { display:block !important; }
+            .mobile-filter-toggle { display:flex !important; }
 
             .detail-top-grid { grid-template-columns:1fr !important; }
             .detail-cards-grid { grid-template-columns:1fr !important; }
@@ -1413,6 +1423,13 @@ HTML_TEMPLATE = """
             /* Keep sticky company cell on phone too */
             #companyTable td.company-cell { max-width:140px; }
         }
+
+        /* Mobile filter toggle — hidden on desktop */
+        .mobile-filter-toggle { display:none; align-items:center; justify-content:space-between;
+            padding:8px 12px; background:#2c3e50; border-radius:6px; margin-bottom:8px;
+            color:#fff; cursor:pointer; font-size:14px; font-weight:500; }
+        .mobile-filter-toggle i { transition:transform .2s; }
+        .mobile-filter-toggle.open i { transform:rotate(180deg); }
 
         /* Mobile status bar — hidden on desktop */
         .mobile-status-bar { display:none; }
@@ -2447,6 +2464,10 @@ HTML_TEMPLATE = """
         </div>
     </div>
 
+    <div class="mobile-filter-toggle" onclick="this.classList.toggle('open'); document.querySelector('.filters').classList.toggle('filters-open');">
+        <span><i class="fa-solid fa-filter"></i> Filters &amp; Search</span>
+        <i class="fa-solid fa-chevron-down"></i>
+    </div>
     <div class="filters">
         <input type="text" id="searchBox" placeholder="Search company name..." onkeyup="filterTable()">
         <select id="regionFilter" onchange="filterTable()">
