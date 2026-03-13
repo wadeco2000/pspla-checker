@@ -2885,49 +2885,42 @@ HTML_TEMPLATE = """
                             </span>
                         </div>
 
-                        <!-- FULL RE-CHECK BANNER -->
-                        <div style="background:#2c3e50; border-radius:8px; padding:10px 16px; margin-bottom:12px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                            <span style="color:white; font-size:12px; font-weight:bold;">🔄 Full Re-check</span>
-                            <span id="full-recheck-result-{{ c.id }}" style="font-size:12px; color:#ecf0f1; flex:1;"></span>
-                            <small style="color:#95a5a6; order:3;">Runs CO + Facebook + Google + PSPLA + NZSA</small>
-                            <button onclick="fullRecheck({{ c.id }})" id="full-recheck-btn-{{ c.id }}"
-                                    data-name="{{ (c.company_name or '') | e }}"
-                                    data-website="{{ (c.website_url or '') | e }}"
-                                    data-region="{{ (c.region or '') | e }}"
-                                    style="padding:5px 16px; font-size:12px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold; order:2; white-space:nowrap;">
-                                Re-check all sources
-                            </button>
+                        <!-- RE-CHECK + AI SENSE CHECK (compact row) -->
+                        <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+                            <div style="background:#2c3e50; border-radius:6px; padding:6px 12px; display:flex; align-items:center; gap:8px; flex:1; min-width:250px;">
+                                <span style="color:white; font-size:11px; font-weight:bold; white-space:nowrap;">🔄 Full Re-check</span>
+                                <span id="full-recheck-result-{{ c.id }}" style="font-size:11px; color:#ecf0f1; flex:1;"></span>
+                                <button onclick="fullRecheck({{ c.id }})" id="full-recheck-btn-{{ c.id }}"
+                                        data-name="{{ (c.company_name or '') | e }}"
+                                        data-website="{{ (c.website_url or '') | e }}"
+                                        data-region="{{ (c.region or '') | e }}"
+                                        style="padding:3px 12px; font-size:11px; background:#27ae60; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold; white-space:nowrap;">
+                                    Re-check all sources
+                                </button>
+                            </div>
+                            <div style="background:#4a235a; border-radius:6px; padding:6px 12px; display:flex; align-items:center; gap:8px; flex:1; min-width:200px;">
+                                <span style="color:white; font-size:11px; font-weight:bold; white-space:nowrap;">🤖 AI Sense Check</span>
+                                <span id="llm-sense-result-{{ c.id }}" style="font-size:11px; color:#ecf0f1; flex:1;"></span>
+                                <button onclick="recheckLlmSense({{ c.id }})" id="llm-sense-btn-{{ c.id }}"
+                                        style="padding:3px 12px; font-size:11px; background:#8e44ad; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold; white-space:nowrap;">
+                                    AI Sense Check
+                                </button>
+                            </div>
                         </div>
 
-                        <!-- AI LLM SENSE CHECK -->
-                        <div style="background:#4a235a; border-radius:8px; padding:10px 16px; margin-bottom:12px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                            <span style="color:white; font-size:12px; font-weight:bold;">🤖 AI Sense Check</span>
-                            <span id="llm-sense-result-{{ c.id }}" style="font-size:12px; color:#ecf0f1; flex:1;"></span>
-                            <small style="color:#c39bd3; order:3;">Claude reviews all associations and removes obvious errors</small>
-                            <button onclick="recheckLlmSense({{ c.id }})" id="llm-sense-btn-{{ c.id }}"
-                                    style="padding:5px 16px; font-size:12px; background:#8e44ad; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold; order:2; white-space:nowrap;">
-                                AI Sense Check
-                            </button>
-                        </div>
-
-                        <!-- AI DECISIONS -->
-                        <div style="border-top:1px solid #ddd; padding-top:10px; margin-bottom:8px;">
-                            <label style="font-weight:bold; color:#555; font-size:11px; display:block; margin-bottom:6px;">AI Matching Decisions</label>
-                            <div id="ai-decisions-{{ c.id }}" style="font-size:11px;">
+                        <!-- AI DECISIONS + COMPANY HISTORY (compact row) -->
+                        <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; align-items:center; border-top:1px solid #ddd; padding-top:8px;">
+                            <span style="font-weight:bold; color:#555; font-size:11px;">AI Matching Decisions</span>
+                            <div id="ai-decisions-{{ c.id }}" style="font-size:11px; display:inline;">
                                 <button onclick="loadAIDecisions('{{ c.id }}', this.dataset.name)"
                                         data-name="{{ (c.company_name or '') | e }}"
                                         style="padding:2px 10px; font-size:11px; background:#2980b9; color:white; border:none; border-radius:3px; cursor:pointer;">
                                     Load AI reasoning
                                 </button>
                             </div>
-                        </div>
-
-                        <!-- COMPANY HISTORY LOG -->
-                        <div style="border-top:1px solid #ddd; padding-top:10px; margin-bottom:8px;">
-                            <label style="font-weight:bold; color:#555; font-size:11px; display:block; margin-bottom:6px;">
-                                <i class="fa-solid fa-clock-rotate-left" style="color:#7f8c8d;"></i> Company History
-                            </label>
-                            <div id="company-history-{{ c.id }}" style="font-size:11px;">
+                            <span style="color:#ccc;">|</span>
+                            <span style="font-weight:bold; color:#555; font-size:11px;"><i class="fa-solid fa-clock-rotate-left" style="color:#7f8c8d;"></i> Company History</span>
+                            <div id="company-history-{{ c.id }}" style="font-size:11px; display:inline;">
                                 <button onclick="loadCompanyHistory('{{ c.id }}', this.dataset.name)"
                                         data-name="{{ (c.company_name or '') | e }}"
                                         style="padding:2px 10px; font-size:11px; background:#7f8c8d; color:white; border:none; border-radius:3px; cursor:pointer;">
@@ -2937,7 +2930,7 @@ HTML_TEMPLATE = """
                         </div>
 
                         <!-- EDIT / DELETE / CORRECTION -->
-                        <div style="border-top:1px solid #ddd; padding-top:10px; margin-top:4px;">
+                        <div style="border-top:1px solid #ddd; padding-top:8px; margin-top:4px;">
                             <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
                                 <button onclick="toggleEditForm({{ c.id }})"
                                         style="padding:3px 12px; font-size:12px; background:#8e44ad; color:white; border:none; border-radius:3px; cursor:pointer;">
@@ -2965,11 +2958,18 @@ HTML_TEMPLATE = """
                                     style="padding:3px 12px; font-size:12px; background:#c0392b; color:white; border:none; border-radius:3px; cursor:pointer;">
                                     🚩 Report to NZSA
                                 </button>
+                                {% if is_admin %}
                                 <button data-cid="{{ c.id }}" data-cname="{{ (c.company_name or '') | e }}"
                                         onclick="deleteCompany(this.dataset.cid, this.dataset.cname)"
                                         style="padding:3px 12px; font-size:12px; background:#c0392b; color:white; border:none; border-radius:3px; cursor:pointer;">
                                     ✕ Delete this record
                                 </button>
+                                {% else %}
+                                <button disabled title="Admin only function"
+                                        style="padding:3px 12px; font-size:12px; background:#999; color:#ccc; border:none; border-radius:3px; cursor:not-allowed;">
+                                    ✕ Delete (admin only)
+                                </button>
+                                {% endif %}
                             </div>
 
                             <div id="edit-form-{{ c.id }}" style="display:none; background:#f9f0ff; border:1px solid #c39bd3; border-radius:5px; padding:10px; margin-bottom:8px;">
