@@ -11013,12 +11013,12 @@ USEFUL REFERENCES
 - Section 23 (Penalties): legislation.govt.nz/act/public/2010/0115/latest/whole.html
 """
 
-_LICENSE_CHAT_HTML = """<!doctype html>
+_LICENSE_CHAT_HTML = r"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="csrf-token" content="{{ csrf_token() }}">
+<meta name="csrf-token" content="__CSRF_TOKEN__">
 <title>Do I Need a PSPLA Licence? — NZ Licensing Advisor</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
@@ -11341,7 +11341,8 @@ window.onload = function(){
 
 @app.route("/license-checker")
 def license_checker():
-    return render_template_string(_LICENSE_CHAT_HTML)
+    html = _LICENSE_CHAT_HTML.replace('__CSRF_TOKEN__', _csrf_token())
+    return Response(html, mimetype="text/html")
 
 
 @app.route("/license-checker/chat", methods=["POST"])
