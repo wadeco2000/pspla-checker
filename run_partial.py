@@ -43,6 +43,7 @@ def run_partial(triggered_by="manual", fresh=False):
     google_terms = config.get("google_terms", [])
     include_facebook = config.get("include_facebook", False)
     include_nationwide = config.get("include_nationwide", False)
+    fb_time_filter = config.get("fb_time_filter")
 
     if not regions:
         print("No regions specified. Aborting.")
@@ -178,6 +179,7 @@ def run_partial(triggered_by="manual", fresh=False):
                 regions=regions if include_facebook else [],
                 include_nationwide=include_nationwide,
                 track_progress=False,
+                time_filter=fb_time_filter,
             )
             total_found += fb_found
             total_new += fb_new

@@ -5216,16 +5216,19 @@ def _process_fb_result(result, found_urls_all, fb_total, fb_new, term, fallback_
     return fb_total, fb_new
 
 
-def run_facebook_search(found_urls_all, regions=None, include_nationwide=True, fresh=False, track_progress=True):
+def run_facebook_search(found_urls_all, regions=None, include_nationwide=True, fresh=False, track_progress=True, time_filter=None):
     """Search Facebook for NZ security camera companies. Returns (total_found, total_new).
     - regions: subset of NZ_REGIONS to search; defaults to all.
     - include_nationwide: also run a 'New Zealand' wide pass to catch businesses
       that don't mention a specific town on their Facebook page.
     - fresh: if True, clear any saved FB progress before starting.
-    - track_progress: if False (e.g. called from run_partial), skip FB progress file entirely."""
+    - track_progress: if False (e.g. called from run_partial), skip FB progress file entirely.
+    - time_filter: SerpAPI tbs value, e.g. 'qdr:m3' (90 days), 'qdr:m6', 'qdr:y', None (all time)."""
     search_regions = regions if regions is not None else NZ_REGIONS
+    _tf_labels = {"qdr:m3": "last 90 days", "qdr:m6": "last 6 months", "qdr:y": "last 12 months"}
+    tf_label = _tf_labels.get(time_filter, "all time")
     print("\n" + "=" * 60)
-    print("  Facebook Search Pass")
+    print(f"  Facebook Search Pass  ({tf_label})")
     print("=" * 60)
 
     # Load/clear progress (only when running as standalone, not when called from partial)
@@ -5263,7 +5266,7 @@ def run_facebook_search(found_urls_all, regions=None, include_nationwide=True, f
             query = f'site:facebook.com "{term}" "{region}" New Zealand -group -marketplace -"for sale"'
             print(f"  Query: {query}")
 
-            results = google_search(query, num_results=50)
+            results = google_search(query, num_results=50, time_filter=time_filter)
             time.sleep(1)
 
             if results is SERPAPI_EXHAUSTED:
@@ -5300,7 +5303,7 @@ def run_facebook_search(found_urls_all, regions=None, include_nationwide=True, f
                 query = f'site:facebook.com "{term}" "New Zealand" -group -marketplace -"for sale"'
                 print(f"  Query: {query}")
 
-                results = google_search(query, num_results=50)
+                results = google_search(query, num_results=50, time_filter=time_filter)
                 time.sleep(1)
 
                 if results is SERPAPI_EXHAUSTED:

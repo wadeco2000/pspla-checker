@@ -2192,6 +2192,27 @@ HTML_TEMPLATE = """
                     <input type="checkbox" id="partial-facebook-nz" style="margin-right:4px;">
                     <i class="fa-brands fa-facebook-f" style="color:#1877f2;"></i> Facebook (NZ-wide, no town)
                 </label>
+                <label style="font-size:12px; color:#555;">
+                    <i class="fa-solid fa-clock" style="color:#888;"></i> FB date range:
+                    <select id="partial-fb-time" style="font-size:12px; padding:2px 4px; border:1px solid #ccc; border-radius:4px;" disabled>
+                        <option value="qdr:m3">Last 90 days</option>
+                        <option value="qdr:m6">Last 6 months</option>
+                        <option value="qdr:y">Last 12 months</option>
+                        <option value="">All time</option>
+                    </select>
+                </label>
+                <script>
+                (function(){
+                    var fbCb = document.getElementById('partial-facebook');
+                    var fbNwCb = document.getElementById('partial-facebook-nz');
+                    var timeSel = document.getElementById('partial-fb-time');
+                    function updateTimeSelect() {
+                        timeSel.disabled = !(fbCb.checked || fbNwCb.checked);
+                    }
+                    fbCb.addEventListener('change', updateTimeSelect);
+                    fbNwCb.addEventListener('change', updateTimeSelect);
+                })();
+                </script>
                 <script>
                 function runPartialSearch(fresh) {
                     var regions = Array.from(document.querySelectorAll('.partial-region-cb:checked')).map(function(cb){ return cb.value; });
@@ -2201,6 +2222,8 @@ HTML_TEMPLATE = """
                     var allTerms = terms.concat(extraTerms);
                     var includeFb = document.getElementById('partial-facebook').checked;
                     var includeFbNw = document.getElementById('partial-facebook-nz').checked;
+                    var fbTimeVal = document.getElementById('partial-fb-time').value;
+                    var fbTimeFilter = (includeFb || includeFbNw) && fbTimeVal ? fbTimeVal : null;
                     if (!regions.length) { alert('Please select at least one region.'); return; }
                     if (!allTerms.length && !includeFb && !includeFbNw) { alert('Please select at least one term or enable Facebook search.'); return; }
                     var statusEl = document.getElementById('partial-status');
@@ -2212,7 +2235,7 @@ HTML_TEMPLATE = """
                         fetch('/start-partial-search', {
                             method: 'POST',
                             headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({regions: regions, google_terms: allTerms, include_facebook: includeFb, include_nationwide: includeFbNw, fresh: !!fresh})
+                            body: JSON.stringify({regions: regions, google_terms: allTerms, include_facebook: includeFb, include_nationwide: includeFbNw, fb_time_filter: fbTimeFilter, fresh: !!fresh})
                         }).then(function(r){ return r.json(); }).then(function(d) {
                             if (d.ok) {
                                 statusEl.style.color = '#27ae60';
@@ -5768,11 +5791,13 @@ def start_partial_search():
         return jsonify({"ok": False, "error": "A search is already running."}), 409
     try:
         data = request.get_json()
+        fb_tf = data.get("fb_time_filter") or None
         config = {
             "regions": data.get("regions", []),
             "google_terms": data.get("google_terms", []),
             "include_facebook": bool(data.get("include_facebook", False)),
             "include_nationwide": bool(data.get("include_nationwide", False)),
+            "fb_time_filter": fb_tf,
         }
         fresh = bool(data.get("fresh", False))
         with open(PARTIAL_CONFIG_FILE, "w") as f:
@@ -5970,6 +5995,7 @@ function configSummary(r) {
     if (c.include_facebook) parts.push('+ Facebook');
     if (c.include_nationwide) parts.push('+ NZ-wide FB');
     if (c.time_filter) parts.push(c.time_filter);
+    if (c.fb_time_filter) parts.push('FB: ' + c.fb_time_filter);
     if (c.test_mode) parts.push('TEST MODE');
     return parts.join(' &middot; ');
 }
@@ -5989,6 +6015,7 @@ function configDetail(r) {
     if (c.include_facebook) lines.push('<b>Facebook:</b> included');
     if (c.include_nationwide) lines.push('<b>NZ-wide FB:</b> included');
     if (c.time_filter) lines.push('<b>Time filter:</b> ' + c.time_filter);
+    if (c.fb_time_filter) lines.push('<b>FB time filter:</b> ' + c.fb_time_filter);
     if (c.test_mode) lines.push('<b>Test mode:</b> limit ' + (c.limit || 5));
     if (c.imports) lines.push('<b>Imports:</b> ' + c.imports.join(', '));
     return lines.join('<br>');
