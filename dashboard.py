@@ -347,8 +347,7 @@ def _safe_error(e, fallback="An error occurred"):
 _AUTH_SKIP = {
     'login_page', 'login_password', 'auth_callback', 'auth_verify', 'auth_logout',
     'service_worker', 'auth_2fa_page', 'auth_2fa_verify',
-    'auth_request_access_page', 'auth_request_access_submit',
-    'license_checker', 'license_checker_chat'
+    'auth_request_access_page', 'auth_request_access_submit'
 }
 
 @app.route('/sw.js')
@@ -11014,11 +11013,12 @@ USEFUL REFERENCES
 - Section 23 (Penalties): legislation.govt.nz/act/public/2010/0115/latest/whole.html
 """
 
-_LICENSE_CHAT_HTML = r"""<!doctype html>
+_LICENSE_CHAT_HTML = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="csrf-token" content="{{ csrf_token() }}">
 <title>Do I Need a PSPLA Licence? — NZ Licensing Advisor</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
@@ -11107,6 +11107,7 @@ html.dark .thinking-status{color:#5d6d7e}
   <p class="disclaimer"><i class="fa-solid fa-circle-info"></i> General guidance only — not legal advice. Always verify with the <a href="https://www.justice.govt.nz/tribunals/licences-certificates/pspla/" target="_blank">PSPLA Licensing Authority</a>.</p>
 </div>
 <script>
+(function(){var _f=window.fetch;window.fetch=function(u,o){o=o||{};var m=(o.method||'GET').toUpperCase();if(m!=='GET'&&m!=='HEAD'){o.headers=o.headers||{};o.headers['X-CSRF-Token']=document.querySelector('meta[name="csrf-token"]').content;}return _f.call(this,u,o);};})();
 var _history = [];
 var _thinking = false;
 var _thinkingTimer = null;
@@ -11340,7 +11341,7 @@ window.onload = function(){
 
 @app.route("/license-checker")
 def license_checker():
-    return Response(_LICENSE_CHAT_HTML, mimetype="text/html")
+    return render_template_string(_LICENSE_CHAT_HTML)
 
 
 @app.route("/license-checker/chat", methods=["POST"])
