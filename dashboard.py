@@ -11094,7 +11094,7 @@ html.dark .thinking-status{color:#5d6d7e}
   <span style="opacity:.7"><i class="fa-solid fa-database"></i> <strong>482</strong> PSPLA decisions (2019–2026)</span>
   <span style="opacity:.7"><i class="fa-solid fa-newspaper"></i> <strong>92</strong> news &amp; media sources</span>
   <span><i class="fa-solid fa-file-lines"></i> <a href="https://www.legislation.govt.nz/act/public/2010/0115/latest/dlm1594432.html" target="_blank">PSPLA Act 2010</a></span>
-  <span><i class="fa-solid fa-file-lines"></i> <a href="https://security.org.nz/wp-content/uploads/2023/01/Joint_Statement_Master_Electricians_and_NZSA.01.pdf" target="_blank">NZSA Position Statement (July 2025)</a></span>
+  <span><i class="fa-solid fa-file-lines"></i> <a href="https://security.org.nz/wp-content/uploads/2025/07/NZSA_positionstatement25_July.pdf" target="_blank">NZSA Position Statement (July 2025)</a></span>
   <span><i class="fa-solid fa-file-lines"></i> <a href="https://www.legislation.govt.nz/act/public/2006/0027/latest/DLM375802.html" target="_blank">Electrical Workers Registration Act</a></span>
   <span><i class="fa-solid fa-arrow-up-right-from-square"></i> <a href="https://www.justice.govt.nz/tribunals/licences-certificates/pspla/decisions/" target="_blank">Full decisions register</a></span>
 </div>
