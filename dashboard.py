@@ -347,7 +347,8 @@ def _safe_error(e, fallback="An error occurred"):
 _AUTH_SKIP = {
     'login_page', 'login_password', 'auth_callback', 'auth_verify', 'auth_logout',
     'service_worker', 'auth_2fa_page', 'auth_2fa_verify',
-    'auth_request_access_page', 'auth_request_access_submit'
+    'auth_request_access_page', 'auth_request_access_submit',
+    'license_checker', 'license_checker_chat'
 }
 
 @app.route('/sw.js')
@@ -11092,8 +11093,8 @@ html.dark .thinking-status{color:#5d6d7e}
 <div class="kb-stats">
   <span style="opacity:.7"><i class="fa-solid fa-database"></i> <strong>482</strong> PSPLA decisions (2019–2026)</span>
   <span style="opacity:.7"><i class="fa-solid fa-newspaper"></i> <strong>92</strong> news &amp; media sources</span>
-  <span><i class="fa-solid fa-file-lines"></i> <a href="https://www.legislation.govt.nz/act/public/2010/0064/latest/DLM1594508.html" target="_blank">PSPLA Act 2010</a></span>
-  <span><i class="fa-solid fa-file-lines"></i> <a href="https://security.org.nz/about-nzsa/nzsa-position-statements/" target="_blank">NZSA Position Statement (July 2025)</a></span>
+  <span><i class="fa-solid fa-file-lines"></i> <a href="https://www.legislation.govt.nz/act/public/2010/0115/latest/dlm1594432.html" target="_blank">PSPLA Act 2010</a></span>
+  <span><i class="fa-solid fa-file-lines"></i> <a href="https://security.org.nz/wp-content/uploads/2023/01/Joint_Statement_Master_Electricians_and_NZSA.01.pdf" target="_blank">NZSA Position Statement (July 2025)</a></span>
   <span><i class="fa-solid fa-file-lines"></i> <a href="https://www.legislation.govt.nz/act/public/2006/0027/latest/DLM375802.html" target="_blank">Electrical Workers Registration Act</a></span>
   <span><i class="fa-solid fa-arrow-up-right-from-square"></i> <a href="https://www.justice.govt.nz/tribunals/licences-certificates/pspla/decisions/" target="_blank">Full decisions register</a></span>
 </div>
