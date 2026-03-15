@@ -1,8 +1,8 @@
+import sys; print("[BOOT] Starting imports...", flush=True)
 import os
 import csv
 import io
 import json
-import sys
 import threading
 import time as _time
 import subprocess
@@ -12,14 +12,18 @@ import hashlib as _hashlib
 import hmac as _hmac
 from contextlib import contextmanager
 from datetime import datetime, timezone
+print("[BOOT] stdlib done", flush=True)
 import requests
 import pyotp
 import qrcode
 from cryptography.fernet import Fernet
+print("[BOOT] third-party done", flush=True)
 from flask import Flask, render_template_string, redirect, url_for, request, Response, session, jsonify as _jsonify_auth, jsonify
 from dotenv import load_dotenv
+print("[BOOT] flask done", flush=True)
 
 load_dotenv()
+print("[BOOT] dotenv loaded", flush=True)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
@@ -212,7 +216,9 @@ def _load_terms():
         pass
     return dict(_DEFAULT_TERMS)
 
+print("[BOOT] creating Flask app...", flush=True)
 app = Flask(__name__)
+print("[BOOT] Flask app created", flush=True)
 
 # ── Dashboard auth ─────────────────────────────────────────────────────────────
 app.secret_key = _hashlib.sha256(
@@ -11900,6 +11906,8 @@ def actuate_query():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
+
+print("[BOOT] Module import complete — all routes registered", flush=True)
 
 if __name__ == "__main__":
     print("Dashboard running at http://localhost:5000")
