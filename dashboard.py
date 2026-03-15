@@ -11482,91 +11482,91 @@ def license_checker_chat():
 # ──────────────────────────────────────────────────────────────
 
 _ACTUATE_ENDPOINTS = {
-    "Site & Status": [
-        ("site_status", "customer/{id}/site_status/"),
-        ("site_status/{id}", "customer/{id}/site_status/{id}/"),
-        ("camera_status", "customer/{id}/camera_status/"),
-        ("camera_status/{id}", "customer/{id}/camera_status/{id}/"),
-        ("healthcheck", "customer/{id}/healthcheck/"),
+    "Site & Customer": [
+        ("customer", "customer/"),
+        ("customer/{id}", "customer/{id}/"),
+        ("site_status", "site_status/"),
+        ("camera_status", "camera_status/"),
+        ("healthcheck", "healthcheck/"),
     ],
     "Command History": [
-        ("command_history", "customer/{id}/command_history/"),
+        ("command_history", "command_history/"),
     ],
     "Cameras": [
-        ("camera", "customer/{id}/camera/"),
-        ("camera_type", "customer/{id}/camera_type/"),
-        ("nvr_camera", "customer/{id}/nvr_camera/"),
-        ("stream", "customer/{id}/stream/"),
-        ("clip", "customer/{id}/clip/"),
-        ("video_clip", "customer/{id}/video_clip/"),
+        ("camera", "camera/"),
+        ("camera_type", "camera_type/"),
+        ("nvr_camera", "nvr_camera/"),
+        ("stream", "stream/"),
+        ("clip", "clip/"),
+        ("video_clip", "video_clip/"),
     ],
     "Schedules": [
-        ("schedule", "customer/{id}/schedule/"),
-        ("flex_schedule", "customer/{id}/flex_schedule/"),
-        ("schedule_location", "customer/{id}/schedule_location/"),
-        ("calendar", "customer/{id}/calendar/"),
-        ("calendar_event", "customer/{id}/calendar_event/"),
+        ("schedule", "schedule/"),
+        ("flex_schedule", "flex_schedule/"),
+        ("schedule_location", "schedule_location/"),
+        ("calendar", "calendar/"),
+        ("calendar_event", "calendar_event/"),
     ],
     "Alerts & Alarms": [
-        ("immix", "customer/{id}/immix/"),
-        ("immix_credential", "customer/{id}/immix_credential/"),
-        ("proactive_alerting", "customer/{id}/proactive_alerting/"),
+        ("immix", "immix/"),
+        ("immix_credential", "immix_credential/"),
+        ("proactive_alerting", "proactive_alerting/"),
     ],
     "Webhooks": [
-        ("webhook", "customer/{id}/webhook/"),
-        ("webhook_type", "customer/{id}/webhook_type/"),
-        ("webhook_customer", "customer/{id}/webhook_customer/"),
+        ("webhook", "webhook/"),
+        ("webhook_type", "webhook_type/"),
+        ("webhook_customer", "webhook_customer/"),
     ],
     "AI & Configuration": [
-        ("ai_model", "customer/{id}/ai_model/"),
-        ("configuration", "customer/{id}/configuration/"),
-        ("option", "customer/{id}/option/"),
-        ("sensitivity", "customer/{id}/sensitivity/"),
-        ("tagzone", "customer/{id}/tagzone/"),
-        ("line_crossing", "customer/{id}/line_crossing/"),
-        ("dwell", "customer/{id}/dwell/"),
+        ("ai_model", "ai_model/"),
+        ("configuration", "configuration/"),
+        ("option", "option/"),
+        ("sensitivity", "sensitivity/"),
+        ("tagzone", "tagzone/"),
+        ("line_crossing", "line_crossing/"),
+        ("dwell", "dwell/"),
     ],
     "Users & Groups": [
-        ("user", "customer/{id}/user/"),
-        ("group", "customer/{id}/group/"),
-        ("group_user", "customer/{id}/group_user/"),
+        ("user", "user/"),
+        ("group", "group/"),
+        ("group_user", "group_user/"),
     ],
     "Integrations": [
-        ("integration_type", "customer/{id}/integration_type/"),
-        ("bold", "customer/{id}/bold/"),
-        ("patriot", "customer/{id}/patriot/"),
-        ("lisa", "customer/{id}/lisa/"),
-        ("evalink-site", "customer/{id}/evalink-site/"),
-        ("sureview", "customer/{id}/sureview/"),
-        ("sentinel", "customer/{id}/sentinel/"),
-        ("softguard", "customer/{id}/softguard/"),
-        ("sysaid", "customer/{id}/sysaid/"),
-        ("smtp", "customer/{id}/smtp/"),
+        ("integration_type", "integration_type/"),
+        ("bold", "bold/"),
+        ("patriot", "patriot/"),
+        ("lisa", "lisa/"),
+        ("evalink-site", "evalink-site/"),
+        ("sureview", "sureview/"),
+        ("sentinel", "sentinel/"),
+        ("softguard", "softguard/"),
+        ("sysaid", "sysaid/"),
+        ("smtp", "smtp/"),
     ],
     "Infrastructure": [
-        ("management_server", "customer/{id}/management_server/"),
-        ("recording_server", "customer/{id}/recording_server/"),
-        ("storage", "customer/{id}/storage/"),
-        ("remote_link", "customer/{id}/remote_link/"),
-        ("wireguard", "customer/{id}/wireguard/"),
-        ("wireguard_tunnel", "customer/{id}/wireguard_tunnel/"),
+        ("management_server", "management_server/"),
+        ("recording_server", "recording_server/"),
+        ("storage", "storage/"),
+        ("remote_link", "remote_link/"),
+        ("wireguard", "wireguard/"),
+        ("wireguard_tunnel", "wireguard_tunnel/"),
     ],
     "Metrics & Analytics": [
-        ("metric", "customer/{id}/metric/"),
-        ("metric_label", "customer/{id}/metric_label/"),
-        ("metric_healthcheck", "customer/{id}/metric_healthcheck/"),
+        ("metric", "metric/"),
+        ("metric_label", "metric_label/"),
+        ("metric_healthcheck", "metric_healthcheck/"),
     ],
     "Sync & Other": [
-        ("aisync", "customer/{id}/aisync/"),
-        ("sentinelsync", "customer/{id}/sentinelsync/"),
-        ("frontelsync", "customer/{id}/frontelsync/"),
-        ("yoursixsync", "customer/{id}/yoursixsync/"),
-        ("timezone", "customer/{id}/timezone/"),
-        ("bulk_onboarding", "customer/{id}/bulk_onboarding/"),
-        ("product_requirements", "customer/{id}/product_requirements/"),
-        ("auto_patrol_schedule", "customer/{id}/auto_patrol_schedule/"),
-        ("auto_patrol_contract", "customer/{id}/auto_patrol_contract/"),
-        ("special_pricing_subscription", "customer/{id}/special_pricing_subscription/"),
+        ("aisync", "aisync/"),
+        ("sentinelsync", "sentinelsync/"),
+        ("frontelsync", "frontelsync/"),
+        ("yoursixsync", "yoursixsync/"),
+        ("timezone", "timezone/"),
+        ("bulk_onboarding", "bulk_onboarding/"),
+        ("product_requirements", "product_requirements/"),
+        ("auto_patrol_schedule", "auto_patrol_schedule/"),
+        ("auto_patrol_contract", "auto_patrol_contract/"),
+        ("special_pricing_subscription", "special_pricing_subscription/"),
     ],
 }
 
@@ -11583,7 +11583,7 @@ ACTUATE_TEMPLATE = r"""
     <style>
         *{box-sizing:border-box;}
         body{font-family:Arial,sans-serif;margin:0;padding:0;background:#f4f4f4;color:#333;}
-        .page-header{background:#1a252f;color:white;padding:14px 24px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+        .page-header{background:#1a252f;color:white;padding:14px 24px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
         .page-header h1{margin:0;font-size:18px;display:flex;align-items:center;gap:10px;}
         .page-header h1 i{color:#3498db;}
         .content{max-width:1400px;margin:20px auto;padding:0 20px;}
@@ -11601,12 +11601,6 @@ ACTUATE_TEMPLATE = r"""
         .btn-info{background:#3498db;color:white;}
         .btn-sm{padding:4px 10px;font-size:11px;border-radius:4px;}
 
-        /* Status badge */
-        .status-badge{font-size:12px;padding:4px 12px;border-radius:20px;font-weight:600;}
-        .status-ok{background:#d4edda;color:#155724;}
-        .status-err{background:#f8d7da;color:#721c24;}
-        .status-wait{background:#fff3cd;color:#856404;}
-
         /* Two-column layout */
         .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px;}
         @media(max-width:900px){.two-col{grid-template-columns:1fr;}}
@@ -11621,11 +11615,14 @@ ACTUATE_TEMPLATE = r"""
         .cat-label:first-child{margin-top:0;}
         .ep-grid{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:4px;}
         .ep-btn{font-size:11px;padding:4px 9px;border:2px solid #bdc3c7;background:white;border-radius:4px;cursor:pointer;
-                color:#2c3e50;font-family:monospace;transition:border-color .2s,background .2s;}
+                color:#2c3e50;font-family:monospace;transition:border-color .2s,background .2s;position:relative;}
         .ep-btn:hover{background:#ecf0f1;}
         .ep-btn.ok{border-color:#27ae60;background:#eafaf1;}
         .ep-btn.fail{border-color:#e74c3c;background:#fdedec;}
         .ep-btn.loading{border-color:#f39c12;background:#fef9e7;}
+        .ep-icon{margin-left:4px;font-size:10px;}
+        .ep-icon.ic-ok{color:#27ae60;}
+        .ep-icon.ic-fail{color:#e74c3c;}
 
         /* Response preview */
         .resp-pre{background:#1e1e1e;color:#d4d4d4;font-family:'Consolas','Courier New',monospace;font-size:12px;
@@ -11645,11 +11642,9 @@ ACTUATE_TEMPLATE = r"""
     </style>
 </head>
 <body>
-    __SUB_NAVBAR__
 
     <div class="page-header">
         <h1><i class="fa-solid fa-tower-broadcast"></i> Actuate AI Control</h1>
-        <span class="status-badge status-wait" id="conn-status"><i class="fa-solid fa-circle-question"></i> Not connected</span>
     </div>
 
     <div class="content">
@@ -11672,7 +11667,7 @@ ACTUATE_TEMPLATE = r"""
             <div class="card">
                 <div class="card-head"><i class="fa-solid fa-flask"></i> API Endpoint Explorer</div>
                 <div class="card-body">
-                    <p style="font-size:11px;color:#888;margin:0 0 10px;">Click any endpoint to fire a GET request through the backend proxy. Green = 200 OK, Red = denied/error.</p>
+                    <p style="font-size:11px;color:#888;margin:0 0 10px;">Click any endpoint to test access. <i class="fa-solid fa-check" style="color:#27ae60;"></i> = 200 OK, <i class="fa-solid fa-xmark" style="color:#e74c3c;"></i> = denied/error.</p>
                     <div class="explorer-wrap" id="explorer">
                         {% for cat, endpoints in categories %}
                         <div class="cat-label">{{ cat }}</div>
@@ -11735,10 +11730,13 @@ function showResp(label, data, status) {
     document.getElementById('resp-label').textContent = label + (status ? ' (' + status + ')' : '');
 }
 
-function setConnStatus(ok, text) {
-    var el = document.getElementById('conn-status');
-    el.className = 'status-badge ' + (ok ? 'status-ok' : 'status-err');
-    el.innerHTML = (ok ? '<i class=\"fa-solid fa-circle-check\"></i> ' : '<i class=\"fa-solid fa-circle-xmark\"></i> ') + text;
+function setIcon(btn, ok) {
+    // Remove any existing icon
+    var old = btn.querySelector('.ep-icon');
+    if (old) old.remove();
+    var icon = document.createElement('i');
+    icon.className = ok ? 'fa-solid fa-check ep-icon ic-ok' : 'fa-solid fa-xmark ep-icon ic-fail';
+    btn.appendChild(icon);
 }
 
 function doAction(action) {
@@ -11751,17 +11749,14 @@ function doAction(action) {
         body: JSON.stringify({site_id: siteId})
     }).then(function(r){ return r.json().then(function(d){ return {status:r.status, data:d}; }); })
     .then(function(res) {
-        if (res.status === 200) {
+        if (res.status === 200 && res.data.upstream_status >= 200 && res.data.upstream_status < 300) {
             addLog(action.toUpperCase() + ' — ' + (res.data.detail || 'OK') + ' (HTTP ' + res.data.upstream_status + ')', 'log-ok');
-            setConnStatus(true, 'Connected — ' + action.toUpperCase() + ' sent');
         } else {
-            addLog(action.toUpperCase() + ' FAILED — ' + (res.data.error || JSON.stringify(res.data)) + ' (HTTP ' + res.status + ')', 'log-err');
-            setConnStatus(false, 'Error');
+            addLog(action.toUpperCase() + ' FAILED — ' + (res.data.error || JSON.stringify(res.data.upstream_body || res.data)) + ' (HTTP ' + (res.data.upstream_status || res.status) + ')', 'log-err');
         }
         showResp(action.toUpperCase(), res.data.upstream_body || res.data, res.data.upstream_status || res.status);
     }).catch(function(e) {
         addLog('Network error: ' + e, 'log-err');
-        setConnStatus(false, 'Network error');
     });
 }
 
@@ -11772,11 +11767,10 @@ function getSiteInfo() {
     fetch('/api/actuate/site-info?site_id=' + encodeURIComponent(siteId))
     .then(function(r){ return r.json().then(function(d){ return {status:r.status, data:d}; }); })
     .then(function(res) {
-        if (res.status === 200) {
+        if (res.status === 200 && (res.data.upstream_status||200) < 300) {
             addLog('Site info received (HTTP ' + (res.data.upstream_status||200) + ')', 'log-ok');
-            setConnStatus(true, 'Connected — Site ' + siteId);
         } else {
-            addLog('Site info FAILED — ' + (res.data.error || '') + ' (HTTP ' + res.status + ')', 'log-err');
+            addLog('Site info FAILED — ' + (res.data.error || '') + ' (HTTP ' + (res.data.upstream_status || res.status) + ')', 'log-err');
         }
         showResp('Site Info', res.data.upstream_body || res.data, res.data.upstream_status || res.status);
     }).catch(function(e){
@@ -11790,6 +11784,9 @@ function queryEndpoint(btn) {
     var path = btn.dataset.path;
     var name = btn.dataset.name;
     btn.className = 'ep-btn loading';
+    // Remove old icon while loading
+    var oldIcon = btn.querySelector('.ep-icon');
+    if (oldIcon) oldIcon.remove();
     addLog('GET /api/' + path.replace(/\{id\}/g, siteId), 'log-req');
     fetch('/api/actuate/query?site_id=' + encodeURIComponent(siteId) + '&path=' + encodeURIComponent(path))
     .then(function(r){ return r.json().then(function(d){ return {status:r.status, data:d}; }); })
@@ -11797,14 +11794,17 @@ function queryEndpoint(btn) {
         var upStatus = res.data.upstream_status || res.status;
         if (upStatus >= 200 && upStatus < 300) {
             btn.className = 'ep-btn ok';
+            setIcon(btn, true);
             addLog(name + ' — OK (HTTP ' + upStatus + ')', 'log-ok');
         } else {
             btn.className = 'ep-btn fail';
+            setIcon(btn, false);
             addLog(name + ' — DENIED (HTTP ' + upStatus + ')', 'log-err');
         }
         showResp(name, res.data.upstream_body || res.data, upStatus);
     }).catch(function(e){
         btn.className = 'ep-btn fail';
+        setIcon(btn, false);
         addLog(name + ' — Network error: ' + e, 'log-err');
     });
 }
@@ -11827,10 +11827,7 @@ function testAllEndpoints() {
 @app.route("/actuate")
 def actuate_page():
     cats = list(_ACTUATE_ENDPOINTS.items())
-    # Actuate is a standalone tool — no sub-navbar links to PSPLA pages
-    back_link = '<nav style="background:#2c3e50;padding:8px 20px;font-family:Arial,sans-serif;"><a href="/" style="color:#bdc3c7;text-decoration:none;font-size:13px;"><i class="fa-solid fa-arrow-left" style="margin-right:6px;"></i>Back to Dashboard</a></nav>'
-    html = ACTUATE_TEMPLATE.replace("__SUB_NAVBAR__", back_link)
-    return render_template_string(html, categories=cats, is_admin=_is_admin())
+    return render_template_string(ACTUATE_TEMPLATE, categories=cats, is_admin=_is_admin())
 
 
 @app.route("/api/actuate/action/<action>", methods=["POST"])
