@@ -4760,7 +4760,6 @@ _SUB_NAVBAR = """
     <a href="/suspect-records">Suspects</a>
     <a href="/review-duplicates">Near-Matches</a>
     <span class="sn-sep">|</span>
-    <a href="/actuate">Actuate</a>
     <a href="/account/profile">My Account</a>
   </div>
 </nav>
@@ -11828,7 +11827,9 @@ function testAllEndpoints() {
 @app.route("/actuate")
 def actuate_page():
     cats = list(_ACTUATE_ENDPOINTS.items())
-    html = ACTUATE_TEMPLATE.replace("__SUB_NAVBAR__", _sub_navbar_for("actuate"))
+    # Actuate is a standalone tool — no sub-navbar links to PSPLA pages
+    back_link = '<nav style="background:#2c3e50;padding:8px 20px;font-family:Arial,sans-serif;"><a href="/" style="color:#bdc3c7;text-decoration:none;font-size:13px;"><i class="fa-solid fa-arrow-left" style="margin-right:6px;"></i>Back to Dashboard</a></nav>'
+    html = ACTUATE_TEMPLATE.replace("__SUB_NAVBAR__", back_link)
     return render_template_string(html, categories=cats, is_admin=_is_admin())
 
 
