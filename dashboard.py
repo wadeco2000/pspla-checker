@@ -16,7 +16,7 @@ import requests
 import pyotp
 import qrcode
 from cryptography.fernet import Fernet
-from flask import Flask, render_template_string, redirect, url_for, request, Response, session, jsonify as _jsonify_auth
+from flask import Flask, render_template_string, redirect, url_for, request, Response, session, jsonify as _jsonify_auth, jsonify
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -36,6 +36,8 @@ GITHUB_PAT = os.getenv("GITHUB_PAT")
 EXPORT_PASSWORD = os.getenv("EXPORT_PASSWORD") or os.getenv("PAGES_PASSWORD", "")
 GITHUB_REPO = os.getenv("GITHUB_REPO", "wadeco2000/pspla-checker")
 DROPBOX_TOKEN = os.getenv("DROPBOX_TOKEN", "")
+ACTUATE_API_TOKEN = os.getenv("ACTUATE_API_TOKEN", "")
+ACTUATE_BASE_URL = "https://admin.actuateui.net"
 RECAPTCHA_SITE_KEY = os.getenv("RECAPTCHA_SITE_KEY", "")
 RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY", "")
 
@@ -1665,6 +1667,13 @@ HTML_TEMPLATE = """
           <span>Do I Need a Licence?<span class="dd-sub">AI-guided PSPLA licensing advisor</span></span>
         </a>
       </div>
+    </div>
+
+    <!-- Actuate AI -->
+    <div class="nav-item" id="menu-actuate">
+      <a href="/actuate" class="nav-btn" style="text-decoration:none;">
+        <i class="fa-solid fa-tower-broadcast"></i> Actuate
+      </a>
     </div>
 
   </div><!-- /nav-menus -->
@@ -4751,6 +4760,7 @@ _SUB_NAVBAR = """
     <a href="/suspect-records">Suspects</a>
     <a href="/review-duplicates">Near-Matches</a>
     <span class="sn-sep">|</span>
+    <a href="/actuate">Actuate</a>
     <a href="/account/profile">My Account</a>
   </div>
 </nav>
@@ -11465,6 +11475,432 @@ def license_checker_chat():
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+
+# ──────────────────────────────────────────────────────────────
+# Actuate AI — Arm/Disarm & API Explorer
+# ──────────────────────────────────────────────────────────────
+
+_ACTUATE_ENDPOINTS = {
+    "Site & Status": [
+        ("site_status", "customer/{id}/site_status/"),
+        ("site_status/{id}", "customer/{id}/site_status/{id}/"),
+        ("camera_status", "customer/{id}/camera_status/"),
+        ("camera_status/{id}", "customer/{id}/camera_status/{id}/"),
+        ("healthcheck", "customer/{id}/healthcheck/"),
+    ],
+    "Command History": [
+        ("command_history", "customer/{id}/command_history/"),
+    ],
+    "Cameras": [
+        ("camera", "customer/{id}/camera/"),
+        ("camera_type", "customer/{id}/camera_type/"),
+        ("nvr_camera", "customer/{id}/nvr_camera/"),
+        ("stream", "customer/{id}/stream/"),
+        ("clip", "customer/{id}/clip/"),
+        ("video_clip", "customer/{id}/video_clip/"),
+    ],
+    "Schedules": [
+        ("schedule", "customer/{id}/schedule/"),
+        ("flex_schedule", "customer/{id}/flex_schedule/"),
+        ("schedule_location", "customer/{id}/schedule_location/"),
+        ("calendar", "customer/{id}/calendar/"),
+        ("calendar_event", "customer/{id}/calendar_event/"),
+    ],
+    "Alerts & Alarms": [
+        ("immix", "customer/{id}/immix/"),
+        ("immix_credential", "customer/{id}/immix_credential/"),
+        ("proactive_alerting", "customer/{id}/proactive_alerting/"),
+    ],
+    "Webhooks": [
+        ("webhook", "customer/{id}/webhook/"),
+        ("webhook_type", "customer/{id}/webhook_type/"),
+        ("webhook_customer", "customer/{id}/webhook_customer/"),
+    ],
+    "AI & Configuration": [
+        ("ai_model", "customer/{id}/ai_model/"),
+        ("configuration", "customer/{id}/configuration/"),
+        ("option", "customer/{id}/option/"),
+        ("sensitivity", "customer/{id}/sensitivity/"),
+        ("tagzone", "customer/{id}/tagzone/"),
+        ("line_crossing", "customer/{id}/line_crossing/"),
+        ("dwell", "customer/{id}/dwell/"),
+    ],
+    "Users & Groups": [
+        ("user", "customer/{id}/user/"),
+        ("group", "customer/{id}/group/"),
+        ("group_user", "customer/{id}/group_user/"),
+    ],
+    "Integrations": [
+        ("integration_type", "customer/{id}/integration_type/"),
+        ("bold", "customer/{id}/bold/"),
+        ("patriot", "customer/{id}/patriot/"),
+        ("lisa", "customer/{id}/lisa/"),
+        ("evalink-site", "customer/{id}/evalink-site/"),
+        ("sureview", "customer/{id}/sureview/"),
+        ("sentinel", "customer/{id}/sentinel/"),
+        ("softguard", "customer/{id}/softguard/"),
+        ("sysaid", "customer/{id}/sysaid/"),
+        ("smtp", "customer/{id}/smtp/"),
+    ],
+    "Infrastructure": [
+        ("management_server", "customer/{id}/management_server/"),
+        ("recording_server", "customer/{id}/recording_server/"),
+        ("storage", "customer/{id}/storage/"),
+        ("remote_link", "customer/{id}/remote_link/"),
+        ("wireguard", "customer/{id}/wireguard/"),
+        ("wireguard_tunnel", "customer/{id}/wireguard_tunnel/"),
+    ],
+    "Metrics & Analytics": [
+        ("metric", "customer/{id}/metric/"),
+        ("metric_label", "customer/{id}/metric_label/"),
+        ("metric_healthcheck", "customer/{id}/metric_healthcheck/"),
+    ],
+    "Sync & Other": [
+        ("aisync", "customer/{id}/aisync/"),
+        ("sentinelsync", "customer/{id}/sentinelsync/"),
+        ("frontelsync", "customer/{id}/frontelsync/"),
+        ("yoursixsync", "customer/{id}/yoursixsync/"),
+        ("timezone", "customer/{id}/timezone/"),
+        ("bulk_onboarding", "customer/{id}/bulk_onboarding/"),
+        ("product_requirements", "customer/{id}/product_requirements/"),
+        ("auto_patrol_schedule", "customer/{id}/auto_patrol_schedule/"),
+        ("auto_patrol_contract", "customer/{id}/auto_patrol_contract/"),
+        ("special_pricing_subscription", "customer/{id}/special_pricing_subscription/"),
+    ],
+}
+
+ACTUATE_TEMPLATE = r"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>(function(){var _f=window.fetch;window.fetch=function(u,o){o=o||{};var m=(o.method||'GET').toUpperCase();if(m!=='GET'&&m!=='HEAD'){o.headers=o.headers||{};o.headers['X-CSRF-Token']=document.querySelector('meta[name="csrf-token"]').content;}return _f.call(this,u,o);};})();</script>
+    <title>Actuate AI Control — PSPLA Checker</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer" />
+    <style>
+        *{box-sizing:border-box;}
+        body{font-family:Arial,sans-serif;margin:0;padding:0;background:#f4f4f4;color:#333;}
+        .page-header{background:#1a252f;color:white;padding:14px 24px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+        .page-header h1{margin:0;font-size:18px;display:flex;align-items:center;gap:10px;}
+        .page-header h1 i{color:#3498db;}
+        .content{max-width:1400px;margin:20px auto;padding:0 20px;}
+
+        /* Controls row */
+        .ctrl-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px;
+                   background:white;padding:14px 18px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.08);}
+        .ctrl-row label{font-size:12px;font-weight:bold;color:#555;}
+        .ctrl-row input[type=text]{font-size:13px;padding:6px 10px;border:1px solid #ccc;border-radius:4px;width:100px;}
+        .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 16px;border:none;border-radius:5px;font-size:13px;
+             cursor:pointer;font-weight:600;transition:opacity .15s;}
+        .btn:hover{opacity:0.85;}
+        .btn-arm{background:#27ae60;color:white;}
+        .btn-disarm{background:#e74c3c;color:white;}
+        .btn-info{background:#3498db;color:white;}
+        .btn-sm{padding:4px 10px;font-size:11px;border-radius:4px;}
+
+        /* Status badge */
+        .status-badge{font-size:12px;padding:4px 12px;border-radius:20px;font-weight:600;}
+        .status-ok{background:#d4edda;color:#155724;}
+        .status-err{background:#f8d7da;color:#721c24;}
+        .status-wait{background:#fff3cd;color:#856404;}
+
+        /* Two-column layout */
+        .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px;}
+        @media(max-width:900px){.two-col{grid-template-columns:1fr;}}
+
+        /* Cards */
+        .card{background:white;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.08);overflow:hidden;}
+        .card-head{background:#2c3e50;color:white;padding:10px 16px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;}
+        .card-body{padding:14px 16px;}
+
+        /* Explorer grid */
+        .cat-label{font-size:11px;font-weight:bold;color:#7f8c8d;text-transform:uppercase;letter-spacing:0.5px;margin:12px 0 6px;border-bottom:1px solid #eee;padding-bottom:4px;}
+        .cat-label:first-child{margin-top:0;}
+        .ep-grid{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:4px;}
+        .ep-btn{font-size:11px;padding:4px 9px;border:2px solid #bdc3c7;background:white;border-radius:4px;cursor:pointer;
+                color:#2c3e50;font-family:monospace;transition:border-color .2s,background .2s;}
+        .ep-btn:hover{background:#ecf0f1;}
+        .ep-btn.ok{border-color:#27ae60;background:#eafaf1;}
+        .ep-btn.fail{border-color:#e74c3c;background:#fdedec;}
+        .ep-btn.loading{border-color:#f39c12;background:#fef9e7;}
+
+        /* Response preview */
+        .resp-pre{background:#1e1e1e;color:#d4d4d4;font-family:'Consolas','Courier New',monospace;font-size:12px;
+                  padding:14px;border-radius:6px;max-height:400px;overflow:auto;white-space:pre-wrap;word-break:break-all;margin:0;}
+        .resp-empty{color:#888;font-style:italic;font-size:13px;}
+
+        /* Command log */
+        .log-wrap{max-height:300px;overflow-y:auto;font-family:'Consolas','Courier New',monospace;font-size:11px;padding:8px;background:#fafafa;border:1px solid #eee;border-radius:4px;}
+        .log-entry{padding:3px 0;border-bottom:1px solid #f0f0f0;}
+        .log-ts{color:#7f8c8d;}
+        .log-req{color:#2980b9;}
+        .log-ok{color:#27ae60;}
+        .log-err{color:#e74c3c;}
+
+        /* Explorer wrapper */
+        .explorer-wrap{max-height:500px;overflow-y:auto;padding-right:4px;}
+    </style>
+</head>
+<body>
+    __SUB_NAVBAR__
+
+    <div class="page-header">
+        <h1><i class="fa-solid fa-tower-broadcast"></i> Actuate AI Control</h1>
+        <span class="status-badge status-wait" id="conn-status"><i class="fa-solid fa-circle-question"></i> Not connected</span>
+    </div>
+
+    <div class="content">
+
+        <!-- Controls -->
+        <div class="ctrl-row">
+            <label>Site ID:</label>
+            <input type="text" id="site-id" value="35218">
+            <button class="btn btn-arm" onclick="doAction('arm')"><i class="fa-solid fa-lock"></i> ARM</button>
+            <button class="btn btn-disarm" onclick="doAction('disarm')"><i class="fa-solid fa-lock-open"></i> DISARM</button>
+            <button class="btn btn-info" onclick="getSiteInfo()"><i class="fa-solid fa-circle-info"></i> Get Site Info</button>
+            <button class="btn btn-sm" style="background:#8e44ad;color:white;" onclick="testAllEndpoints()"><i class="fa-solid fa-flask"></i> Test All Endpoints</button>
+            <button class="btn btn-sm" style="background:#95a5a6;color:white;" onclick="clearLog()"><i class="fa-solid fa-eraser"></i> Clear Log</button>
+        </div>
+
+        <!-- Two column: Explorer + Response -->
+        <div class="two-col">
+
+            <!-- API Endpoint Explorer -->
+            <div class="card">
+                <div class="card-head"><i class="fa-solid fa-flask"></i> API Endpoint Explorer</div>
+                <div class="card-body">
+                    <p style="font-size:11px;color:#888;margin:0 0 10px;">Click any endpoint to fire a GET request through the backend proxy. Green = 200 OK, Red = denied/error.</p>
+                    <div class="explorer-wrap" id="explorer">
+                        {% for cat, endpoints in categories %}
+                        <div class="cat-label">{{ cat }}</div>
+                        <div class="ep-grid">
+                            {% for name, path in endpoints %}
+                            <button class="ep-btn" data-path="{{ path }}" data-name="{{ name }}" onclick="queryEndpoint(this)">{{ name }}</button>
+                            {% endfor %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Response preview -->
+            <div class="card">
+                <div class="card-head"><i class="fa-solid fa-code"></i> Response Preview <span id="resp-label" style="margin-left:auto;font-weight:normal;font-size:11px;color:#7fb3d8;"></span></div>
+                <div class="card-body">
+                    <div id="resp-empty" class="resp-empty">Click an endpoint or action to see the response here.</div>
+                    <pre class="resp-pre" id="resp-pre" style="display:none;"></pre>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Command log -->
+        <div class="card">
+            <div class="card-head"><i class="fa-solid fa-terminal"></i> Command Log</div>
+            <div class="card-body">
+                <div class="log-wrap" id="cmd-log">
+                    <div class="log-entry"><span class="log-ts">[ready]</span> Actuate API controller loaded. Site ID: 35218</div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+<script>
+function sid() { return document.getElementById('site-id').value.trim(); }
+function ts() { var d=new Date(); return d.toLocaleTimeString('en-NZ',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+
+function addLog(msg, cls) {
+    var log = document.getElementById('cmd-log');
+    var e = document.createElement('div');
+    e.className = 'log-entry';
+    e.innerHTML = '<span class=\"log-ts\">[' + ts() + ']</span> <span class=\"' + (cls||'') + '\">' + msg + '</span>';
+    log.appendChild(e);
+    log.scrollTop = log.scrollHeight;
+}
+
+function clearLog() {
+    document.getElementById('cmd-log').innerHTML = '<div class=\"log-entry\"><span class=\"log-ts\">[' + ts() + ']</span> Log cleared.</div>';
+}
+
+function showResp(label, data, status) {
+    document.getElementById('resp-empty').style.display = 'none';
+    var pre = document.getElementById('resp-pre');
+    pre.style.display = 'block';
+    try { pre.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2); }
+    catch(e) { pre.textContent = String(data); }
+    document.getElementById('resp-label').textContent = label + (status ? ' (' + status + ')' : '');
+}
+
+function setConnStatus(ok, text) {
+    var el = document.getElementById('conn-status');
+    el.className = 'status-badge ' + (ok ? 'status-ok' : 'status-err');
+    el.innerHTML = (ok ? '<i class=\"fa-solid fa-circle-check\"></i> ' : '<i class=\"fa-solid fa-circle-xmark\"></i> ') + text;
+}
+
+function doAction(action) {
+    var siteId = sid();
+    if (!siteId) { alert('Enter a Site ID'); return; }
+    addLog('POST /api/customer/' + siteId + '/action/' + action + '/', 'log-req');
+    fetch('/api/actuate/action/' + action, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({site_id: siteId})
+    }).then(function(r){ return r.json().then(function(d){ return {status:r.status, data:d}; }); })
+    .then(function(res) {
+        if (res.status === 200) {
+            addLog(action.toUpperCase() + ' — ' + (res.data.detail || 'OK') + ' (HTTP ' + res.data.upstream_status + ')', 'log-ok');
+            setConnStatus(true, 'Connected — ' + action.toUpperCase() + ' sent');
+        } else {
+            addLog(action.toUpperCase() + ' FAILED — ' + (res.data.error || JSON.stringify(res.data)) + ' (HTTP ' + res.status + ')', 'log-err');
+            setConnStatus(false, 'Error');
+        }
+        showResp(action.toUpperCase(), res.data.upstream_body || res.data, res.data.upstream_status || res.status);
+    }).catch(function(e) {
+        addLog('Network error: ' + e, 'log-err');
+        setConnStatus(false, 'Network error');
+    });
+}
+
+function getSiteInfo() {
+    var siteId = sid();
+    if (!siteId) { alert('Enter a Site ID'); return; }
+    addLog('GET /api/customer/' + siteId + '/', 'log-req');
+    fetch('/api/actuate/site-info?site_id=' + encodeURIComponent(siteId))
+    .then(function(r){ return r.json().then(function(d){ return {status:r.status, data:d}; }); })
+    .then(function(res) {
+        if (res.status === 200) {
+            addLog('Site info received (HTTP ' + (res.data.upstream_status||200) + ')', 'log-ok');
+            setConnStatus(true, 'Connected — Site ' + siteId);
+        } else {
+            addLog('Site info FAILED — ' + (res.data.error || '') + ' (HTTP ' + res.status + ')', 'log-err');
+        }
+        showResp('Site Info', res.data.upstream_body || res.data, res.data.upstream_status || res.status);
+    }).catch(function(e){
+        addLog('Network error: ' + e, 'log-err');
+    });
+}
+
+function queryEndpoint(btn) {
+    var siteId = sid();
+    if (!siteId) { alert('Enter a Site ID'); return; }
+    var path = btn.dataset.path;
+    var name = btn.dataset.name;
+    btn.className = 'ep-btn loading';
+    addLog('GET /api/' + path.replace(/\{id\}/g, siteId), 'log-req');
+    fetch('/api/actuate/query?site_id=' + encodeURIComponent(siteId) + '&path=' + encodeURIComponent(path))
+    .then(function(r){ return r.json().then(function(d){ return {status:r.status, data:d}; }); })
+    .then(function(res) {
+        var upStatus = res.data.upstream_status || res.status;
+        if (upStatus >= 200 && upStatus < 300) {
+            btn.className = 'ep-btn ok';
+            addLog(name + ' — OK (HTTP ' + upStatus + ')', 'log-ok');
+        } else {
+            btn.className = 'ep-btn fail';
+            addLog(name + ' — DENIED (HTTP ' + upStatus + ')', 'log-err');
+        }
+        showResp(name, res.data.upstream_body || res.data, upStatus);
+    }).catch(function(e){
+        btn.className = 'ep-btn fail';
+        addLog(name + ' — Network error: ' + e, 'log-err');
+    });
+}
+
+function testAllEndpoints() {
+    var btns = document.querySelectorAll('.ep-btn');
+    var delay = 0;
+    addLog('Testing all ' + btns.length + ' endpoints...', 'log-req');
+    btns.forEach(function(btn) {
+        setTimeout(function(){ queryEndpoint(btn); }, delay);
+        delay += 350;
+    });
+}
+</script>
+</body>
+</html>
+"""
+
+
+@app.route("/actuate")
+def actuate_page():
+    cats = list(_ACTUATE_ENDPOINTS.items())
+    html = ACTUATE_TEMPLATE.replace("__SUB_NAVBAR__", _sub_navbar_for("actuate"))
+    return render_template_string(html, categories=cats, is_admin=_is_admin())
+
+
+@app.route("/api/actuate/action/<action>", methods=["POST"])
+def actuate_action(action):
+    if action not in ("arm", "disarm"):
+        return jsonify({"ok": False, "error": "Invalid action. Use arm or disarm."}), 400
+    if not ACTUATE_API_TOKEN:
+        return jsonify({"ok": False, "error": "ACTUATE_API_TOKEN not configured."}), 500
+    data = request.get_json(silent=True) or {}
+    site_id = data.get("site_id", "35218")
+    url = f"{ACTUATE_BASE_URL}/api/customer/{site_id}/action/{action}/"
+    try:
+        import requests as _req
+        r = _req.post(url, headers={
+            "Authorization": f"Token {ACTUATE_API_TOKEN}",
+            "Content-Type": "application/json",
+        }, json={}, timeout=15)
+        try:
+            body = r.json()
+        except Exception:
+            body = r.text
+        return jsonify({"ok": r.ok, "upstream_status": r.status_code, "upstream_body": body, "detail": f"{action} sent"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/actuate/site-info")
+def actuate_site_info():
+    if not ACTUATE_API_TOKEN:
+        return jsonify({"ok": False, "error": "ACTUATE_API_TOKEN not configured."}), 500
+    site_id = request.args.get("site_id", "35218")
+    url = f"{ACTUATE_BASE_URL}/api/customer/{site_id}/"
+    try:
+        import requests as _req
+        r = _req.get(url, headers={
+            "Authorization": f"Token {ACTUATE_API_TOKEN}",
+            "Content-Type": "application/json",
+        }, timeout=15)
+        try:
+            body = r.json()
+        except Exception:
+            body = r.text
+        return jsonify({"ok": r.ok, "upstream_status": r.status_code, "upstream_body": body})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/actuate/query")
+def actuate_query():
+    if not ACTUATE_API_TOKEN:
+        return jsonify({"ok": False, "error": "ACTUATE_API_TOKEN not configured."}), 500
+    site_id = request.args.get("site_id", "35218")
+    path = request.args.get("path", "")
+    if not path:
+        return jsonify({"ok": False, "error": "Missing path parameter."}), 400
+    # Replace {id} placeholder with site_id
+    resolved = path.replace("{id}", site_id)
+    url = f"{ACTUATE_BASE_URL}/api/{resolved}"
+    try:
+        import requests as _req
+        r = _req.get(url, headers={
+            "Authorization": f"Token {ACTUATE_API_TOKEN}",
+            "Content-Type": "application/json",
+        }, timeout=15)
+        try:
+            body = r.json()
+        except Exception:
+            body = r.text
+        return jsonify({"ok": r.ok, "upstream_status": r.status_code, "upstream_body": body})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
 
 
 if __name__ == "__main__":
