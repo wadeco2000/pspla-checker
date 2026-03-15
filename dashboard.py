@@ -369,6 +369,57 @@ def _is_admin():
     email = (session.get('email') or '').lower().strip()
     return bool(email and NOTIFY_EMAIL and email == NOTIFY_EMAIL.lower().strip())
 
+# ── Per-user permissions ────────────────────────────────────────────────────
+_PERMISSION_GROUPS = ['searches', 'database', 'history', 'utilities', 'actuate']
+_PERMISSION_LABELS = {'searches': 'Searches', 'database': 'Database', 'history': 'History', 'utilities': 'Utilities', 'actuate': 'Actuate'}
+_DEFAULT_PERMISSIONS = {'searches': True, 'database': True, 'history': True, 'utilities': True, 'actuate': False}
+
+def _has_permission(group):
+    """Check if current user has access to a permission group."""
+    if _is_admin():
+        return True
+    return bool((session.get('permissions') or _DEFAULT_PERMISSIONS).get(group, False))
+
+def _require_permission(group):
+    """Returns a 403/redirect response if user lacks permission, else None."""
+    if not _has_permission(group):
+        if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'ok': False, 'error': 'Permission denied'}), 403
+        return redirect('/')
+    return None
+
+def _user_perms_dict():
+    """Return dict of {group: bool} for the current user."""
+    return {g: _has_permission(g) for g in _PERMISSION_GROUPS}
+
+_ROUTE_PERMISSIONS = {
+    # searches
+    'start_search': 'searches', 'start_weekly_search': 'searches',
+    'start_facebook_search': 'searches', 'start_directory_import': 'searches',
+    'start_partial_search': 'searches', 'start_bulk_recheck': 'searches',
+    'stop_search': 'searches', 'pause_search': 'searches', 'resume_search': 'searches',
+    'search_terms_api': 'searches', 'toggle_schedule': 'searches',
+    'recheck_pspla': 'searches', 'find_facebook': 'searches',
+    'recheck_nzsa': 'searches', 'recheck_services': 'searches',
+    'recheck_companies_office': 'searches', 'recheck_google_profile': 'searches',
+    'recheck_electrician': 'searches', 'recheck_llm_sense': 'searches',
+    'find_linkedin': 'searches', 'full_recheck': 'searches',
+    # database
+    'dedupe_db': 'database', 'publish': 'database',
+    'export_csv': 'database', 'backup_db': 'database', 'clear_db': 'database',
+    'review_duplicates_page': 'database', 'suspect_records_page': 'database',
+    'duplicates_page': 'database',
+    # history
+    'search_history_page': 'history', 'audit_log_page': 'history',
+    'llm_log_page': 'history', 'release_notes_page': 'history',
+    'history_page': 'history',
+    # utilities
+    'license_checker': 'utilities', 'license_checker_chat': 'utilities',
+    # actuate
+    'actuate_page': 'actuate', 'actuate_action': 'actuate',
+    'actuate_site_info': 'actuate', 'actuate_query': 'actuate',
+}
+
 # ── TOTP 2FA helpers ──────────────────────────────────────────────────────────
 
 def _totp_fernet():
@@ -504,6 +555,12 @@ def _require_dashboard_auth():
     csrf_err = _check_csrf()
     if csrf_err:
         return csrf_err
+    # ── Permission check ──
+    _perm_group = _ROUTE_PERMISSIONS.get(request.endpoint)
+    if _perm_group:
+        _denied = _require_permission(_perm_group)
+        if _denied:
+            return _denied
 
 _DASH_LOGIN_HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -660,7 +717,7 @@ def auth_verify():
     # Check allowed_users table using service key (bypasses RLS)
     try:
         r2 = requests.get(f"{SUPABASE_URL}/rest/v1/allowed_users",
-                          params={'email': f'eq.{email}', 'active': 'eq.true', 'select': 'id,is_admin'},
+                          params={'email': f'eq.{email}', 'active': 'eq.true', 'select': 'id,is_admin,permissions'},
                           headers={'apikey': SUPABASE_SERVICE_KEY,
                                    'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}'},
                           timeout=10)
@@ -678,6 +735,7 @@ def auth_verify():
                 session['2fa_pending'] = True
                 session['2fa_email'] = email
                 session['2fa_is_admin'] = bool(_user_row.get('is_admin'))
+                session['2fa_permissions'] = _user_row.get('permissions') or dict(_DEFAULT_PERMISSIONS)
                 session['2fa_attempts'] = 0
                 try:
                     requests.post(f"{SUPABASE_URL}/rest/v1/login_audit",
@@ -694,6 +752,7 @@ def auth_verify():
             session['email'] = email
             session['auth_method'] = 'google'
             session['is_admin'] = bool(_user_row.get('is_admin'))
+            session['permissions'] = _user_row.get('permissions') or dict(_DEFAULT_PERMISSIONS)
             # Audit log (fire and forget)
             try:
                 requests.post(f"{SUPABASE_URL}/rest/v1/login_audit",
@@ -1075,6 +1134,7 @@ def auth_2fa_verify():
                 pass
     if valid:
         is_admin = session.pop('2fa_is_admin', False)
+        _2fa_perms = session.pop('2fa_permissions', None) or dict(_DEFAULT_PERMISSIONS)
         session.pop('2fa_pending', None)
         session.pop('2fa_attempts', None)
         session.pop('2fa_email', None)
@@ -1082,6 +1142,7 @@ def auth_2fa_verify():
         session['email'] = email
         session['auth_method'] = 'google'
         session['is_admin'] = is_admin
+        session['permissions'] = _2fa_perms
         try:
             requests.post(f"{SUPABASE_URL}/rest/v1/login_audit",
                           json={'email': email, 'provider': 'google', 'result': result_label,
@@ -1458,6 +1519,7 @@ HTML_TEMPLATE = """
   <div class="nav-menus">
 
     <!-- Searches -->
+    {% if user_perms.searches %}
     <div class="nav-item" id="menu-searches">
       <button class="nav-btn" onclick="toggleMenu('menu-searches')">
         <i class="fa-solid fa-magnifying-glass"></i> Searches
@@ -1535,8 +1597,10 @@ HTML_TEMPLATE = """
         </button>
       </div>
     </div>
+    {% endif %}
 
     <!-- Database -->
+    {% if user_perms.database %}
     <div class="nav-item" id="menu-database">
       <button class="nav-btn" onclick="toggleMenu('menu-database')">
         <i class="fa-solid fa-database"></i> Database
@@ -1601,8 +1665,10 @@ HTML_TEMPLATE = """
         </button>
       </div>
     </div>
+    {% endif %}
 
     <!-- Logs & History -->
+    {% if user_perms.history %}
     <div class="nav-item" id="menu-logs">
       <button class="nav-btn" onclick="toggleMenu('menu-logs')">
         <i class="fa-solid fa-clock-rotate-left"></i> History &amp; Logs
@@ -1641,7 +1707,9 @@ HTML_TEMPLATE = """
         </a>
       </div>
     </div>
+    {% endif %}
 
+    {% if user_perms.utilities %}
     <div class="nav-item" id="menu-utilities">
       <button class="nav-btn" onclick="toggleMenu('menu-utilities')">
         <i class="fa-solid fa-wrench"></i> Utilities
@@ -1668,13 +1736,16 @@ HTML_TEMPLATE = """
         </a>
       </div>
     </div>
+    {% endif %}
 
     <!-- Actuate AI -->
+    {% if user_perms.actuate %}
     <div class="nav-item" id="menu-actuate">
       <a href="/actuate" class="nav-btn" style="text-decoration:none;">
         <i class="fa-solid fa-tower-broadcast"></i> Actuate
       </a>
     </div>
+    {% endif %}
 
   </div><!-- /nav-menus -->
 
@@ -4592,6 +4663,12 @@ def get_companies():
 
 @app.route("/")
 def index():
+    # Redirect actuate-only users straight to /actuate
+    if not _is_admin():
+        _perms = session.get('permissions') or _DEFAULT_PERMISSIONS
+        _pspla_access = any(_perms.get(g) for g in ('searches', 'database', 'history', 'utilities'))
+        if not _pspla_access and _perms.get('actuate'):
+            return redirect('/actuate')
     message = request.args.get("message", "")
     message_type = request.args.get("type", "success")
 
@@ -4725,6 +4802,7 @@ def index():
         git_version=git_version,
         github_repo=os.getenv("GITHUB_REPO", "wadeco2000/pspla-checker"),
         is_admin=_is_admin(),
+        user_perms=_user_perms_dict(),
         avatar_url=(_get_user_profile(session.get('email', '')) or {}).get('avatar_url', ''),
     )
 
@@ -7426,7 +7504,7 @@ def user_access_page():
 def api_allowed_users_get():
     from flask import jsonify
     r = requests.get(f"{SUPABASE_URL}/rest/v1/allowed_users",
-                     params={"select": "id,email,name,added_by,added_at,active,last_login,last_provider,is_admin,totp_enabled,avatar_url",
+                     params={"select": "id,email,name,added_by,added_at,active,last_login,last_provider,is_admin,totp_enabled,avatar_url,permissions",
                              "order": "added_at.desc"},
                      headers={"apikey": SUPABASE_SERVICE_KEY,
                               "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
@@ -7445,10 +7523,11 @@ def api_allowed_users_add():
     len_err = _validate_input_lengths({'email': email, 'name': name})
     if len_err:
         return jsonify({"error": len_err}), 400
+    perms = data.get("permissions") or dict(_DEFAULT_PERMISSIONS)
     added_by = session.get("email", "admin")
     r = requests.post(f"{SUPABASE_URL}/rest/v1/allowed_users",
                       json={"email": email, "name": name, "added_by": added_by,
-                            "active": True},
+                            "active": True, "permissions": perms},
                       headers={"apikey": SUPABASE_SERVICE_KEY,
                                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                                "Prefer": "return=representation"})
@@ -7482,6 +7561,33 @@ def api_allowed_users_toggle_admin(uid):
                                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                                 "Prefer": "return=minimal"})
     return jsonify({"ok": r.ok})
+
+@app.route("/api/allowed-users/<uid>/set-permissions", methods=["POST"])
+def api_allowed_users_set_permissions(uid):
+    from flask import jsonify
+    if not _is_admin():
+        return jsonify({"ok": False, "error": "admin only"}), 403
+    data = request.json or {}
+    group = data.get("group", "")
+    enabled = bool(data.get("enabled", False))
+    if group not in _PERMISSION_GROUPS:
+        return jsonify({"ok": False, "error": "invalid group"}), 400
+    # Fetch current perms
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/allowed_users",
+                     params={"id": f"eq.{uid}", "select": "permissions"},
+                     headers={"apikey": SUPABASE_SERVICE_KEY,
+                              "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"})
+    if not r.ok or not r.json():
+        return jsonify({"ok": False, "error": "user not found"}), 404
+    perms = r.json()[0].get("permissions") or dict(_DEFAULT_PERMISSIONS)
+    perms[group] = enabled
+    r2 = requests.patch(f"{SUPABASE_URL}/rest/v1/allowed_users",
+                        params={"id": f"eq.{uid}"},
+                        json={"permissions": perms},
+                        headers={"apikey": SUPABASE_SERVICE_KEY,
+                                 "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                 "Prefer": "return=minimal"})
+    return jsonify({"ok": r2.ok, "permissions": perms})
 
 @app.route("/api/allowed-users/<uid>/reset-2fa", methods=["POST"])
 def api_reset_user_2fa(uid):
@@ -7685,6 +7791,14 @@ tr:last-child td{border-bottom:none}
 .badge-2fa_admin_reset{background:#fef6e4;color:#d69e2e}
 .ua-cell{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#888;font-size:11px}
 .loading{color:#999;font-size:13px;padding:20px 0}
+.perm-btn{display:inline-block;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700;cursor:pointer;border:none;margin:1px;transition:all .15s;letter-spacing:.3px}
+.perm-on{background:#d5f5e3;color:#1e8449}
+.perm-off{background:#eee;color:#aaa}
+.perm-btn:hover{opacity:.75}
+.perm-label{font-size:10px;color:#999;margin-right:2px}
+.add-perms{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;align-items:center}
+.add-perms label{font-size:12px;cursor:pointer;display:flex;align-items:center;gap:4px}
+.add-perms label input{margin:0}
 </style>
 </head>
 <body>
@@ -7694,14 +7808,24 @@ tr:last-child td{border-bottom:none}
   <!-- Allowed Users -->
   <div class="card">
     <h2><i class="fa-solid fa-user-check" style="color:#27ae60"></i> Allowed Users</h2>
-    <div id="add-row" class="add-row" style="display:none">
-      <input type="email" id="new-email" placeholder="Email address" onkeydown="if(event.key==='Enter')addUser()">
-      <input type="text" id="new-name" placeholder="Name (optional)" onkeydown="if(event.key==='Enter')addUser()">
-      <button class="btn btn-add" onclick="addUser()"><i class="fa-solid fa-plus"></i> Add User</button>
+    <div id="add-row" style="display:none">
+      <div class="add-row">
+        <input type="email" id="new-email" placeholder="Email address" onkeydown="if(event.key==='Enter')addUser()">
+        <input type="text" id="new-name" placeholder="Name (optional)" onkeydown="if(event.key==='Enter')addUser()">
+        <button class="btn btn-add" onclick="addUser()"><i class="fa-solid fa-plus"></i> Add User</button>
+      </div>
+      <div class="add-perms">
+        <span style="font-size:12px;color:#666;font-weight:600">Permissions:</span>
+        <label><input type="checkbox" id="add-perm-searches" checked> Searches</label>
+        <label><input type="checkbox" id="add-perm-database" checked> Database</label>
+        <label><input type="checkbox" id="add-perm-history" checked> History</label>
+        <label><input type="checkbox" id="add-perm-utilities" checked> Utilities</label>
+        <label><input type="checkbox" id="add-perm-actuate"> Actuate</label>
+      </div>
     </div>
     <div id="users-loading" class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</div>
     <table id="users-table" style="display:none">
-      <thead><tr><th>Email</th><th>Name</th><th>Added by</th><th>Added</th><th>Last login</th><th>Status</th><th>Role</th><th>2FA</th><th></th></tr></thead>
+      <thead><tr><th>Email</th><th>Name</th><th>Added by</th><th>Added</th><th>Last login</th><th>Status</th><th>Role</th><th>Permissions</th><th>2FA</th><th></th></tr></thead>
       <tbody id="users-body"></tbody>
     </table>
   </div>
@@ -7763,6 +7887,22 @@ function loadUsers() {
             var avatarHtml = u.avatar_url
                 ? '<img src="' + u.avatar_url + '" style="width:24px;height:24px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:6px">'
                 : '<i class="fa-solid fa-user-circle" style="font-size:22px;color:#ccc;vertical-align:middle;margin-right:6px"></i>';
+            var perms = u.permissions || {searches:true,database:true,history:true,utilities:true,actuate:false};
+            var permLabels = {searches:'Sea',database:'Dat',history:'His',utilities:'Uti',actuate:'Act'};
+            var permCol = '';
+            if (u.is_admin) {
+                permCol = '<span style="font-size:11px;color:#8e44ad">All (admin)</span>';
+            } else if (IS_ADMIN) {
+                ['searches','database','history','utilities','actuate'].forEach(function(g){
+                    var on = perms[g];
+                    permCol += '<button class="perm-btn ' + (on ? 'perm-on' : 'perm-off') + '" onclick="togglePerm(\\'' + u.id + '\\',\\'' + g + '\\',' + !on + ')" title="' + g + '">' + permLabels[g] + '</button>';
+                });
+            } else {
+                ['searches','database','history','utilities','actuate'].forEach(function(g){
+                    var on = perms[g];
+                    permCol += '<span class="perm-btn ' + (on ? 'perm-on' : 'perm-off') + '" style="cursor:default" title="' + g + '">' + permLabels[g] + '</span>';
+                });
+            }
             tr.innerHTML = '<td>' + avatarHtml + '<strong>' + u.email + '</strong></td>' +
                 '<td>' + (u.name || '—') + '</td>' +
                 '<td>' + (u.added_by || '—') + '</td>' +
@@ -7770,6 +7910,7 @@ function loadUsers() {
                 '<td>' + (u.last_login ? fmt(u.last_login) + (u.last_provider ? ' <span class="badge badge-' + u.last_provider + '">' + u.last_provider + '</span>' : '') : '—') + '</td>' +
                 '<td><span class="badge ' + (u.active ? 'badge-active">Active' : 'badge-inactive">Inactive') + '</span></td>' +
                 '<td>' + adminCol + '</td>' +
+                '<td>' + permCol + '</td>' +
                 '<td style="text-align:center">' + tfaCol + '</td>' +
                 '<td>' + removeBtn + '</td>';
             b.appendChild(tr);
@@ -7782,11 +7923,26 @@ function addUser() {
     var email = document.getElementById('new-email').value.trim();
     var name = document.getElementById('new-name').value.trim();
     if (!email) { alert('Enter an email address.'); return; }
+    var perms = {
+        searches: document.getElementById('add-perm-searches').checked,
+        database: document.getElementById('add-perm-database').checked,
+        history: document.getElementById('add-perm-history').checked,
+        utilities: document.getElementById('add-perm-utilities').checked,
+        actuate: document.getElementById('add-perm-actuate').checked
+    };
     fetch('/api/allowed-users', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({email: email, name: name})
+        body: JSON.stringify({email: email, name: name, permissions: perms})
     }).then(function(r){return r.json();}).then(function(d){
         if (d.ok) { document.getElementById('new-email').value=''; document.getElementById('new-name').value=''; loadUsers(); }
         else alert('Failed to add user (may already exist).');
+    });
+}
+function togglePerm(uid, group, enabled) {
+    fetch('/api/allowed-users/' + uid + '/set-permissions', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({group: group, enabled: enabled})
+    }).then(function(r){return r.json();}).then(function(d){
+        if (d.ok) loadUsers();
+        else alert('Failed to update permission.');
     });
 }
 function removeUser(id, email) {
