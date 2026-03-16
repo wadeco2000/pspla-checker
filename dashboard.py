@@ -8036,7 +8036,7 @@ function approveRequest(id, email) {
     });
 }
 function rejectRequest(id, email) {
-    var reason = prompt('Reject access for ' + email + '?\n\nOptional reason (leave blank for none):');
+    var reason = prompt('Reject access for ' + email + '?' + String.fromCharCode(10,10) + 'Optional reason (leave blank for none):');
     if (reason === null) return;
     fetch('/api/access-requests/' + id + '/reject', {method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({reason: reason})
