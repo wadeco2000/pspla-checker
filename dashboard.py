@@ -12188,22 +12188,20 @@ function grabEverything() {
 }
 
 function _filterBySite(data, siteId) {
-    // Client-side: if data is an array of objects with a customer field, keep only matching site
+    // Client-side: filter array items to only those belonging to a specific customer/site
     if (!Array.isArray(data) || !data.length) return data;
     var first = data[0];
     if (typeof first !== 'object' || first === null) return data;
-    // Check for customer.id or customer__id or site_id fields
-    var hasCustomer = 'customer' in first && typeof first.customer === 'object' && first.customer && 'id' in first.customer;
-    var hasCustomerId = 'customer_id' in first;
-    var hasSiteId = 'site_id' in first;
-    var hasSite = 'site' in first;
-    if (!hasCustomer && !hasCustomerId && !hasSiteId && !hasSite) return data;
     var sid = parseInt(siteId);
+    // Detect which field links to the customer — only filter on actual customer references
+    var hasCustomerObj = 'customer' in first && typeof first.customer === 'object' && first.customer !== null && 'id' in first.customer;
+    var hasCustomerInt = 'customer' in first && typeof first.customer === 'number';
+    var hasCustomerArr = 'customer' in first && Array.isArray(first.customer);
+    if (!hasCustomerObj && !hasCustomerInt && !hasCustomerArr) return data;
     return data.filter(function(item) {
-        if (hasCustomer) return item.customer && item.customer.id === sid;
-        if (hasCustomerId) return item.customer_id === sid || item.customer_id === siteId;
-        if (hasSiteId) return item.site_id === sid || item.site_id === siteId;
-        if (hasSite) return item.site === sid || item.site === siteId;
+        if (hasCustomerObj) return item.customer && item.customer.id === sid;
+        if (hasCustomerInt) return item.customer === sid;
+        if (hasCustomerArr) return Array.isArray(item.customer) && item.customer.indexOf(sid) !== -1;
         return true;
     });
 }
