@@ -11792,6 +11792,13 @@ ACTUATE_TEMPLATE = r"""
         .btn-disarm{background:#e74c3c;color:white;}
         .btn-info{background:#3498db;color:white;}
         .btn-sm{padding:4px 10px;font-size:11px;border-radius:4px;}
+        .site-filter-toggle{display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none;}
+        .site-filter-toggle input{display:none;}
+        .site-filter-slider{position:relative;width:36px;height:20px;background:#ccc;border-radius:10px;transition:background .2s;}
+        .site-filter-slider::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;background:white;border-radius:50%;transition:transform .2s;}
+        .site-filter-toggle input:checked + .site-filter-slider{background:#27ae60;}
+        .site-filter-toggle input:checked + .site-filter-slider::after{transform:translateX(16px);}
+        .site-filter-label{font-size:11px;color:#888;font-weight:600;}
 
         /* Two-column layout */
         .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px;}
@@ -11908,6 +11915,11 @@ ACTUATE_TEMPLATE = r"""
         <div class="ctrl-row">
             <label>Site ID:</label>
             <input type="text" id="site-id" value="35218">
+            <label class="site-filter-toggle" title="When ON, individual endpoint buttons filter results to this Site ID only. When OFF, they return data for all sites.">
+                <input type="checkbox" id="site-filter-toggle" checked>
+                <span class="site-filter-slider"></span>
+                <span class="site-filter-label" id="site-filter-label">Filter by Site ID</span>
+            </label>
             <button class="btn btn-arm" onclick="doAction('arm')"><i class="fa-solid fa-lock"></i> ARM</button>
             <button class="btn btn-disarm" onclick="doAction('disarm')"><i class="fa-solid fa-lock-open"></i> DISARM</button>
             <button class="btn btn-info" onclick="getSiteInfo()"><i class="fa-solid fa-circle-info"></i> Get Site Info</button>
@@ -12046,6 +12058,8 @@ function getSiteInfo() {
     });
 }
 
+function siteFilterOn() { return document.getElementById('site-filter-toggle').checked; }
+
 function queryEndpoint(btn) {
     var siteId = sid();
     if (!siteId) { alert('Enter a Site ID'); return; }
@@ -12055,8 +12069,9 @@ function queryEndpoint(btn) {
     // Remove old icon while loading
     var oldIcon = btn.querySelector('.ep-icon');
     if (oldIcon) oldIcon.remove();
-    addLog('GET /api/' + path.replace(/\{id\}/g, siteId), 'log-req');
-    fetch('/api/actuate/query?site_id=' + encodeURIComponent(siteId) + '&path=' + encodeURIComponent(path))
+    var filterParam = siteFilterOn() ? '&filter_site_id=' + encodeURIComponent(siteId) : '';
+    addLog('GET /api/' + path.replace(/\{id\}/g, siteId) + (siteFilterOn() ? '?siteId=' + siteId : ' (all sites)'), 'log-req');
+    fetch('/api/actuate/query?site_id=' + encodeURIComponent(siteId) + '&path=' + encodeURIComponent(path) + filterParam)
     .then(function(r){ return r.json().then(function(d){ return {status:r.status, data:d}; }); })
     .then(function(res) {
         var upStatus = res.data.upstream_status || res.status;
@@ -12451,12 +12466,17 @@ def actuate_query():
     # Replace {id} placeholder with site_id
     resolved = path.replace("{id}", site_id)
     url = f"{ACTUATE_BASE_URL}/api/{resolved}"
+    # If filter_site_id is provided, append as query param to Actuate API
+    filter_site_id = request.args.get("filter_site_id", "")
+    params = {}
+    if filter_site_id:
+        params["siteId"] = filter_site_id
     try:
         import requests as _req
         r = _req.get(url, headers={
             "Authorization": f"Token {ACTUATE_API_TOKEN}",
             "Content-Type": "application/json",
-        }, timeout=15)
+        }, params=params, timeout=15)
         try:
             body = r.json()
         except Exception:
