@@ -12466,11 +12466,11 @@ def actuate_query():
     # Replace {id} placeholder with site_id
     resolved = path.replace("{id}", site_id)
     url = f"{ACTUATE_BASE_URL}/api/{resolved}"
-    # If filter_site_id is provided, append as query param to Actuate API
+    # If filter_site_id is provided, use Django-style nested filter: customer__id=X
     filter_site_id = request.args.get("filter_site_id", "")
     params = {}
     if filter_site_id:
-        params["siteId"] = filter_site_id
+        params["customer__id"] = filter_site_id
     try:
         import requests as _req
         r = _req.get(url, headers={
