@@ -5132,7 +5132,7 @@ def start_search():
     rl = _check_rate_limit('search_launch', 3, 60)
     if rl: return rl
     try:
-        _launch("searcher.py")
+        _launch("searcher.py", triggered_by_user=session.get("email", "localhost"))
         return redirect(url_for("index", message="Full search started.", type="success"))
     except Exception as e:
         _safe_error(e, "Failed to start search")
@@ -5146,7 +5146,7 @@ def start_weekly_search():
     rl = _check_rate_limit('search_launch', 3, 60)
     if rl: return rl
     try:
-        _launch("run_weekly.py")
+        _launch("run_weekly.py", triggered_by_user=session.get("email", "localhost"))
         return redirect(url_for("index", message="Weekly scan started.", type="success"))
     except Exception as e:
         _safe_error(e, "Failed to start weekly search")
@@ -5171,7 +5171,7 @@ def start_facebook_search():
     if rl: return rl
     try:
         fresh = request.form.get("fresh") == "1"
-        _launch("run_facebook.py", ["--fresh"] if fresh else [])
+        _launch("run_facebook.py", ["--fresh"] if fresh else [], triggered_by_user=session.get("email", "localhost"))
         return redirect(url_for("index", message="Facebook search started.", type="success"))
     except Exception as e:
         _safe_error(e, "Failed to start Facebook search")
@@ -5186,7 +5186,7 @@ def start_directory_import():
     if rl: return rl
     try:
         fresh = request.form.get("fresh") == "1"
-        _launch("run_directories.py", ["--fresh"] if fresh else [])
+        _launch("run_directories.py", ["--fresh"] if fresh else [], triggered_by_user=session.get("email", "localhost"))
         return redirect(url_for("index", message="Directory import started (NZSA + LinkedIn).", type="success"))
     except Exception as e:
         _safe_error(e, "Failed to start directory import")
@@ -5899,7 +5899,7 @@ def start_partial_search():
         fresh = bool(data.get("fresh", False))
         with open(PARTIAL_CONFIG_FILE, "w") as f:
             json.dump(config, f, indent=2)
-        _launch("run_partial.py", ["--fresh"] if fresh else [])
+        _launch("run_partial.py", ["--fresh"] if fresh else [], triggered_by_user=session.get("email", "localhost"))
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": _safe_error(e)}), 500
@@ -5922,7 +5922,7 @@ def start_bulk_recheck():
     config = {"checks": checks, "company_ids": company_ids}
     with open(RECHECK_CONFIG_FILE, "w") as f:
         json.dump(config, f)
-    _launch("run_recheck.py")
+    _launch("run_recheck.py", triggered_by_user=session.get("email", "localhost"))
     scope = "all companies" if company_ids == "all" else f"{len(company_ids)} selected companies"
     return jsonify({"ok": True, "message": f"Bulk recheck started for {scope}"})
 
@@ -6048,6 +6048,7 @@ SEARCH_HISTORY_TEMPLATE = """<!DOCTYPE html>
                 <th>Date (NZT)</th>
                 <th>Type</th>
                 <th>Triggered by</th>
+                <th>User</th>
                 <th class="right">Duration</th>
                 <th class="right">Found</th>
                 <th class="right">New</th>
@@ -6056,7 +6057,7 @@ SEARCH_HISTORY_TEMPLATE = """<!DOCTYPE html>
                 <th>Notes</th>
             </tr>
         </thead>
-        <tbody id="tableBody"><tr><td colspan="9" style="text-align:center;color:#aaa;padding:30px;">Loading...</td></tr></tbody>
+        <tbody id="tableBody"><tr><td colspan="10" style="text-align:center;color:#aaa;padding:30px;">Loading...</td></tr></tbody>
     </table>
 </div>
 <script>
@@ -6137,11 +6138,12 @@ function renderTable() {
             && (!search || (r.type||'').toLowerCase().includes(search)
                         || (r.status||'').toLowerCase().includes(search)
                         || (r.triggered_by||'').toLowerCase().includes(search)
+                        || (r.triggered_by_user||'').toLowerCase().includes(search)
                         || configSummary(r).toLowerCase().includes(search));
     });
     if (!rows.length) {
         document.getElementById('tableBody').innerHTML =
-            '<tr><td colspan="9" style="text-align:center;color:#aaa;padding:30px;">No records match.</td></tr>';
+            '<tr><td colspan="10" style="text-align:center;color:#aaa;padding:30px;">No records match.</td></tr>';
         return;
     }
     var html = '';
@@ -6180,12 +6182,12 @@ function renderTable() {
         var extraRows = '';
         if (cfgDet) {
             extraRows += '<tr id="detail-' + idx + '" style="display:none;">'
-                + '<td colspan="9" style="background:#f0f6ff;padding:10px 14px;font-size:12px;color:#333;">'
+                + '<td colspan="10" style="background:#f0f6ff;padding:10px 14px;font-size:12px;color:#333;">'
                 + cfgDet + '</td></tr>';
         }
         if (notes && notes.length > 60) {
             extraRows += '<tr id="notes-' + idx + '" style="display:none;">'
-                + '<td colspan="9" style="background:#fff8f8;padding:10px 14px;font-size:11px;color:#555;white-space:pre-wrap;font-family:monospace;">'
+                + '<td colspan="10" style="background:#fff8f8;padding:10px 14px;font-size:11px;color:#555;white-space:pre-wrap;font-family:monospace;">'
                 + notes.replace(/</g,'&lt;') + '</td></tr>';
         }
 
@@ -6193,6 +6195,7 @@ function renderTable() {
             + '<td>' + fmt(r.started) + '</td>'
             + '<td>' + lbl + '</td>'
             + '<td style="color:#888;">' + (r.triggered_by||'-') + '</td>'
+            + '<td style="color:#888;font-size:11px;">' + (r.triggered_by_user||'-') + '</td>'
             + '<td class="right" style="color:#888;">' + dur + '</td>'
             + '<td class="right">' + (r.total_found||0).toLocaleString() + '</td>'
             + '<td class="right" style="font-weight:bold;">' + (r.total_new||0).toLocaleString() + '</td>'
@@ -8468,6 +8471,7 @@ def _write_stopped_history():
         total_found = 0
         total_new = 0
         triggered_by = "manual"
+        triggered_by_user = None
 
         if STATE_BACKEND == "supabase":
             try:
@@ -8490,6 +8494,7 @@ def _write_stopped_history():
             search_type = start.get("type", "full")
             started_iso = start.get("started")
             triggered_by = start.get("triggered_by", "manual")
+            triggered_by_user = start.get("triggered_by_user")
 
         if not started_iso:
             return  # nothing to record
@@ -8518,6 +8523,7 @@ def _write_stopped_history():
             "total_new": total_new,
             "status": "stopped",
             "triggered_by": triggered_by,
+            "triggered_by_user": triggered_by_user,
         }
 
         # Write to Supabase search_runs if available
@@ -10396,7 +10402,7 @@ def _search_process_alive():
     return False
 
 
-def _launch(script, args=None, triggered_by="manual"):
+def _launch(script, args=None, triggered_by="manual", triggered_by_user=None):
     """Launch a search script as a subprocess, capturing output to search_log.txt."""
     global _search_proc
     if _search_process_alive():
@@ -10417,10 +10423,12 @@ def _launch(script, args=None, triggered_by="manual"):
     try:
         with open(START_FILE, "w") as f:
             json.dump({"started": started_iso, "type": _type_map.get(script, script),
-                       "triggered_by": triggered_by}, f)
+                       "triggered_by": triggered_by, "triggered_by_user": triggered_by_user}, f)
     except Exception:
         pass
     cmd = ["python", "-u", os.path.join(BASE_DIR, script)] + (args or [])
+    if triggered_by_user:
+        cmd += ["--triggered-by-user", triggered_by_user]
     log = open(LOG_FILE, "w", encoding="utf-8", buffering=1)
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"

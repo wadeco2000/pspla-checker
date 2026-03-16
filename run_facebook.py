@@ -28,6 +28,10 @@ PAUSE_FLAG = os.path.join(BASE_DIR, "pause.flag")
 if __name__ == "__main__":
     triggered_by = "scheduled" if "--scheduled" in sys.argv else "manual"
     fresh = "--fresh" in sys.argv
+    _tbu = None
+    for _i, _a in enumerate(sys.argv):
+        if _a == "--triggered-by-user" and _i + 1 < len(sys.argv):
+            _tbu = sys.argv[_i + 1]
 
     # Scheduled runs default to last 90 days; manual runs search all time
     fb_time_filter = "qdr:m3" if triggered_by == "scheduled" else None
@@ -54,10 +58,10 @@ if __name__ == "__main__":
     reset_token_usage()
     reset_serp_query_count()
     open(RUNNING_FLAG, "w").close()
-    record_search_start("facebook", started_iso, triggered_by, config=_config)
+    record_search_start("facebook", started_iso, triggered_by, config=_config, triggered_by_user=_tbu)
     try:
         fb_found, fb_new = run_facebook_search(set(), fresh=fresh, time_filter=fb_time_filter)
-        append_history("facebook", started_iso, fb_found, fb_new, "completed", triggered_by, config=_config)
+        append_history("facebook", started_iso, fb_found, fb_new, "completed", triggered_by, config=_config, triggered_by_user=_tbu)
         send_search_email("facebook", started_iso, fb_found, fb_new, triggered_by, get_session_log())
         clear_fb_progress()
     except Exception as e:
@@ -65,7 +69,7 @@ if __name__ == "__main__":
         print(f"\n  [CRASH] Unhandled exception in Facebook search: {e}")
         print(tb)
         append_history("facebook", started_iso, 0, 0, f"error: {type(e).__name__}: {e}", triggered_by,
-                       notes=tb[:1500], config=_config)
+                       notes=tb[:1500], config=_config, triggered_by_user=_tbu)
         raise
     finally:
         clear_status()

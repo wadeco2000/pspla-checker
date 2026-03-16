@@ -31,7 +31,7 @@ PAUSE_FLAG = os.path.join(BASE_DIR, "pause.flag")
 PARTIAL_CONFIG_FILE = os.path.join(BASE_DIR, "partial_config.json")
 
 
-def run_partial(triggered_by="manual", fresh=False):
+def run_partial(triggered_by="manual", fresh=False, triggered_by_user=None):
     if not os.path.exists(PARTIAL_CONFIG_FILE):
         print("No partial_config.json found. Aborting.")
         return
@@ -70,7 +70,7 @@ def run_partial(triggered_by="manual", fresh=False):
     open(RUNNING_FLAG, "w").close()
     _hist_config = {"regions": regions, "terms": google_terms,
                      "include_facebook": include_facebook, "include_nationwide": include_nationwide}
-    record_search_start("google-partial", started_iso, triggered_by, config=_hist_config)
+    record_search_start("google-partial", started_iso, triggered_by, config=_hist_config, triggered_by_user=triggered_by_user)
     total_found = 0
     total_new = 0
     found_urls = set()
@@ -107,7 +107,7 @@ def run_partial(triggered_by="manual", fresh=False):
                     if results is SERPAPI_EXHAUSTED:
                         print("\n  [STOPPED] SerpAPI exhausted.")
                         append_history("google-partial", started_iso, total_found, total_new,
-                                       "stopped", triggered_by, config=_hist_config)
+                                       "stopped", triggered_by, config=_hist_config, triggered_by_user=triggered_by_user)
                         send_search_email("google-partial", started_iso, total_found, total_new, triggered_by, get_session_log())
                         return
 
@@ -187,7 +187,7 @@ def run_partial(triggered_by="manual", fresh=False):
             save_partial_progress(partial_progress)
 
         append_history("google-partial", started_iso, total_found, total_new,
-                       "completed", triggered_by, config=_hist_config)
+                       "completed", triggered_by, config=_hist_config, triggered_by_user=triggered_by_user)
         send_search_email("google-partial", started_iso, total_found, total_new, triggered_by, get_session_log())
         clear_partial_progress()
 
@@ -196,7 +196,7 @@ def run_partial(triggered_by="manual", fresh=False):
         print(f"\n  [CRASH] Unhandled exception in Partial search: {e}")
         print(tb)
         append_history("google-partial", started_iso, total_found, total_new,
-                       f"error: {type(e).__name__}: {e}", triggered_by, notes=tb[:1500], config=_hist_config)
+                       f"error: {type(e).__name__}: {e}", triggered_by, notes=tb[:1500], config=_hist_config, triggered_by_user=triggered_by_user)
         raise
 
     finally:
@@ -215,4 +215,8 @@ def run_partial(triggered_by="manual", fresh=False):
 if __name__ == "__main__":
     triggered_by = "scheduled" if "--scheduled" in sys.argv else "manual"
     fresh = "--fresh" in sys.argv
-    run_partial(triggered_by, fresh=fresh)
+    _tbu = None
+    for _i, _a in enumerate(sys.argv):
+        if _a == "--triggered-by-user" and _i + 1 < len(sys.argv):
+            _tbu = sys.argv[_i + 1]
+    run_partial(triggered_by, fresh=fresh, triggered_by_user=_tbu)

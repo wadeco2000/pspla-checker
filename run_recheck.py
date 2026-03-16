@@ -487,7 +487,7 @@ CHECK_LABELS = {
 }
 
 
-def run_recheck(triggered_by="manual"):
+def run_recheck(triggered_by="manual", triggered_by_user=None):
     if not os.path.exists(RECHECK_CONFIG_FILE):
         print("No recheck_config.json found. Aborting.")
         return
@@ -520,7 +520,7 @@ def run_recheck(triggered_by="manual"):
         os.remove(PAUSE_FLAG)
     open(RUNNING_FLAG, "w").close()
     _hist_config = {"checks": checks, "check_labels": check_label, "scope": scope_label}
-    record_search_start("bulk-recheck", started_iso, triggered_by, config=_hist_config)
+    record_search_start("bulk-recheck", started_iso, triggered_by, config=_hist_config, triggered_by_user=triggered_by_user)
 
     total_processed = 0
     total_updated = 0
@@ -570,7 +570,7 @@ def run_recheck(triggered_by="manual"):
             total_processed += 1
 
         append_history("bulk-recheck", started_iso, total_processed, total_updated,
-                       "completed", triggered_by, config=_hist_config)
+                       "completed", triggered_by, config=_hist_config, triggered_by_user=triggered_by_user)
         send_search_email("bulk-recheck", started_iso, total_processed, total_updated,
                           triggered_by, get_session_log(), checks_label=check_label,
                           total_edits=total_edits)
@@ -580,7 +580,7 @@ def run_recheck(triggered_by="manual"):
         print(f"\n  [CRASH] Unhandled exception in Bulk Recheck: {e}")
         print(tb)
         append_history("bulk-recheck", started_iso, total_processed, total_updated,
-                       f"error: {type(e).__name__}: {e}", triggered_by, notes=tb[:1500], config=_hist_config)
+                       f"error: {type(e).__name__}: {e}", triggered_by, notes=tb[:1500], config=_hist_config, triggered_by_user=triggered_by_user)
         raise
 
     finally:
@@ -598,4 +598,8 @@ def run_recheck(triggered_by="manual"):
 
 if __name__ == "__main__":
     triggered_by = "scheduled" if "--scheduled" in sys.argv else "manual"
-    run_recheck(triggered_by)
+    _tbu = None
+    for _i, _a in enumerate(sys.argv):
+        if _a == "--triggered-by-user" and _i + 1 < len(sys.argv):
+            _tbu = sys.argv[_i + 1]
+    run_recheck(triggered_by, triggered_by_user=_tbu)

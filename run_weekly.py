@@ -38,7 +38,7 @@ RUNNING_FLAG = os.path.join(BASE_DIR, "running.flag")
 PAUSE_FLAG = os.path.join(BASE_DIR, "pause.flag")
 
 
-def run_weekly(triggered_by="manual"):
+def run_weekly(triggered_by="manual", triggered_by_user=None):
     started_iso = datetime.now(timezone.utc).isoformat()
     _config = {"regions": list(NZ_REGIONS), "terms": list(WEEKLY_TERMS), "time_filter": "last 7 days"}
     reset_session_log()
@@ -56,7 +56,7 @@ def run_weekly(triggered_by="manual"):
     open(RUNNING_FLAG, "w").close()
     reset_token_usage()
     reset_serp_query_count()
-    record_search_start("google-weekly", started_iso, triggered_by, config=_config)
+    record_search_start("google-weekly", started_iso, triggered_by, config=_config, triggered_by_user=triggered_by_user)
     total_found = 0
     total_new = 0
     found_urls = set()
@@ -80,7 +80,7 @@ def run_weekly(triggered_by="manual"):
                 if results is SERPAPI_EXHAUSTED:
                     print("\n  [STOPPED] SerpAPI exhausted.")
                     append_history("google-weekly", started_iso, total_found, total_new,
-                                   "stopped", triggered_by, config=_config)
+                                   "stopped", triggered_by, config=_config, triggered_by_user=triggered_by_user)
                     send_search_email("google-weekly", started_iso, total_found, total_new, triggered_by, get_session_log())
                     return
 
@@ -139,7 +139,7 @@ def run_weekly(triggered_by="manual"):
                         total_new += 1
 
         append_history("google-weekly", started_iso, total_found, total_new,
-                       "completed", triggered_by, config=_config)
+                       "completed", triggered_by, config=_config, triggered_by_user=triggered_by_user)
         send_search_email("google-weekly", started_iso, total_found, total_new, triggered_by, get_session_log())
 
     finally:
@@ -157,7 +157,11 @@ def run_weekly(triggered_by="manual"):
 
 if __name__ == "__main__":
     triggered_by = "scheduled" if "--scheduled" in sys.argv else "manual"
+    _tbu = None
+    for _i, _a in enumerate(sys.argv):
+        if _a == "--triggered-by-user" and _i + 1 < len(sys.argv):
+            _tbu = sys.argv[_i + 1]
     if triggered_by == "scheduled" and not is_schedule_enabled():
         print("  Scheduled searches are disabled — exiting.")
         raise SystemExit(0)
-    run_weekly(triggered_by)
+    run_weekly(triggered_by, triggered_by_user=_tbu)

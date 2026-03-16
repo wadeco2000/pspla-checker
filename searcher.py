@@ -4324,7 +4324,7 @@ def clear_status():
     })
 
 
-def record_search_start(run_type, started_iso, triggered_by, config=None):
+def record_search_start(run_type, started_iso, triggered_by, config=None, triggered_by_user=None):
     """Write a 'running' sentinel to history at search start.
     If the process crashes without calling append_history(), this entry remains
     visible in the history so you can see the search started but never finished.
@@ -4339,6 +4339,7 @@ def record_search_start(run_type, started_iso, triggered_by, config=None):
         "total_new": 0,
         "status": "running",
         "triggered_by": triggered_by,
+        "triggered_by_user": triggered_by_user,
         "notes": "",
         "config": config or {},
     }
@@ -4365,13 +4366,13 @@ def record_search_start(run_type, started_iso, triggered_by, config=None):
     })
     _insert_search_run({
         "run_type": run_type, "started": started_iso, "status": "running",
-        "triggered_by": triggered_by,
+        "triggered_by": triggered_by, "triggered_by_user": triggered_by_user,
         "config": json.dumps(config) if config else None,
     })
     _push_search_status(True, search_type=run_type, progress="Starting...", log_lines="")
 
 
-def append_history(run_type, started_iso, total_found, total_new, status="completed", triggered_by="manual", notes="", config=None):
+def append_history(run_type, started_iso, total_found, total_new, status="completed", triggered_by="manual", notes="", config=None, triggered_by_user=None):
     """Append a run record to search_history.json (newest first, capped at 100).
     Replaces any 'running' sentinel written by record_search_start() for the same started_iso."""
     finished = datetime.now(timezone.utc)
@@ -4389,6 +4390,7 @@ def append_history(run_type, started_iso, total_found, total_new, status="comple
         "total_new": total_new,
         "status": status,
         "triggered_by": triggered_by,
+        "triggered_by_user": triggered_by_user,
         "notes": notes,
         "config": config or {},
     }
@@ -4419,6 +4421,7 @@ def append_history(run_type, started_iso, total_found, total_new, status="comple
             headers=_patch_h,
             json={"finished": finished.isoformat(), "duration_minutes": duration_minutes,
                   "total_found": total_found, "total_new": total_new, "status": status,
+                  "triggered_by_user": triggered_by_user,
                   "notes": notes or None, "config": json.dumps(config) if config else None},
             timeout=8
         )
@@ -5995,14 +5998,14 @@ def run_linkedin_import(found_urls=None, limit=None, fresh=False):
     return total_found, total_new
 
 
-def run_search(triggered_by="manual"):
+def run_search(triggered_by="manual", triggered_by_user=None):
     print("=" * 60)
     print("  PSPLA Security Camera Company Checker")
     print("=" * 60)
     started_iso = datetime.now(timezone.utc).isoformat()
     _full_config = {"regions": list(NZ_REGIONS), "terms": list(SEARCH_TERMS),
                     "includes": ["facebook", "nzsa", "linkedin"]}
-    record_search_start("full", started_iso, triggered_by, config=_full_config)
+    record_search_start("full", started_iso, triggered_by, config=_full_config, triggered_by_user=triggered_by_user)
     reset_session_log()
     reset_token_usage()
     reset_serp_query_count()
@@ -6056,7 +6059,7 @@ def run_search(triggered_by="manual"):
                     print(f"  Progress saved — completed regions: {', '.join(completed_regions) or 'none'}")
                     print("  Upgrade your SerpAPI plan or wait for next month, then re-run to resume.")
                     save_progress(completed_regions, total_found, total_new)
-                    append_history("full", started_iso, total_found, total_new, "stopped", triggered_by, config=_full_config)
+                    append_history("full", started_iso, total_found, total_new, "stopped", triggered_by, config=_full_config, triggered_by_user=triggered_by_user)
                     return
 
                 for result in results:
@@ -6148,7 +6151,7 @@ def run_search(triggered_by="manual"):
         total_new += li_new
 
         clear_progress()
-        append_history("full", started_iso, total_found, total_new, "completed", triggered_by, config=_full_config)
+        append_history("full", started_iso, total_found, total_new, "completed", triggered_by, config=_full_config, triggered_by_user=triggered_by_user)
         send_search_email("full", started_iso, total_found, total_new, triggered_by, get_session_log())
 
     except Exception as e:
@@ -6158,7 +6161,7 @@ def run_search(triggered_by="manual"):
         print(tb)
         append_history("full", started_iso, total_found, total_new,
                        f"error: {type(e).__name__}: {e}", triggered_by,
-                       notes=tb[:1500], config=_full_config)
+                       notes=tb[:1500], config=_full_config, triggered_by_user=triggered_by_user)
         raise
 
     finally:
@@ -6179,7 +6182,11 @@ def run_search(triggered_by="manual"):
 if __name__ == "__main__":
     import sys
     triggered_by = "scheduled" if "--scheduled" in sys.argv else "manual"
+    _tbu = None
+    for _i, _a in enumerate(sys.argv):
+        if _a == "--triggered-by-user" and _i + 1 < len(sys.argv):
+            _tbu = sys.argv[_i + 1]
     if triggered_by == "scheduled" and not is_schedule_enabled():
         print("  Scheduled searches are disabled — exiting.")
         raise SystemExit(0)
-    run_search(triggered_by=triggered_by)
+    run_search(triggered_by=triggered_by, triggered_by_user=_tbu)
