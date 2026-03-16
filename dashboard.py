@@ -393,28 +393,39 @@ def _user_perms_dict():
     return {g: _has_permission(g) for g in _PERMISSION_GROUPS}
 
 _ROUTE_PERMISSIONS = {
-    # searches
+    # searches — launch, stop, status, rechecks
     'start_search': 'searches', 'start_weekly_search': 'searches',
     'start_facebook_search': 'searches', 'start_directory_import': 'searches',
     'start_partial_search': 'searches', 'start_bulk_recheck': 'searches',
     'stop_search': 'searches', 'pause_search': 'searches', 'resume_search': 'searches',
-    'search_terms_api': 'searches', 'toggle_schedule': 'searches',
-    'recheck_pspla': 'searches', 'find_facebook': 'searches',
-    'recheck_nzsa': 'searches', 'recheck_services': 'searches',
-    'recheck_companies_office': 'searches', 'recheck_google_profile': 'searches',
-    'recheck_electrician': 'searches', 'recheck_llm_sense': 'searches',
-    'find_linkedin': 'searches', 'full_recheck': 'searches',
+    'get_search_terms': 'searches', 'save_terms': 'searches', 'toggle_schedule': 'searches',
+    'search_status': 'searches', 'search_running_info': 'searches',
+    'search_log': 'searches', 'search_progress_endpoint': 'searches',
+    'recheck_pspla_for_company': 'searches', 'find_facebook_for_company': 'searches',
+    'recheck_nzsa_for_company': 'searches', 'recheck_services_for_company': 'searches',
+    'recheck_companies_office_for_company': 'searches', 'recheck_google_profile_for_company': 'searches',
+    'recheck_electrician_for_company': 'searches', 'recheck_llm_sense': 'searches',
+    'find_linkedin_for_company': 'searches', 'full_recheck_for_company': 'searches',
+    'save_correction': 'searches', 'confirm_recheck': 'searches',
+    'recheck_log': 'searches', 'open_nzsa_report': 'searches',
+    'company_ai_decisions': 'searches',
     # database
     'dedupe_db': 'database', 'publish': 'database',
     'export_csv': 'database', 'backup_db': 'database', 'clear_db': 'database',
-    'review_duplicates_page': 'database', 'suspect_records_page': 'database',
-    'duplicates_page': 'database',
+    'suspect_records': 'database', 'duplicates_page': 'database',
+    'update_company': 'database', 'delete_company': 'database',
     # history
-    'search_history_page': 'history', 'audit_log_page': 'history',
-    'llm_log_page': 'history', 'release_notes_page': 'history',
-    'history_page': 'history',
+    'search_history': 'history', 'search_history_data': 'history',
+    'audit_log_page': 'history', 'audit_log_data': 'history',
+    'company_history': 'history',
+    'llm_log_page': 'history', 'llm_log_clear': 'history',
+    'release_notes_page': 'history', 'add_release_note': 'history',
+    'generate_release_notes': 'history',
+    'history': 'history', 'api_credits': 'history',
     # utilities
     'license_checker': 'utilities', 'license_checker_chat': 'utilities',
+    'util_pspla_search': 'utilities', 'util_nzsa_search': 'utilities',
+    'util_electrician_search': 'utilities',
     # actuate
     'actuate_page': 'actuate', 'actuate_action': 'actuate',
     'actuate_site_info': 'actuate', 'actuate_query': 'actuate',
@@ -7494,6 +7505,8 @@ def account_2fa_regen_backup():
 # ── User Access page ───────────────────────────────────────────────────────────
 @app.route("/user-access")
 def user_access_page():
+    if not _is_admin():
+        return redirect('/')
     return render_template_string(
         _USER_ACCESS_HTML.replace('__IS_ADMIN__', 'true' if _is_admin() else 'false'),
         sub_navbar=_sub_navbar_for("user-access")
@@ -7502,6 +7515,8 @@ def user_access_page():
 @app.route("/api/allowed-users", methods=["GET"])
 def api_allowed_users_get():
     from flask import jsonify
+    if not _is_admin():
+        return jsonify({"ok": False, "error": "admin only"}), 403
     r = requests.get(f"{SUPABASE_URL}/rest/v1/allowed_users",
                      params={"select": "id,email,name,added_by,added_at,active,last_login,last_provider,is_admin,totp_enabled,avatar_url,permissions",
                              "order": "added_at.desc"},
@@ -7615,6 +7630,8 @@ def api_reset_user_2fa(uid):
 @app.route("/api/login-audit")
 def api_login_audit():
     from flask import jsonify
+    if not _is_admin():
+        return jsonify({"ok": False, "error": "admin only"}), 403
     r = requests.get(f"{SUPABASE_URL}/rest/v1/login_audit",
                      params={"select": "id,email,provider,result,attempted_at,user_agent",
                              "order": "attempted_at.desc", "limit": "200"},
@@ -7793,6 +7810,7 @@ tr:last-child td{border-bottom:none}
 .perm-on{background:#d5f5e3;color:#1e8449}
 .perm-off{background:#eee;color:#aaa}
 .perm-btn:hover{opacity:.75}
+.perm-cell{white-space:nowrap}
 .add-perms{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;align-items:center}
 .add-perms label{font-size:12px;cursor:pointer;display:flex;align-items:center;gap:4px}
 .add-perms label input{margin:0}
@@ -7907,7 +7925,7 @@ function loadUsers() {
                 '<td>' + (u.last_login ? fmt(u.last_login) + (u.last_provider ? ' <span class="badge badge-' + u.last_provider + '">' + u.last_provider + '</span>' : '') : '—') + '</td>' +
                 '<td><span class="badge ' + (u.active ? 'badge-active">Active' : 'badge-inactive">Inactive') + '</span></td>' +
                 '<td>' + adminCol + '</td>' +
-                '<td>' + permCol + '</td>' +
+                '<td class="perm-cell">' + permCol + '</td>' +
                 '<td style="text-align:center">' + tfaCol + '</td>' +
                 '<td>' + removeBtn + '</td>';
             b.appendChild(tr);
