@@ -11767,6 +11767,12 @@ ACTUATE_TEMPLATE = r"""
         .page-header{background:#1a252f;color:white;padding:14px 24px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
         .page-header h1{margin:0;font-size:18px;display:flex;align-items:center;gap:10px;}
         .page-header h1 i{color:#3498db;}
+        .header-right{margin-left:auto;display:flex;align-items:center;gap:12px;}
+        .header-right a{color:#aac;font-size:12px;text-decoration:none;display:flex;align-items:center;gap:5px;}
+        .header-right a:hover{color:white;}
+        .header-avatar{width:24px;height:24px;border-radius:50%;border:1px solid #555;}
+        .header-email{font-size:11px;color:#7fb3d8;}
+        .header-signout{background:rgba(231,76,60,0.15);border:1px solid rgba(231,76,60,0.4);border-radius:6px;padding:4px 10px;font-size:11px;color:#e98 !important;}
         .content{max-width:1400px;margin:20px auto;padding:0 20px;}
 
         /* Controls row */
@@ -11861,6 +11867,13 @@ ACTUATE_TEMPLATE = r"""
 
     <div class="page-header">
         <h1><i class="fa-solid fa-tower-broadcast"></i> Actuate AI Control</h1>
+        <div class="header-right">
+            {% if has_pspla_access %}<a href="/"><i class="fa-solid fa-arrow-left"></i> Dashboard</a>{% endif %}
+            <a href="/account/profile"><i class="fa-solid fa-user-gear"></i> My Account</a>
+            {% if user_avatar %}<img src="{{ user_avatar }}" class="header-avatar" alt="">{% endif %}
+            <span class="header-email">{{ user_email }}</span>
+            <a href="/logout" class="header-signout"><i class="fa-solid fa-right-from-bracket"></i> Sign out</a>
+        </div>
     </div>
 
     <div class="content">
@@ -12268,7 +12281,9 @@ function toggleGrabEp(uid) {
 @app.route("/actuate")
 def actuate_page():
     cats = list(_ACTUATE_ENDPOINTS.items())
-    return render_template_string(ACTUATE_TEMPLATE, categories=cats, is_admin=_is_admin())
+    return render_template_string(ACTUATE_TEMPLATE, categories=cats, is_admin=_is_admin(),
+                                  user_email=session.get("email", ""), user_avatar=session.get("avatar_url", ""),
+                                  has_pspla_access=_is_admin() or any((session.get("permissions") or _DEFAULT_PERMISSIONS).get(g) for g in ("searches", "database", "history", "utilities")))
 
 
 @app.route("/api/actuate/action/<action>", methods=["POST"])
