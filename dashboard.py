@@ -352,6 +352,11 @@ _AUTH_SKIP = {
     'auth_request_access_page', 'auth_request_access_submit'
 }
 
+@app.route('/health')
+def health_check():
+    """Health check endpoint for Azure App Service monitoring."""
+    return 'ok', 200
+
 @app.route('/sw.js')
 def service_worker():
     """Serve service worker from root scope so it can control all pages."""
