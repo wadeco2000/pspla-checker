@@ -11861,6 +11861,27 @@ ACTUATE_TEMPLATE = r"""
         .grab-json{background:#1e1e1e;color:#d4d4d4;font-family:'Consolas','Courier New',monospace;font-size:11px;
                    padding:10px;border-radius:4px;max-height:200px;overflow:auto;white-space:pre-wrap;word-break:break-all;}
         .grab-none{color:#aaa;font-style:italic;font-size:11px;padding:8px 0;}
+
+        /* Overview card */
+        .grab-overview{background:white;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.1);margin-bottom:18px;overflow:hidden;}
+        .grab-ov-head{background:#1a6b3a;color:white;padding:12px 18px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:10px;}
+        .grab-ov-body{padding:18px;}
+        .grab-ov-section{margin-bottom:18px;}
+        .grab-ov-section:last-child{margin-bottom:0;}
+        .grab-ov-label{font-size:11px;font-weight:700;color:#2c3e50;text-transform:uppercase;letter-spacing:.5px;
+                       padding-bottom:5px;margin-bottom:8px;border-bottom:2px solid #3498db;display:flex;align-items:center;gap:6px;}
+        .grab-ov-label i{color:#3498db;font-size:11px;}
+        .grab-ov-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:4px 24px;}
+        .grab-ov-row{display:flex;gap:8px;font-size:12px;padding:3px 0;border-bottom:1px dotted #f0f0f0;}
+        .grab-ov-key{font-weight:600;color:#555;min-width:130px;flex-shrink:0;}
+        .grab-ov-val{color:#333;word-break:break-word;}
+        .grab-ov-true{display:inline-block;font-size:10px;padding:1px 6px;border-radius:3px;font-weight:700;background:#d5f5e3;color:#1e8449;}
+        .grab-ov-false{display:inline-block;font-size:10px;padding:1px 6px;border-radius:3px;font-weight:700;background:#fadbd8;color:#922b21;}
+        .grab-ov-null{color:#aaa;font-style:italic;}
+        .grab-ov-count{font-size:11px;color:#888;font-weight:normal;margin-left:4px;}
+        .grab-ov-mini-tbl{width:100%;border-collapse:collapse;font-size:11px;margin-top:4px;}
+        .grab-ov-mini-tbl th{text-align:left;padding:3px 6px;background:#f8f9fa;border:1px solid #eee;font-weight:600;color:#555;}
+        .grab-ov-mini-tbl td{padding:3px 6px;border:1px solid #eee;color:#333;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
     </style>
 </head>
 <body>
@@ -12147,9 +12168,92 @@ function grabEverything() {
 function renderGrabResults(results, cats, siteId) {
     var container = document.getElementById('grab-results');
     container.style.display = 'block';
-    var html = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">'
-        + '<h2 style="margin:0;font-size:16px;color:#2c3e50;"><i class="fa-solid fa-database" style="color:#3498db;"></i> Site ' + siteId + ' — Full Data Dump</h2>'
-        + '<span style="font-size:11px;color:#888;">' + new Date().toLocaleString('en-NZ') + '</span></div>';
+    var html = '';
+
+    // ---- Overview card ----
+    html += '<div class="grab-overview">';
+    html += '<div class="grab-ov-head"><i class="fa-solid fa-eye"></i> Site ' + siteId + ' — Overview'
+        + '<span style="margin-left:auto;font-size:11px;font-weight:normal;">' + new Date().toLocaleString('en-NZ') + '</span></div>';
+    html += '<div class="grab-ov-body">';
+
+    cats.forEach(function(cat) {
+        var eps = results[cat.name] || [];
+        var hasData = eps.some(function(ep) { return ep.ok && ep.status >= 200 && ep.status < 300 && ep.data != null; });
+        if (!hasData) return;
+
+        html += '<div class="grab-ov-section">';
+        html += '<div class="grab-ov-label"><i class="fa-solid fa-folder"></i> ' + cat.name + '</div>';
+
+        eps.forEach(function(ep) {
+            if (!ep.ok || ep.status < 200 || ep.status >= 300 || ep.data == null) return;
+            var d = ep.data;
+
+            if (Array.isArray(d)) {
+                if (d.length === 0) {
+                    html += '<div class="grab-ov-row"><span class="grab-ov-key">' + ep.name + '</span><span class="grab-ov-null">empty</span></div>';
+                    return;
+                }
+                // Show array as mini table (max 5 rows, 6 cols)
+                html += '<div style="margin-bottom:8px;"><strong style="font-size:12px;">' + ep.name + '</strong><span class="grab-ov-count">(' + d.length + ' items)</span>';
+                if (typeof d[0] === 'object' && d[0] !== null) {
+                    var keys = Object.keys(d[0]).slice(0, 6);
+                    var rows = d.slice(0, 5);
+                    html += '<table class="grab-ov-mini-tbl"><thead><tr>';
+                    keys.forEach(function(k) { html += '<th>' + k + '</th>'; });
+                    html += '</tr></thead><tbody>';
+                    rows.forEach(function(row) {
+                        html += '<tr>';
+                        keys.forEach(function(k) {
+                            var v = row[k];
+                            if (v === null || v === undefined) v = '';
+                            else if (typeof v === 'object') v = JSON.stringify(v);
+                            else v = String(v);
+                            if (v.length > 40) v = v.substring(0, 40) + '...';
+                            html += '<td>' + v.replace(/</g, '&lt;') + '</td>';
+                        });
+                        html += '</tr>';
+                    });
+                    html += '</tbody></table>';
+                    if (d.length > 5) html += '<div class="grab-ov-null">' + (d.length - 5) + ' more...</div>';
+                } else {
+                    html += '<div style="font-size:11px;color:#555;">' + d.slice(0, 10).join(', ') + (d.length > 10 ? '...' : '') + '</div>';
+                }
+                html += '</div>';
+                return;
+            }
+
+            if (typeof d === 'object') {
+                // Flat key-value pairs in grid
+                var keys = Object.keys(d);
+                if (keys.length === 0) return;
+                html += '<div style="margin-bottom:6px;"><strong style="font-size:12px;">' + ep.name + '</strong></div>';
+                html += '<div class="grab-ov-grid">';
+                keys.forEach(function(k) {
+                    var v = d[k];
+                    var vHtml;
+                    if (v === null || v === undefined) vHtml = '<span class="grab-ov-null">null</span>';
+                    else if (v === true) vHtml = '<span class="grab-ov-true">true</span>';
+                    else if (v === false) vHtml = '<span class="grab-ov-false">false</span>';
+                    else if (typeof v === 'object') vHtml = '<code style="font-size:10px;color:#666;">' + JSON.stringify(v).replace(/</g, '&lt;').substring(0, 80) + '</code>';
+                    else vHtml = String(v).replace(/</g, '&lt;');
+                    html += '<div class="grab-ov-row"><span class="grab-ov-key">' + k + '</span><span class="grab-ov-val">' + vHtml + '</span></div>';
+                });
+                html += '</div>';
+                return;
+            }
+
+            // Scalar
+            html += '<div class="grab-ov-row"><span class="grab-ov-key">' + ep.name + '</span><span class="grab-ov-val">' + String(d).replace(/</g, '&lt;') + '</span></div>';
+        });
+
+        html += '</div>';
+    });
+
+    html += '</div></div>';
+
+    // ---- Detailed collapsible categories ----
+    html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">'
+        + '<h2 style="margin:0;font-size:15px;color:#2c3e50;"><i class="fa-solid fa-list" style="color:#8e44ad;"></i> Detailed Endpoint Data</h2></div>';
 
     cats.forEach(function(cat, catIdx) {
         var eps = results[cat.name] || [];
