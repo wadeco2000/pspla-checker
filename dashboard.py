@@ -6914,15 +6914,73 @@ def _send_access_request_email(requester_email, user_agent, dashboard_url=None):
         print(f"[access request email] failed to send: {e}")
 
 
-def _send_welcome_email(to_email, to_name, added_by):
-    """Send a welcome email to a newly added allowed user."""
+def _send_welcome_email(to_email, to_name, added_by, permissions=None):
+    """Send a welcome email to a newly added allowed user.
+    Email content adapts based on which permission groups are granted."""
     if not SMTP_HOST or not SMTP_USER or not SMTP_PASS:
         return
     import smtplib
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
-    site_url = "https://wadeco2000.github.io/pspla-checker/"
+    perms = permissions or dict(_DEFAULT_PERMISSIONS)
     display_name = to_name or to_email.split("@")[0].title()
+    # Detect actuate-only user (actuate=True, everything else False)
+    _pspla_groups = ['searches', 'database', 'history', 'utilities']
+    actuate_only = perms.get('actuate', False) and not any(perms.get(g) for g in _pspla_groups)
+
+    if actuate_only:
+        subject = "You've been granted access \u2014 Actuate Camera AI"
+        site_url = "https://www.psplachecker.co.nz/actuate"
+        intro_text = ("You've been granted access to the <strong>Actuate Camera AI</strong> management console \u2014 "
+                      "monitor and control camera AI systems, schedules, and alerts.")
+        features_html = (
+            '<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f4f9 &nbsp;Camera and NVR management</td></tr>'
+            '<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f4c5 &nbsp;Schedules and calendar control</td></tr>'
+            '<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f514 &nbsp;Alerts, alarms, and health monitoring</td></tr>'
+            '<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\u2699\ufe0f &nbsp;AI sensitivity and configuration</td></tr>'
+        )
+        features_plain = ("- Camera and NVR management\n"
+                          "- Schedules and calendar control\n"
+                          "- Alerts, alarms, and health monitoring\n"
+                          "- AI sensitivity and configuration")
+        header_subtitle = "Actuate Camera AI \u2014 Access Granted"
+        footer_text = "Actuate Camera AI &nbsp;\u00b7&nbsp; New Zealand &nbsp;\u00b7&nbsp; For authorised users only"
+    else:
+        subject = "You've been granted access \u2014 PSPLA Licence Checker"
+        site_url = "https://www.psplachecker.co.nz"
+        intro_text = ("You've been granted access to the <strong>PSPLA Licence Checker</strong> \u2014 "
+                      "a live database tracking NZ private security companies and their licensing status.")
+        # Build features dynamically based on permissions
+        _feat_rows = [
+            '<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\u2705 &nbsp;PSPLA licence status for hundreds of NZ security companies</td></tr>',
+            '<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f3e2 &nbsp;Companies Office registrations, directors, NZBN numbers</td></tr>',
+            '<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\u2b50 &nbsp;Google ratings and Facebook presence</td></tr>',
+        ]
+        _feat_plain = [
+            "- PSPLA licence status for hundreds of NZ security companies",
+            "- Companies Office registrations, directors, NZBN numbers",
+            "- Google ratings and Facebook presence",
+        ]
+        if perms.get('utilities'):
+            _feat_rows.append('<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f916 &nbsp;"Do I Need a Licence?" AI assistant</td></tr>')
+            _feat_plain.append('- "Do I Need a Licence?" AI assistant')
+        if perms.get('searches'):
+            _feat_rows.append('<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f50d &nbsp;Run and manage automated company searches</td></tr>')
+            _feat_plain.append("- Run and manage automated company searches")
+        if perms.get('database'):
+            _feat_rows.append('<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f5c4\ufe0f &nbsp;Database management, exports, and publishing</td></tr>')
+            _feat_plain.append("- Database management, exports, and publishing")
+        if perms.get('history'):
+            _feat_rows.append('<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f4cb &nbsp;Search history, audit logs, and version tracking</td></tr>')
+            _feat_plain.append("- Search history, audit logs, and version tracking")
+        if perms.get('actuate'):
+            _feat_rows.append('<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f4f9 &nbsp;Actuate camera AI management</td></tr>')
+            _feat_plain.append("- Actuate camera AI management")
+        features_html = "".join(_feat_rows)
+        features_plain = "\n".join(_feat_plain)
+        header_subtitle = "PSPLA Licence Checker \u2014 Access Granted"
+        footer_text = "PSPLA Licence Checker &nbsp;\u00b7&nbsp; New Zealand &nbsp;\u00b7&nbsp; For authorised users only"
+
     html = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"></head>
@@ -6934,9 +6992,9 @@ def _send_welcome_email(to_email, to_name, added_by):
       <!-- Header -->
       <tr>
         <td style="background:linear-gradient(135deg,#1a2e4a 0%,#2c5282 100%);padding:36px 40px;text-align:center">
-          <div style="font-size:28px;margin-bottom:8px">🔐</div>
+          <div style="font-size:28px;margin-bottom:8px">\U0001f510</div>
           <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;letter-spacing:-0.3px">You're in.</h1>
-          <p style="margin:8px 0 0;color:#90cdf4;font-size:14px">PSPLA Licence Checker — Access Granted</p>
+          <p style="margin:8px 0 0;color:#90cdf4;font-size:14px">{header_subtitle}</p>
         </td>
       </tr>
 
@@ -6945,7 +7003,7 @@ def _send_welcome_email(to_email, to_name, added_by):
         <td style="padding:36px 40px">
           <p style="margin:0 0 16px;font-size:16px;color:#2d3748">Hi {display_name},</p>
           <p style="margin:0 0 24px;font-size:15px;color:#4a5568;line-height:1.6">
-            You've been granted access to the <strong>PSPLA Licence Checker</strong> — a live database tracking NZ private security companies and their licensing status.
+            {intro_text}
           </p>
 
           <!-- Access box -->
@@ -6956,7 +7014,7 @@ def _send_welcome_email(to_email, to_name, added_by):
                 <a href="{site_url}" style="font-size:15px;color:#2b6cb0;font-weight:600;word-break:break-all">{site_url}</a>
                 <p style="margin:12px 0 0;font-size:13px;color:#2c5282">
                   Sign in with the Google account this email was sent to.<br>
-                  No password needed — just click <strong>Sign in with Google</strong>.
+                  No password needed \u2014 just click <strong>Sign in with Google</strong>.
                 </p>
               </td>
             </tr>
@@ -6964,14 +7022,11 @@ def _send_welcome_email(to_email, to_name, added_by):
 
           <p style="margin:0 0 8px;font-size:14px;color:#718096;font-weight:600">What you'll find inside:</p>
           <table cellpadding="0" cellspacing="0" style="margin-bottom:28px">
-            <tr><td style="padding:4px 0;font-size:14px;color:#4a5568">✅ &nbsp;PSPLA licence status for hundreds of NZ security companies</td></tr>
-            <tr><td style="padding:4px 0;font-size:14px;color:#4a5568">🏢 &nbsp;Companies Office registrations, directors, NZBN numbers</td></tr>
-            <tr><td style="padding:4px 0;font-size:14px;color:#4a5568">⭐ &nbsp;Google ratings and Facebook presence</td></tr>
-            <tr><td style="padding:4px 0;font-size:14px;color:#4a5568">🤖 &nbsp;"Do I Need a Licence?" AI assistant</td></tr>
+            {features_html}
           </table>
 
           <p style="margin:0;font-size:14px;color:#718096;line-height:1.6">
-            Access was set up by <strong>{added_by}</strong>. If you think this was sent in error, you can ignore it — nothing has been shared and no action is required.
+            Access was set up by <strong>{added_by}</strong>. If you think this was sent in error, you can ignore it \u2014 nothing has been shared and no action is required.
           </p>
         </td>
       </tr>
@@ -6979,7 +7034,7 @@ def _send_welcome_email(to_email, to_name, added_by):
       <!-- Footer -->
       <tr>
         <td style="background:#f7fafc;border-top:1px solid #e2e8f0;padding:20px 40px;text-align:center">
-          <p style="margin:0;font-size:12px;color:#a0aec0">PSPLA Licence Checker &nbsp;·&nbsp; New Zealand &nbsp;·&nbsp; For authorised users only</p>
+          <p style="margin:0;font-size:12px;color:#a0aec0">{footer_text}</p>
         </td>
       </tr>
 
@@ -6989,14 +7044,15 @@ def _send_welcome_email(to_email, to_name, added_by):
 </body>
 </html>"""
     plain = (f"Hi {display_name},\n\n"
-             f"You've been granted access to the PSPLA Licence Checker.\n\n"
+             f"{intro_text.replace('<strong>', '').replace('</strong>', '')}\n\n"
              f"Sign in at: {site_url}\n"
              f"Use the Google account this email was sent to.\n\n"
+             f"What you'll find inside:\n{features_plain}\n\n"
              f"Access was set up by {added_by}.\n\n"
              f"If this was sent in error, you can ignore it.")
     try:
         msg = MIMEMultipart("alternative")
-        msg["Subject"] = "You've been granted access — PSPLA Licence Checker"
+        msg["Subject"] = subject
         msg["From"] = SMTP_USER
         msg["To"] = to_email
         msg.attach(MIMEText(plain, "plain"))
@@ -7602,7 +7658,7 @@ def api_allowed_users_add():
                                "Prefer": "return=representation"})
     if r.ok:
         import threading
-        threading.Thread(target=_send_welcome_email, args=(email, name, added_by), daemon=True).start()
+        threading.Thread(target=_send_welcome_email, args=(email, name, added_by, perms), daemon=True).start()
     return jsonify({"ok": r.ok, "status": r.status_code})
 
 @app.route("/api/allowed-users/<uid>", methods=["DELETE"])
