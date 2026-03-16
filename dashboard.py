@@ -12521,6 +12521,9 @@ def actuate_query():
             body = r.json()
         except Exception:
             body = r.text
+        # Unwrap Django REST paginated responses: {count, next, previous, results} → results array
+        if isinstance(body, dict) and "results" in body and "count" in body:
+            body = body["results"]
         return jsonify({"ok": r.ok, "upstream_status": r.status_code, "upstream_body": body})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
