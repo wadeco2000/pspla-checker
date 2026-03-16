@@ -249,6 +249,50 @@ def _set_security_headers(response):
     )
     return response
 
+# ── Security: Rate limiting ───────────────────────────────────────────────────
+import collections as _collections
+_rate_buckets = _collections.defaultdict(list)   # key → [timestamps]
+
+def _rate_limit(key, max_requests, window_seconds):
+    """Return True if rate limit exceeded. Lightweight in-memory sliding window."""
+    import time as _rl_time
+    now = _rl_time.time()
+    cutoff = now - window_seconds
+    bucket = _rate_buckets[key]
+    # Prune expired entries
+    _rate_buckets[key] = [t for t in bucket if t > cutoff]
+    if len(_rate_buckets[key]) >= max_requests:
+        return True
+    _rate_buckets[key].append(now)
+    return False
+
+def _get_client_ip():
+    return request.headers.get('X-Forwarded-For', request.remote_addr or '').split(',')[0].strip()
+
+# Rate-limited endpoints: (endpoint_name, max_requests, window_seconds)
+_RATE_LIMITS = {
+    'login_password':          (5, 60),      # 5 login attempts per minute
+    'auth_callback':           (10, 60),     # 10 OAuth attempts per minute
+    'start_search':            (3, 300),     # 3 search launches per 5 min
+    'start_weekly_search':     (3, 300),
+    'start_facebook_search':   (3, 300),
+    'start_directory_import':  (3, 300),
+    'start_partial_search':    (3, 300),
+    'start_bulk_recheck':      (3, 300),
+    'clear_db':                (2, 300),     # 2 clear attempts per 5 min
+    'export_csv':              (5, 60),      # 5 exports per minute
+    'actuate_query':           (60, 60),     # 60 Actuate API calls per minute
+}
+
+@app.before_request
+def _enforce_rate_limits():
+    endpoint = request.endpoint
+    if endpoint in _RATE_LIMITS:
+        max_req, window = _RATE_LIMITS[endpoint]
+        ip = _get_client_ip()
+        if _rate_limit(f"{endpoint}:{ip}", max_req, window):
+            return _jsonify_auth({'ok': False, 'error': 'Too many requests. Please wait and try again.'}), 429
+
 # ── Security: CSRF protection ────────────────────────────────────────────────
 def _csrf_token():
     """Get or create a CSRF token for the current session."""
@@ -5526,7 +5570,7 @@ def clear_db():
     if not _is_admin():
         return redirect(url_for("index", message="Admin access required.", type="error"))
     # Password check
-    if EXPORT_PASSWORD and request.form.get("clear_password") != EXPORT_PASSWORD:
+    if EXPORT_PASSWORD and not _hmac.compare_digest(request.form.get("clear_password", ""), EXPORT_PASSWORD):
         return redirect(url_for("index", message="Incorrect password — database not cleared.", type="error"))
 
     companies = get_companies()
@@ -5621,7 +5665,7 @@ def clear_db():
 def export_csv():
     if not _is_admin():
         return redirect(url_for("index", message="Admin access required.", type="error"))
-    if EXPORT_PASSWORD and request.form.get("export_password") != EXPORT_PASSWORD:
+    if EXPORT_PASSWORD and not _hmac.compare_digest(request.form.get("export_password", ""), EXPORT_PASSWORD):
         return redirect(url_for("index", message="Incorrect export password.", type="error"))
     companies = get_companies()
     fields = sorted(companies[0].keys()) if companies else []
@@ -7242,18 +7286,21 @@ def account_profile_page():
     email = session.get('email', '')
     profile = _get_user_profile(email)
     totp_row = _get_user_totp_row(email)
-    # Avatar
+    # Avatar — escape user-controlled values to prevent SSTI via render_template_string
+    from markupsafe import escape as _esc
+    _safe_email = str(_esc(email))
     avatar_url = profile.get('avatar_url')
     if avatar_url:
-        avatar_html = f'<div class="avatar"><img src="{avatar_url}?t={int(_time.time())}" alt="Avatar"></div>'
+        _safe_avatar_url = str(_esc(avatar_url))
+        avatar_html = f'<div class="avatar"><img src="{_safe_avatar_url}?t={int(_time.time())}" alt="Avatar"></div>'
         clear_display = ''
         upload_label = 'Replace Photo'
     else:
-        initials = ''.join([w[0] for w in email.split('@')[0].replace('.', ' ').split()[:2]]).upper() or '?'
+        initials = ''.join([w[0] for w in _safe_email.split('@')[0].replace('.', ' ').split()[:2]]).upper() or '?'
         avatar_html = f'<div class="avatar-initials">{initials}</div>'
         clear_display = 'display:none'
         upload_label = 'Upload Photo'
-    user_name = profile.get('name') or ''
+    user_name = str(_esc(profile.get('name') or ''))
     # 2FA status
     enabled = totp_row and totp_row.get('totp_enabled')
     if enabled:
@@ -12501,6 +12548,10 @@ def actuate_query():
     path = request.args.get("path", "")
     if not path:
         return jsonify({"ok": False, "error": "Missing path parameter."}), 400
+    # SSRF protection: only allow paths defined in _ACTUATE_ENDPOINTS
+    _allowed = {p for eps in _ACTUATE_ENDPOINTS.values() for _, p in eps}
+    if path not in _allowed:
+        return jsonify({"ok": False, "error": "Invalid API path."}), 403
     # Replace {id} placeholder with site_id
     resolved = path.replace("{id}", site_id)
     url = f"{ACTUATE_BASE_URL}/api/{resolved}"

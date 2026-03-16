@@ -3,3 +3,31 @@ __pycache__/
 *.pyc
 *.pyo
 .DS_Store
+
+# Backups (full DB exports)
+backups/
+
+# Runtime state files
+running.flag
+pause.flag
+search_status.json
+search_start.json
+
+# Runtime config (written by dashboard)
+partial_config.json
+recheck_config.json
+
+# Logs
+search_log.txt
+backup_log.txt
+llm_debug.log
+recheck_log.txt
+
+# Runtime data
+search_progress.json
+token_usage.json
+
+# Data files with company info
+corrections.json
+lessons.json
+search_history.json
