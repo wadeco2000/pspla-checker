@@ -12141,7 +12141,8 @@ function grabEverything() {
     progEl.style.display = 'block';
     progText.textContent = 'Fetching 0 / ' + total + ' endpoints...';
     progBar.style.width = '0%';
-    addLog('Grab Everything: fetching ' + total + ' endpoints for site ' + siteId, 'log-req');
+    var filtering = siteFilterOn();
+    addLog('Grab Everything: fetching ' + total + ' endpoints for site ' + siteId + (filtering ? ' (filtered)' : ' (all sites)'), 'log-req');
 
     // Batch fetch with concurrency limit
     var idx = 0;
@@ -12153,7 +12154,8 @@ function grabEverything() {
             (function(ep) {
                 active++;
                 idx++;
-                fetch('/api/actuate/query?site_id=' + encodeURIComponent(siteId) + '&path=' + encodeURIComponent(ep.path))
+                var filterParam = filtering ? '&filter_site_id=' + encodeURIComponent(siteId) : '';
+                fetch('/api/actuate/query?site_id=' + encodeURIComponent(siteId) + '&path=' + encodeURIComponent(ep.path) + filterParam)
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     var upStatus = data.upstream_status || 0;
@@ -12185,9 +12187,31 @@ function grabEverything() {
     fetchNext();
 }
 
+function _filterBySite(data, siteId) {
+    // Client-side: if data is an array of objects with a customer field, keep only matching site
+    if (!Array.isArray(data) || !data.length) return data;
+    var first = data[0];
+    if (typeof first !== 'object' || first === null) return data;
+    // Check for customer.id or customer__id or site_id fields
+    var hasCustomer = 'customer' in first && typeof first.customer === 'object' && first.customer && 'id' in first.customer;
+    var hasCustomerId = 'customer_id' in first;
+    var hasSiteId = 'site_id' in first;
+    var hasSite = 'site' in first;
+    if (!hasCustomer && !hasCustomerId && !hasSiteId && !hasSite) return data;
+    var sid = parseInt(siteId);
+    return data.filter(function(item) {
+        if (hasCustomer) return item.customer && item.customer.id === sid;
+        if (hasCustomerId) return item.customer_id === sid || item.customer_id === siteId;
+        if (hasSiteId) return item.site_id === sid || item.site_id === siteId;
+        if (hasSite) return item.site === sid || item.site === siteId;
+        return true;
+    });
+}
+
 function renderGrabResults(results, cats, siteId) {
     var container = document.getElementById('grab-results');
     container.style.display = 'block';
+    var filtering = siteFilterOn();
     var html = '';
 
     // ---- Overview card ----
@@ -12207,6 +12231,14 @@ function renderGrabResults(results, cats, siteId) {
         eps.forEach(function(ep) {
             if (!ep.ok || ep.status < 200 || ep.status >= 300 || ep.data == null) return;
             var d = ep.data;
+            // Client-side filter: strip items for other sites when toggle is on
+            if (filtering && Array.isArray(d)) d = _filterBySite(d, siteId);
+            // Handle paginated responses (Django REST: {count, results})
+            if (d && typeof d === 'object' && !Array.isArray(d) && 'results' in d) {
+                var inner = d.results;
+                if (filtering && Array.isArray(inner)) inner = _filterBySite(inner, siteId);
+                d = inner;
+            }
 
             if (Array.isArray(d)) {
                 if (d.length === 0) {
@@ -12291,24 +12323,32 @@ function renderGrabResults(results, cats, siteId) {
         html += '<div class="grab-cat-body" id="grab-cat-body-' + catIdx + '">';
 
         eps.forEach(function(ep, epIdx) {
+            // Client-side filter for detail view too
+            var epFiltered = {name: ep.name, path: ep.path, status: ep.status, ok: ep.ok, error: ep.error, data: ep.data};
+            if (filtering && epFiltered.data) {
+                var dd = epFiltered.data;
+                if (dd && typeof dd === 'object' && !Array.isArray(dd) && 'results' in dd) dd = dd.results;
+                if (Array.isArray(dd)) dd = _filterBySite(dd, siteId);
+                epFiltered.data = dd;
+            }
             var uid = catIdx + '-' + epIdx;
-            var isOk = ep.status >= 200 && ep.status < 300;
-            var statusCls = isOk ? 's-ok' : (ep.status ? 's-err' : 's-empty');
-            var statusLabel = ep.status ? ('HTTP ' + ep.status) : 'Error';
+            var isOk = epFiltered.status >= 200 && epFiltered.status < 300;
+            var statusCls = isOk ? 's-ok' : (epFiltered.status ? 's-err' : 's-empty');
+            var statusLabel = epFiltered.status ? ('HTTP ' + epFiltered.status) : 'Error';
             var countLabel = '';
-            if (isOk && ep.data) {
-                if (Array.isArray(ep.data)) countLabel = ep.data.length + ' items';
-                else if (typeof ep.data === 'object') countLabel = Object.keys(ep.data).length + ' fields';
+            if (isOk && epFiltered.data) {
+                if (Array.isArray(epFiltered.data)) countLabel = epFiltered.data.length + ' items';
+                else if (typeof epFiltered.data === 'object') countLabel = Object.keys(epFiltered.data).length + ' fields';
             }
 
             html += '<div class="grab-ep">';
             html += '<div class="grab-ep-head" onclick="toggleGrabEp(\'' + uid + '\')">'
                 + '<span class="ep-status ' + statusCls + '">' + statusLabel + '</span>'
-                + '<strong>' + ep.name + '</strong>'
+                + '<strong>' + epFiltered.name + '</strong>'
                 + (countLabel ? ' <span class="ep-count">(' + countLabel + ')</span>' : '')
                 + '</div>';
             html += '<div class="grab-ep-data" id="grab-ep-' + uid + '">';
-            html += renderGrabData(ep);
+            html += renderGrabData(epFiltered);
             html += '</div></div>';
         });
 
