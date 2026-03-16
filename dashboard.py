@@ -348,7 +348,7 @@ def _safe_error(e, fallback="An error occurred"):
 
 _AUTH_SKIP = {
     'login_page', 'login_password', 'auth_callback', 'auth_verify', 'auth_logout',
-    'service_worker', 'auth_2fa_page', 'auth_2fa_verify',
+    'service_worker', 'health_check', 'auth_2fa_page', 'auth_2fa_verify',
     'auth_request_access_page', 'auth_request_access_submit'
 }
 
