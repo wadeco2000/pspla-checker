@@ -7763,7 +7763,8 @@ body{font-family:Arial,sans-serif;margin:0;background:#f4f4f4;color:#333}
 .page-header h1{margin:0;font-size:18px}
 .back-link{color:#aac;font-size:13px;text-decoration:none;display:flex;align-items:center;gap:6px}
 .back-link:hover{color:white}
-.content{padding:24px;max-width:960px;margin:0 auto}
+.content{padding:24px;max-width:1200px;margin:0 auto}
+.table-wrap{overflow-x:auto}
 h2{font-size:15px;font-weight:600;color:#2c3e50;margin:0 0 12px;display:flex;align-items:center;gap:8px}
 .card{background:white;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.1);padding:20px;margin-bottom:28px}
 .add-row{display:flex;gap:8px;margin-bottom:16px}
@@ -7839,10 +7840,12 @@ tr:last-child td{border-bottom:none}
       </div>
     </div>
     <div id="users-loading" class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</div>
+    <div class="table-wrap">
     <table id="users-table" style="display:none">
-      <thead><tr><th>Email</th><th>Name</th><th>Added by</th><th>Added</th><th>Last login</th><th>Status</th><th>Role</th><th>Permissions</th><th>2FA</th><th></th></tr></thead>
+      <thead><tr><th>Email</th><th>Name</th><th>Added</th><th>Last login</th><th>Status</th><th>Role</th><th>Permissions</th><th>2FA</th><th></th></tr></thead>
       <tbody id="users-body"></tbody>
     </table>
+    </div>
   </div>
 
   <!-- Access Requests -->
@@ -7920,7 +7923,6 @@ function loadUsers() {
             }
             tr.innerHTML = '<td>' + avatarHtml + '<strong>' + u.email + '</strong></td>' +
                 '<td>' + (u.name || '—') + '</td>' +
-                '<td>' + (u.added_by || '—') + '</td>' +
                 '<td>' + fmt(u.added_at) + '</td>' +
                 '<td>' + (u.last_login ? fmt(u.last_login) + (u.last_provider ? ' <span class="badge badge-' + u.last_provider + '">' + u.last_provider + '</span>' : '') : '—') + '</td>' +
                 '<td><span class="badge ' + (u.active ? 'badge-active">Active' : 'badge-inactive">Inactive') + '</span></td>' +
