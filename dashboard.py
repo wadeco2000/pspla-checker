@@ -11820,6 +11820,41 @@ ACTUATE_TEMPLATE = r"""
 
         /* Explorer wrapper */
         .explorer-wrap{max-height:500px;overflow-y:auto;padding-right:4px;}
+
+        /* Grab Everything results */
+        .grab-progress{padding:14px 18px;background:white;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.08);margin-bottom:18px;display:none;}
+        .grab-bar{height:6px;background:#ecf0f1;border-radius:3px;overflow:hidden;margin-top:8px;}
+        .grab-bar-fill{height:100%;background:#3498db;border-radius:3px;transition:width .3s;}
+        .grab-results{display:none;}
+        .grab-cat{background:white;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.08);margin-bottom:14px;overflow:hidden;}
+        .grab-cat-head{background:#2c3e50;color:white;padding:10px 16px;font-size:13px;font-weight:600;cursor:pointer;
+                       display:flex;align-items:center;gap:8px;user-select:none;}
+        .grab-cat-head:hover{background:#34495e;}
+        .grab-cat-head .grab-toggle{margin-left:auto;font-size:11px;transition:transform .2s;}
+        .grab-cat-head .grab-counts{margin-left:auto;font-size:11px;font-weight:normal;color:#7fb3d8;}
+        .grab-cat-body{padding:0;}
+        .grab-ep{border-bottom:1px solid #f0f0f0;}
+        .grab-ep:last-child{border-bottom:none;}
+        .grab-ep-head{padding:8px 16px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px;
+                      background:#fafafa;transition:background .15s;}
+        .grab-ep-head:hover{background:#f0f0f0;}
+        .grab-ep-head .ep-status{font-size:10px;padding:2px 6px;border-radius:3px;font-weight:700;}
+        .grab-ep-head .ep-status.s-ok{background:#d5f5e3;color:#1e8449;}
+        .grab-ep-head .ep-status.s-err{background:#fadbd8;color:#922b21;}
+        .grab-ep-head .ep-status.s-empty{background:#eee;color:#888;}
+        .grab-ep-head .ep-count{font-size:10px;color:#888;font-weight:normal;}
+        .grab-ep-data{display:none;padding:10px 16px;background:white;font-size:12px;overflow-x:auto;}
+        .grab-ep-data.show{display:block;}
+        .grab-tbl{width:100%;border-collapse:collapse;font-size:11px;}
+        .grab-tbl th{text-align:left;padding:4px 8px;background:#f8f9fa;border:1px solid #eee;font-weight:600;color:#555;white-space:nowrap;}
+        .grab-tbl td{padding:4px 8px;border:1px solid #eee;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#333;}
+        .grab-tbl tr:hover td{background:#f0f6ff;}
+        .grab-kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:11px;}
+        .grab-kv .gk{font-weight:600;color:#555;padding:2px 0;}
+        .grab-kv .gv{color:#333;padding:2px 0;word-break:break-word;}
+        .grab-json{background:#1e1e1e;color:#d4d4d4;font-family:'Consolas','Courier New',monospace;font-size:11px;
+                   padding:10px;border-radius:4px;max-height:200px;overflow:auto;white-space:pre-wrap;word-break:break-all;}
+        .grab-none{color:#aaa;font-style:italic;font-size:11px;padding:8px 0;}
     </style>
 </head>
 <body>
@@ -11838,6 +11873,7 @@ ACTUATE_TEMPLATE = r"""
             <button class="btn btn-disarm" onclick="doAction('disarm')"><i class="fa-solid fa-lock-open"></i> DISARM</button>
             <button class="btn btn-info" onclick="getSiteInfo()"><i class="fa-solid fa-circle-info"></i> Get Site Info</button>
             <button class="btn btn-sm" style="background:#8e44ad;color:white;" onclick="testAllEndpoints()"><i class="fa-solid fa-flask"></i> Test All Endpoints</button>
+            <button class="btn" style="background:#e67e22;color:white;" onclick="grabEverything()" id="grab-btn"><i class="fa-solid fa-download"></i> Grab Everything</button>
             <button class="btn btn-sm" style="background:#95a5a6;color:white;" onclick="clearLog()"><i class="fa-solid fa-eraser"></i> Clear Log</button>
         </div>
 
@@ -11872,6 +11908,18 @@ ACTUATE_TEMPLATE = r"""
             </div>
 
         </div>
+
+        <!-- Grab Everything progress -->
+        <div class="grab-progress" id="grab-progress">
+            <div style="display:flex;align-items:center;gap:10px;">
+                <i class="fa-solid fa-spinner fa-spin" style="color:#3498db;"></i>
+                <span id="grab-progress-text" style="font-size:13px;font-weight:600;">Fetching endpoints...</span>
+            </div>
+            <div class="grab-bar"><div class="grab-bar-fill" id="grab-bar-fill" style="width:0%;"></div></div>
+        </div>
+
+        <!-- Grab Everything results -->
+        <div class="grab-results" id="grab-results"></div>
 
         <!-- Command log -->
         <div class="card">
@@ -11998,6 +12046,218 @@ function testAllEndpoints() {
         setTimeout(function(){ queryEndpoint(btn); }, delay);
         delay += 350;
     });
+}
+
+/* ---- Grab Everything ---- */
+function grabEverything() {
+    var siteId = sid();
+    if (!siteId) { alert('Enter a Site ID'); return; }
+    var btn = document.getElementById('grab-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Grabbing...';
+
+    // Collect all endpoints grouped by category
+    var cats = [];
+    var catEls = document.querySelectorAll('.cat-label');
+    catEls.forEach(function(el) {
+        var catName = el.textContent.trim();
+        var grid = el.nextElementSibling;
+        var eps = [];
+        if (grid) {
+            grid.querySelectorAll('.ep-btn').forEach(function(b) {
+                eps.push({name: b.dataset.name, path: b.dataset.path});
+            });
+        }
+        if (eps.length) cats.push({name: catName, endpoints: eps});
+    });
+
+    var allEps = [];
+    cats.forEach(function(c) {
+        c.endpoints.forEach(function(ep) { allEps.push({cat: c.name, name: ep.name, path: ep.path}); });
+    });
+    var total = allEps.length;
+    var done = 0;
+    var results = {};
+    cats.forEach(function(c) { results[c.name] = []; });
+
+    // Show progress
+    var progEl = document.getElementById('grab-progress');
+    var progText = document.getElementById('grab-progress-text');
+    var progBar = document.getElementById('grab-bar-fill');
+    progEl.style.display = 'block';
+    progText.textContent = 'Fetching 0 / ' + total + ' endpoints...';
+    progBar.style.width = '0%';
+    addLog('Grab Everything: fetching ' + total + ' endpoints for site ' + siteId, 'log-req');
+
+    // Batch fetch with concurrency limit
+    var idx = 0;
+    var concurrent = 5;
+    var active = 0;
+
+    function fetchNext() {
+        while (active < concurrent && idx < total) {
+            (function(ep) {
+                active++;
+                idx++;
+                fetch('/api/actuate/query?site_id=' + encodeURIComponent(siteId) + '&path=' + encodeURIComponent(ep.path))
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var upStatus = data.upstream_status || 0;
+                    var body = data.upstream_body;
+                    results[ep.cat].push({name: ep.name, path: ep.path, status: upStatus, data: body, ok: data.ok});
+                })
+                .catch(function(e) {
+                    results[ep.cat].push({name: ep.name, path: ep.path, status: 0, data: null, ok: false, error: String(e)});
+                })
+                .finally(function() {
+                    done++;
+                    active--;
+                    var pct = Math.round(done / total * 100);
+                    progText.textContent = 'Fetching ' + done + ' / ' + total + ' endpoints...';
+                    progBar.style.width = pct + '%';
+                    if (done === total) {
+                        renderGrabResults(results, cats, siteId);
+                        progEl.style.display = 'none';
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="fa-solid fa-download"></i> Grab Everything';
+                        addLog('Grab Everything: complete (' + total + ' endpoints)', 'log-ok');
+                    } else {
+                        fetchNext();
+                    }
+                });
+            })(allEps[idx]);
+        }
+    }
+    fetchNext();
+}
+
+function renderGrabResults(results, cats, siteId) {
+    var container = document.getElementById('grab-results');
+    container.style.display = 'block';
+    var html = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">'
+        + '<h2 style="margin:0;font-size:16px;color:#2c3e50;"><i class="fa-solid fa-database" style="color:#3498db;"></i> Site ' + siteId + ' — Full Data Dump</h2>'
+        + '<span style="font-size:11px;color:#888;">' + new Date().toLocaleString('en-NZ') + '</span></div>';
+
+    cats.forEach(function(cat, catIdx) {
+        var eps = results[cat.name] || [];
+        var okCount = eps.filter(function(e){ return e.status >= 200 && e.status < 300; }).length;
+        var failCount = eps.length - okCount;
+
+        html += '<div class="grab-cat">';
+        html += '<div class="grab-cat-head" onclick="toggleGrabCat(' + catIdx + ')">'
+            + '<i class="fa-solid fa-folder"></i> ' + cat.name
+            + '<span class="grab-counts">' + okCount + ' <i class="fa-solid fa-check" style="color:#2ecc71;"></i>'
+            + (failCount ? '&nbsp;&nbsp;' + failCount + ' <i class="fa-solid fa-xmark" style="color:#e74c3c;"></i>' : '')
+            + '</span>'
+            + '<i class="fa-solid fa-chevron-down grab-toggle" id="grab-toggle-' + catIdx + '"></i>'
+            + '</div>';
+        html += '<div class="grab-cat-body" id="grab-cat-body-' + catIdx + '">';
+
+        eps.forEach(function(ep, epIdx) {
+            var uid = catIdx + '-' + epIdx;
+            var isOk = ep.status >= 200 && ep.status < 300;
+            var statusCls = isOk ? 's-ok' : (ep.status ? 's-err' : 's-empty');
+            var statusLabel = ep.status ? ('HTTP ' + ep.status) : 'Error';
+            var countLabel = '';
+            if (isOk && ep.data) {
+                if (Array.isArray(ep.data)) countLabel = ep.data.length + ' items';
+                else if (typeof ep.data === 'object') countLabel = Object.keys(ep.data).length + ' fields';
+            }
+
+            html += '<div class="grab-ep">';
+            html += '<div class="grab-ep-head" onclick="toggleGrabEp(\'' + uid + '\')">'
+                + '<span class="ep-status ' + statusCls + '">' + statusLabel + '</span>'
+                + '<strong>' + ep.name + '</strong>'
+                + (countLabel ? ' <span class="ep-count">(' + countLabel + ')</span>' : '')
+                + '</div>';
+            html += '<div class="grab-ep-data" id="grab-ep-' + uid + '">';
+            html += renderGrabData(ep);
+            html += '</div></div>';
+        });
+
+        html += '</div></div>';
+    });
+
+    container.innerHTML = html;
+}
+
+function renderGrabData(ep) {
+    if (!ep.ok || ep.error) {
+        return '<div class="grab-none">Error: ' + (ep.error || 'Request failed') + '</div>';
+    }
+    var d = ep.data;
+    if (d === null || d === undefined) return '<div class="grab-none">No data</div>';
+
+    if (Array.isArray(d)) {
+        if (d.length === 0) return '<div class="grab-none">Empty array (0 items)</div>';
+        if (typeof d[0] === 'object' && d[0] !== null) {
+            // Table view for array of objects
+            var keys = Object.keys(d[0]);
+            var showKeys = keys.slice(0, 8);
+            var rows = d.slice(0, 20);
+            var h = '<table class="grab-tbl"><thead><tr>';
+            showKeys.forEach(function(k) { h += '<th>' + k + '</th>'; });
+            if (keys.length > 8) h += '<th>...</th>';
+            h += '</tr></thead><tbody>';
+            rows.forEach(function(row) {
+                h += '<tr>';
+                showKeys.forEach(function(k) {
+                    var v = row[k];
+                    if (v === null || v === undefined) v = '';
+                    else if (typeof v === 'object') v = JSON.stringify(v);
+                    else v = String(v);
+                    if (v.length > 60) v = v.substring(0, 60) + '...';
+                    h += '<td title="' + String(row[k]).replace(/"/g, '&quot;') + '">' + v.replace(/</g, '&lt;') + '</td>';
+                });
+                if (keys.length > 8) h += '<td>...</td>';
+                h += '</tr>';
+            });
+            h += '</tbody></table>';
+            if (d.length > 20) h += '<div class="grab-none">' + (d.length - 20) + ' more items not shown</div>';
+            return h;
+        }
+        // Simple array
+        return '<div class="grab-json">' + JSON.stringify(d, null, 2).replace(/</g, '&lt;') + '</div>';
+    }
+
+    if (typeof d === 'object') {
+        var keys = Object.keys(d);
+        if (keys.length === 0) return '<div class="grab-none">Empty object</div>';
+        if (keys.length <= 20) {
+            // Key-value grid
+            var h = '<div class="grab-kv">';
+            keys.forEach(function(k) {
+                var v = d[k];
+                if (v === null || v === undefined) v = '<span style="color:#aaa;">null</span>';
+                else if (typeof v === 'object') v = '<code style="font-size:10px;">' + JSON.stringify(v).replace(/</g, '&lt;').substring(0, 120) + '</code>';
+                else if (typeof v === 'boolean') v = v ? '<span style="color:#27ae60;">true</span>' : '<span style="color:#e74c3c;">false</span>';
+                else v = String(v).replace(/</g, '&lt;');
+                h += '<div class="gk">' + k + '</div><div class="gv">' + v + '</div>';
+            });
+            h += '</div>';
+            return h;
+        }
+        return '<div class="grab-json">' + JSON.stringify(d, null, 2).replace(/</g, '&lt;') + '</div>';
+    }
+
+    return '<div>' + String(d).replace(/</g, '&lt;') + '</div>';
+}
+
+function toggleGrabCat(idx) {
+    var body = document.getElementById('grab-cat-body-' + idx);
+    var toggle = document.getElementById('grab-toggle-' + idx);
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        toggle.style.transform = 'rotate(0deg)';
+    } else {
+        body.style.display = 'none';
+        toggle.style.transform = 'rotate(-90deg)';
+    }
+}
+
+function toggleGrabEp(uid) {
+    var el = document.getElementById('grab-ep-' + uid);
+    el.classList.toggle('show');
 }
 </script>
 </body>
