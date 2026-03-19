@@ -128,11 +128,15 @@ def _recheck_log_capture():
 # ── MQTT client for Shelly relay control ──────────────────────────────────────
 _mqtt_client = None
 _mqtt_connected = False
+_mqtt_connected_since = None
+_mqtt_message_log = []  # circular buffer of last 30 raw MQTT messages
+_MQTT_LOG_MAX = 30
 
 def _mqtt_on_connect(client, userdata, flags, rc, properties=None):
-    global _mqtt_connected
+    global _mqtt_connected, _mqtt_connected_since
     if rc == 0:
         _mqtt_connected = True
+        _mqtt_connected_since = datetime.now(timezone.utc).isoformat()
         print("[mqtt] Connected to broker")
         # Subscribe to status notifications from all Shelly devices
         client.subscribe("shellyplus1-+/events/rpc")
@@ -153,17 +157,30 @@ def _mqtt_on_message(client, userdata, msg):
     """Handle incoming MQTT messages from Shelly devices."""
     try:
         topic = msg.topic
-        payload = json.loads(msg.payload.decode("utf-8", errors="replace"))
+        raw_payload = msg.payload.decode("utf-8", errors="replace")
+        try:
+            payload = json.loads(raw_payload)
+        except (json.JSONDecodeError, ValueError):
+            payload = raw_payload
+        # Log to in-memory debug buffer
+        _mqtt_message_log.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "topic": topic,
+            "payload": payload if isinstance(payload, (dict, list, bool)) else str(payload),
+        })
+        if len(_mqtt_message_log) > _MQTT_LOG_MAX:
+            _mqtt_message_log.pop(0)
         # Extract device ID from topic (e.g. "shellyplus1-30c9224c9dfc/events/rpc")
         parts = topic.split("/")
         device_id = parts[0] if parts else ""
         if not device_id:
             return
         # Handle status notification events
-        if "events/rpc" in topic:
-            _mqtt_handle_status_event(device_id, payload)
-        elif topic.endswith("/online"):
-            _mqtt_handle_online(device_id, payload)
+        if isinstance(payload, dict):
+            if "events/rpc" in topic:
+                _mqtt_handle_status_event(device_id, payload)
+            elif topic.endswith("/online"):
+                _mqtt_handle_online(device_id, payload)
     except Exception as e:
         print(f"[mqtt] Error processing message on {msg.topic}: {e}")
 
@@ -620,7 +637,8 @@ _ROUTE_PERMISSIONS = {
     # shelly
     'shelly_page': 'shelly', 'shelly_devices_api': 'shelly',
     'shelly_toggle': 'shelly', 'shelly_command_log_api': 'shelly',
-    'shelly_register': 'shelly',
+    'shelly_register': 'shelly', 'shelly_diagnostics': 'shelly',
+    'shelly_test_command': 'shelly',
 }
 
 # ── TOTP 2FA helpers ──────────────────────────────────────────────────────────
@@ -12900,6 +12918,29 @@ SHELLY_TEMPLATE = r"""
         .empty-state i{font-size:48px;color:#ddd;margin-bottom:16px;}
         .empty-state p{font-size:14px;margin:4px 0;}
 
+        /* Diagnostics */
+        .diag-card{background:white;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.08);padding:20px;margin-bottom:24px;border-left:4px solid #3498db;}
+        .diag-card h2{margin:0 0 12px;font-size:16px;color:#1a252f;}
+        .diag-toggle{background:none;border:1px solid #3498db;color:#3498db;padding:6px 14px;border-radius:5px;font-size:12px;cursor:pointer;font-weight:600;}
+        .diag-toggle:hover{background:#3498db;color:white;}
+        .diag-toggle.active{background:#3498db;color:white;}
+        .diag-grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));gap:12px;margin-bottom:16px;}
+        .diag-stat{background:#f8f9fa;border-radius:6px;padding:12px;text-align:center;}
+        .diag-stat-label{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px;}
+        .diag-stat-value{font-size:14px;font-weight:700;color:#1a252f;word-break:break-all;}
+        .diag-stat-value.connected{color:#27ae60;}
+        .diag-stat-value.disconnected{color:#e74c3c;}
+        .mqtt-log{background:#1a252f;border-radius:6px;padding:12px;max-height:400px;overflow-y:auto;font-family:monospace;font-size:12px;color:#a0d0a0;}
+        .mqtt-log-entry{padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.05);}
+        .mqtt-log-ts{color:#666;margin-right:8px;}
+        .mqtt-log-topic{color:#7fb3d8;font-weight:600;}
+        .mqtt-log-payload{color:#a0d0a0;white-space:pre-wrap;word-break:break-all;margin-top:2px;padding-left:12px;font-size:11px;}
+        .mqtt-log-empty{color:#555;font-style:italic;padding:20px;text-align:center;}
+        .diag-subs{font-size:12px;font-family:monospace;color:#666;background:#f8f9fa;padding:8px 12px;border-radius:4px;margin-bottom:12px;}
+        .diag-subs span{display:block;padding:2px 0;}
+        .btn-test{background:#8e44ad;color:white;border:none;padding:6px 14px;border-radius:5px;font-size:12px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:5px;}
+        .btn-test:hover{background:#7d3c98;}
+
         /* Refresh button */
         .btn-refresh{background:none;border:1px solid #ccc;color:#666;padding:6px 14px;border-radius:5px;font-size:12px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:5px;}
         .btn-refresh:hover{border-color:#999;color:#333;}
@@ -12963,6 +13004,32 @@ SHELLY_TEMPLATE = r"""
             <tbody id="log-body"></tbody>
         </table>
         <div id="log-empty" style="display:none;color:#999;font-size:13px;padding:8px 0;">No commands logged yet.</div>
+    </div>
+
+    <!-- Diagnostics -->
+    <div class="diag-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+            <h2 style="margin:0;"><i class="fa-solid fa-stethoscope" style="color:#3498db;"></i> MQTT Diagnostics</h2>
+            <button class="diag-toggle" id="diag-toggle-btn" onclick="toggleDiag()"><i class="fa-solid fa-chevron-down"></i> Show</button>
+        </div>
+        <div id="diag-body" style="display:none;">
+            <div class="diag-grid" id="diag-stats"></div>
+            <div style="margin-bottom:8px;font-size:12px;font-weight:600;color:#888;">SUBSCRIBED TOPICS</div>
+            <div class="diag-subs" id="diag-subs"><span style="color:#aaa;">Loading...</span></div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                <div style="font-size:12px;font-weight:600;color:#888;">RAW MQTT MESSAGES <span id="diag-msg-count" style="font-weight:400;color:#aaa;">(0)</span></div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <select id="diag-test-device" style="font-size:12px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;">
+                        <option value="">Select device...</option>
+                    </select>
+                    <button class="btn-test" onclick="sendTestCommand()"><i class="fa-solid fa-flask"></i> Send GetStatus</button>
+                    <button class="btn-refresh" onclick="loadDiag()" style="padding:4px 10px;font-size:11px;"><i class="fa-solid fa-arrows-rotate"></i></button>
+                </div>
+            </div>
+            <div class="mqtt-log" id="mqtt-log">
+                <div class="mqtt-log-empty">No MQTT messages received yet. Point a Shelly device at the broker to see messages here.</div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -13102,11 +13169,86 @@ function loadLog() {
     });
 }
 
+// Diagnostics
+var diagOpen = false;
+function toggleDiag() {
+    diagOpen = !diagOpen;
+    document.getElementById('diag-body').style.display = diagOpen ? '' : 'none';
+    var btn = document.getElementById('diag-toggle-btn');
+    btn.innerHTML = diagOpen ? '<i class="fa-solid fa-chevron-up"></i> Hide' : '<i class="fa-solid fa-chevron-down"></i> Show';
+    btn.classList.toggle('active', diagOpen);
+    if (diagOpen) loadDiag();
+}
+
+function loadDiag() {
+    fetch('/api/shelly/diagnostics').then(function(r){return r.json();}).then(function(data){
+        if (!data.ok) return;
+        // Stats grid
+        var stats = document.getElementById('diag-stats');
+        var connClass = data.mqtt_connected ? 'connected' : 'disconnected';
+        var connText = data.mqtt_connected ? 'Connected' : 'Disconnected';
+        var sinceText = data.connected_since ? timeAgo(data.connected_since) : '—';
+        stats.innerHTML =
+            '<div class="diag-stat"><div class="diag-stat-label">Status</div><div class="diag-stat-value ' + connClass + '">' + connText + '</div></div>' +
+            '<div class="diag-stat"><div class="diag-stat-label">Broker</div><div class="diag-stat-value">' + data.broker_host + ':' + data.broker_port + '</div></div>' +
+            '<div class="diag-stat"><div class="diag-stat-label">Connected Since</div><div class="diag-stat-value">' + sinceText + '</div></div>' +
+            '<div class="diag-stat"><div class="diag-stat-label">Messages Received</div><div class="diag-stat-value">' + data.message_count + '</div></div>';
+        // Subscriptions
+        var subs = document.getElementById('diag-subs');
+        if (data.subscriptions.length) {
+            subs.innerHTML = data.subscriptions.map(function(s){ return '<span>📡 ' + s + '</span>'; }).join('');
+        } else {
+            subs.innerHTML = '<span style="color:#e74c3c;">Not subscribed to any topics (MQTT disconnected)</span>';
+        }
+        // Message count
+        document.getElementById('diag-msg-count').textContent = '(' + data.messages.length + ')';
+        // Message log
+        var log = document.getElementById('mqtt-log');
+        if (!data.messages.length) {
+            log.innerHTML = '<div class="mqtt-log-empty">No MQTT messages received yet. Point a Shelly device at the broker to see messages here.</div>';
+        } else {
+            var html = '';
+            data.messages.forEach(function(m) {
+                var payloadStr = typeof m.payload === 'object' ? JSON.stringify(m.payload, null, 2) : String(m.payload);
+                html += '<div class="mqtt-log-entry">' +
+                    '<span class="mqtt-log-ts">' + fmt(m.timestamp) + '</span>' +
+                    '<span class="mqtt-log-topic">' + m.topic + '</span>' +
+                    '<div class="mqtt-log-payload">' + payloadStr.replace(/</g, '&lt;') + '</div>' +
+                '</div>';
+            });
+            log.innerHTML = html;
+        }
+        // Populate test device dropdown
+        var sel = document.getElementById('diag-test-device');
+        var curVal = sel.value;
+        sel.innerHTML = '<option value="">Select device...</option>';
+        DEVICES.forEach(function(d) {
+            sel.innerHTML += '<option value="' + d.device_id + '">' + (d.name || d.device_id) + '</option>';
+        });
+        if (curVal) sel.value = curVal;
+    });
+}
+
+function sendTestCommand() {
+    var deviceId = document.getElementById('diag-test-device').value;
+    if (!deviceId) { alert('Select a device first.'); return; }
+    fetch('/api/shelly/test-command', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({device_id: deviceId})
+    }).then(function(r){return r.json();}).then(function(data){
+        if (data.ok) {
+            alert('GetStatus command sent to ' + deviceId + '. Check the MQTT log below for a response (may take a few seconds).');
+            setTimeout(loadDiag, 3000);
+        } else {
+            alert('Failed: ' + (data.detail || data.error || 'Unknown error'));
+        }
+    });
+}
+
 // Initial load
 loadDevices();
 loadLog();
 // Auto-refresh every 15 seconds
-setInterval(function(){ loadDevices(); loadLog(); }, 15000);
+setInterval(function(){ loadDevices(); loadLog(); if (diagOpen) loadDiag(); }, 15000);
 </script>
 </body>
 </html>
@@ -13273,6 +13415,46 @@ def shelly_register():
         headers=headers, json=entry, timeout=10
     )
     return jsonify({"ok": r.ok, "error": "" if r.ok else r.text})
+
+
+@app.route("/api/shelly/diagnostics")
+def shelly_diagnostics():
+    _require_dashboard_auth()
+    perm_block = _require_permission('shelly')
+    if perm_block:
+        return perm_block
+    subscriptions = []
+    if _mqtt_client and _mqtt_connected:
+        subscriptions = [
+            "shellyplus1-+/events/rpc", "shellyplus1-+/online",
+            "shellyplus1g3-+/events/rpc", "shellyplus1g3-+/online",
+        ]
+    return jsonify({
+        "ok": True,
+        "mqtt_connected": _mqtt_connected,
+        "connected_since": _mqtt_connected_since,
+        "broker_host": MQTT_BROKER_HOST or "(not configured)",
+        "broker_port": MQTT_BROKER_PORT,
+        "subscriptions": subscriptions,
+        "messages": list(reversed(_mqtt_message_log)),  # newest first
+        "message_count": len(_mqtt_message_log),
+    })
+
+
+@app.route("/api/shelly/test-command", methods=["POST"])
+def shelly_test_command():
+    _require_dashboard_auth()
+    perm_block = _require_permission('shelly')
+    if perm_block:
+        return perm_block
+    data = request.get_json(silent=True) or {}
+    device_id = data.get("device_id", "").strip()
+    if not device_id:
+        return jsonify({"ok": False, "error": "Missing device_id"}), 400
+    # Send a GetStatus command — this asks the device to report its state
+    # without changing anything
+    success, detail = mqtt_send_command(device_id, "Shelly.GetStatus", {})
+    return jsonify({"ok": success, "detail": detail, "method": "Shelly.GetStatus"})
 
 
 if __name__ == "__main__":
