@@ -8,3 +8,4 @@ gunicorn; sys_platform != 'win32'
 pyotp
 qrcode[pil]
 cryptography
+paho-mqtt

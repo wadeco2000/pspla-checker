@@ -38,6 +38,10 @@ GITHUB_REPO = os.getenv("GITHUB_REPO", "wadeco2000/pspla-checker")
 DROPBOX_TOKEN = os.getenv("DROPBOX_TOKEN", "")
 ACTUATE_API_TOKEN = os.getenv("ACTUATE_API_TOKEN", "")
 ACTUATE_BASE_URL = "https://admin.actuateui.net"
+MQTT_BROKER_HOST = os.getenv("MQTT_BROKER_HOST", "")
+MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
+MQTT_BROKER_USER = os.getenv("MQTT_BROKER_USER", "")
+MQTT_BROKER_PASS = os.getenv("MQTT_BROKER_PASS", "")
 RECAPTCHA_SITE_KEY = os.getenv("RECAPTCHA_SITE_KEY", "")
 RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY", "")
 
@@ -120,6 +124,141 @@ def _recheck_log_capture():
                 f.close()
             except Exception:
                 pass
+
+# ── MQTT client for Shelly relay control ──────────────────────────────────────
+_mqtt_client = None
+_mqtt_connected = False
+
+def _mqtt_on_connect(client, userdata, flags, rc, properties=None):
+    global _mqtt_connected
+    if rc == 0:
+        _mqtt_connected = True
+        print("[mqtt] Connected to broker")
+        # Subscribe to status notifications from all Shelly devices
+        client.subscribe("shellyplus1-+/events/rpc")
+        client.subscribe("shellyplus1-+/online")
+        # Gen3 devices may use different prefix
+        client.subscribe("shellyplus1g3-+/events/rpc")
+        client.subscribe("shellyplus1g3-+/online")
+    else:
+        _mqtt_connected = False
+        print(f"[mqtt] Connection failed with code {rc}")
+
+def _mqtt_on_disconnect(client, userdata, rc, properties=None):
+    global _mqtt_connected
+    _mqtt_connected = False
+    print(f"[mqtt] Disconnected (rc={rc}), will auto-reconnect")
+
+def _mqtt_on_message(client, userdata, msg):
+    """Handle incoming MQTT messages from Shelly devices."""
+    try:
+        topic = msg.topic
+        payload = json.loads(msg.payload.decode("utf-8", errors="replace"))
+        # Extract device ID from topic (e.g. "shellyplus1-30c9224c9dfc/events/rpc")
+        parts = topic.split("/")
+        device_id = parts[0] if parts else ""
+        if not device_id:
+            return
+        # Handle status notification events
+        if "events/rpc" in topic:
+            _mqtt_handle_status_event(device_id, payload)
+        elif topic.endswith("/online"):
+            _mqtt_handle_online(device_id, payload)
+    except Exception as e:
+        print(f"[mqtt] Error processing message on {msg.topic}: {e}")
+
+def _mqtt_handle_status_event(device_id, payload):
+    """Parse Shelly RPC notification and update device status in Supabase."""
+    try:
+        # Shelly Gen2/Gen3 sends NotifyStatus events with switch state
+        params = payload.get("params", {})
+        switch0 = params.get("switch:0", {})
+        update_data = {"last_seen": datetime.now(timezone.utc).isoformat()}
+        if "output" in switch0:
+            update_data["relay_state"] = switch0["output"]
+        if "temperature" in switch0:
+            temp = switch0["temperature"]
+            if isinstance(temp, dict):
+                update_data["temperature_c"] = temp.get("tC")
+            else:
+                update_data["temperature_c"] = temp
+        update_data["online"] = True
+        # Upsert to Supabase
+        if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+            headers = {"apikey": SUPABASE_SERVICE_KEY,
+                       "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                       "Content-Type": "application/json",
+                       "Prefer": "resolution=merge-duplicates"}
+            requests.patch(
+                f"{SUPABASE_URL}/rest/v1/shelly_devices",
+                params={"device_id": f"eq.{device_id}"},
+                headers=headers, json=update_data, timeout=10
+            )
+    except Exception as e:
+        print(f"[mqtt] Failed to update device {device_id}: {e}")
+
+def _mqtt_handle_online(device_id, payload):
+    """Handle online/offline status from Shelly device."""
+    try:
+        online = payload if isinstance(payload, bool) else str(payload).lower() == "true"
+        if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+            headers = {"apikey": SUPABASE_SERVICE_KEY,
+                       "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                       "Content-Type": "application/json"}
+            requests.patch(
+                f"{SUPABASE_URL}/rest/v1/shelly_devices",
+                params={"device_id": f"eq.{device_id}"},
+                headers=headers,
+                json={"online": online, "last_seen": datetime.now(timezone.utc).isoformat()},
+                timeout=10
+            )
+    except Exception as e:
+        print(f"[mqtt] Failed to update online status for {device_id}: {e}")
+
+def mqtt_send_command(device_id, method, params):
+    """Publish an RPC command to a Shelly device via MQTT.
+    Returns (success: bool, detail: str)."""
+    global _mqtt_client, _mqtt_connected
+    if not _mqtt_client or not _mqtt_connected:
+        return False, "MQTT not connected"
+    try:
+        import random
+        msg_id = random.randint(1, 999999)
+        payload = json.dumps({"id": msg_id, "src": "pspla-dashboard", "method": method, "params": params})
+        topic = f"{device_id}/rpc"
+        result = _mqtt_client.publish(topic, payload, qos=1)
+        if result.rc == 0:
+            return True, f"Command sent: {method}"
+        return False, f"Publish failed (rc={result.rc})"
+    except Exception as e:
+        return False, f"MQTT error: {e}"
+
+def _start_mqtt_client():
+    """Start the MQTT client in a background thread. Safe to call if broker not configured."""
+    global _mqtt_client
+    if not MQTT_BROKER_HOST:
+        print("[mqtt] MQTT_BROKER_HOST not set — Shelly MQTT disabled")
+        return
+    try:
+        import paho.mqtt.client as paho_mqtt
+        _mqtt_client = paho_mqtt.Client(client_id="pspla-dashboard", protocol=paho_mqtt.MQTTv5)
+        _mqtt_client.on_connect = _mqtt_on_connect
+        _mqtt_client.on_disconnect = _mqtt_on_disconnect
+        _mqtt_client.on_message = _mqtt_on_message
+        if MQTT_BROKER_USER:
+            _mqtt_client.username_pw_set(MQTT_BROKER_USER, MQTT_BROKER_PASS)
+        _mqtt_client.reconnect_delay_set(min_delay=1, max_delay=60)
+        _mqtt_client.connect_async(MQTT_BROKER_HOST, MQTT_BROKER_PORT, keepalive=60)
+        _mqtt_client.loop_start()  # starts background thread
+        print(f"[mqtt] Connecting to {MQTT_BROKER_HOST}:{MQTT_BROKER_PORT}")
+    except ImportError:
+        print("[mqtt] paho-mqtt not installed — Shelly MQTT disabled")
+    except Exception as e:
+        print(f"[mqtt] Failed to start: {e}")
+
+# Start MQTT client on module load (daemon thread, won't block shutdown)
+_start_mqtt_client()
+
 
 NZ_REGIONS = [
     # Major cities
@@ -419,9 +558,9 @@ def _is_admin():
     return bool(email and NOTIFY_EMAIL and email == NOTIFY_EMAIL.lower().strip())
 
 # ── Per-user permissions ────────────────────────────────────────────────────
-_PERMISSION_GROUPS = ['searches', 'database', 'history', 'utilities', 'actuate']
-_PERMISSION_LABELS = {'searches': 'Searches', 'database': 'Database', 'history': 'History', 'utilities': 'Utilities', 'actuate': 'Actuate'}
-_DEFAULT_PERMISSIONS = {'searches': True, 'database': True, 'history': True, 'utilities': True, 'actuate': False}
+_PERMISSION_GROUPS = ['searches', 'database', 'history', 'utilities', 'actuate', 'shelly']
+_PERMISSION_LABELS = {'searches': 'Searches', 'database': 'Database', 'history': 'History', 'utilities': 'Utilities', 'actuate': 'Actuate', 'shelly': 'Shelly'}
+_DEFAULT_PERMISSIONS = {'searches': True, 'database': True, 'history': True, 'utilities': True, 'actuate': False, 'shelly': False}
 
 def _has_permission(group):
     """Check if current user has access to a permission group."""
@@ -478,6 +617,10 @@ _ROUTE_PERMISSIONS = {
     # actuate
     'actuate_page': 'actuate', 'actuate_action': 'actuate',
     'actuate_site_info': 'actuate', 'actuate_query': 'actuate',
+    # shelly
+    'shelly_page': 'shelly', 'shelly_devices_api': 'shelly',
+    'shelly_toggle': 'shelly', 'shelly_command_log_api': 'shelly',
+    'shelly_register': 'shelly',
 }
 
 # ── TOTP 2FA helpers ──────────────────────────────────────────────────────────
@@ -1802,6 +1945,15 @@ HTML_TEMPLATE = """
     <div class="nav-item" id="menu-actuate">
       <a href="/actuate" class="nav-btn" style="text-decoration:none;">
         <i class="fa-solid fa-tower-broadcast"></i> Actuate
+      </a>
+    </div>
+    {% endif %}
+
+    <!-- Shelly Tower Control -->
+    {% if user_perms.shelly %}
+    <div class="nav-item" id="menu-shelly">
+      <a href="/shelly" class="nav-btn" style="text-decoration:none;">
+        <i class="fa-solid fa-tower-cell"></i> Shelly
       </a>
     </div>
     {% endif %}
@@ -4722,12 +4874,19 @@ def get_companies():
 
 @app.route("/")
 def index():
-    # Actuate-only users redirect
+    # Redirect users who only have partner integrations (no PSPLA access)
     if not _is_admin():
         _perms = session.get('permissions') or _DEFAULT_PERMISSIONS
         _pspla_access = any(_perms.get(g) for g in ('searches', 'database', 'history', 'utilities'))
-        if not _pspla_access and _perms.get('actuate'):
-            return redirect('/actuate')
+        if not _pspla_access:
+            _has_shelly = _perms.get('shelly', False)
+            _has_actuate = _perms.get('actuate', False)
+            if _has_shelly and not _has_actuate:
+                return redirect('/shelly')
+            if _has_actuate and not _has_shelly:
+                return redirect('/actuate')
+            if _has_shelly and _has_actuate:
+                return redirect('/shelly')
     message = request.args.get("message", "")
     message_type = request.args.get("type", "success")
 
@@ -6924,11 +7083,30 @@ def _send_welcome_email(to_email, to_name, added_by, permissions=None):
     from email.mime.text import MIMEText
     perms = permissions or dict(_DEFAULT_PERMISSIONS)
     display_name = to_name or to_email.split("@")[0].title()
-    # Detect actuate-only user (actuate=True, everything else False)
+    # Detect partner-only users (actuate/shelly only, no PSPLA access)
     _pspla_groups = ['searches', 'database', 'history', 'utilities']
-    actuate_only = perms.get('actuate', False) and not any(perms.get(g) for g in _pspla_groups)
+    _has_pspla = any(perms.get(g) for g in _pspla_groups)
+    actuate_only = perms.get('actuate', False) and not _has_pspla and not perms.get('shelly', False)
+    shelly_only = perms.get('shelly', False) and not _has_pspla and not perms.get('actuate', False)
 
-    if actuate_only:
+    if shelly_only:
+        subject = "You've been granted access \u2014 Alarm Watch Tower Control"
+        site_url = "https://www.psplachecker.co.nz/shelly"
+        intro_text = ("You've been granted access to the <strong>Tower Control</strong> panel \u2014 "
+                      "monitor and control Shelly relays in alarm towers.")
+        features_html = (
+            '<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f5fc &nbsp;Tower relay on/off control</td></tr>'
+            '<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f321\ufe0f &nbsp;Device temperature monitoring</td></tr>'
+            '<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f4cb &nbsp;Command history and audit log</td></tr>'
+            '<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f7e2 &nbsp;Real-time online/offline status</td></tr>'
+        )
+        features_plain = ("- Tower relay on/off control\n"
+                          "- Device temperature monitoring\n"
+                          "- Command history and audit log\n"
+                          "- Real-time online/offline status")
+        header_subtitle = "Alarm Watch Tower Control \u2014 Access Granted"
+        footer_text = "Alarm Watch Tower Control &nbsp;\u00b7&nbsp; New Zealand &nbsp;\u00b7&nbsp; For authorised users only"
+    elif actuate_only:
         subject = "You've been granted access \u2014 Actuate Camera AI"
         site_url = "https://www.psplachecker.co.nz/actuate"
         intro_text = ("You've been granted access to the <strong>Actuate Camera AI</strong> management console \u2014 "
@@ -6976,6 +7154,9 @@ def _send_welcome_email(to_email, to_name, added_by, permissions=None):
         if perms.get('actuate'):
             _feat_rows.append('<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f4f9 &nbsp;Actuate camera AI management</td></tr>')
             _feat_plain.append("- Actuate camera AI management")
+        if perms.get('shelly'):
+            _feat_rows.append('<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f5fc &nbsp;Alarm tower relay control</td></tr>')
+            _feat_plain.append("- Alarm tower relay control")
         features_html = "".join(_feat_rows)
         features_plain = "\n".join(_feat_plain)
         header_subtitle = "PSPLA Licence Checker \u2014 Access Granted"
@@ -7948,6 +8129,7 @@ tr:last-child td{border-bottom:none}
         <label><input type="checkbox" id="add-perm-history" checked> History</label>
         <label><input type="checkbox" id="add-perm-utilities" checked> Utilities</label>
         <label><input type="checkbox" id="add-perm-actuate"> Actuate</label>
+        <label><input type="checkbox" id="add-perm-shelly"> Shelly</label>
       </div>
     </div>
     <div id="users-loading" class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</div>
@@ -8016,18 +8198,18 @@ function loadUsers() {
             var avatarHtml = u.avatar_url
                 ? '<img src="' + u.avatar_url + '" style="width:24px;height:24px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:6px">'
                 : '<i class="fa-solid fa-user-circle" style="font-size:22px;color:#ccc;vertical-align:middle;margin-right:6px"></i>';
-            var perms = u.permissions || {searches:true,database:true,history:true,utilities:true,actuate:false};
-            var permLabels = {searches:'Sea',database:'Dat',history:'His',utilities:'Uti',actuate:'Act'};
+            var perms = u.permissions || {searches:true,database:true,history:true,utilities:true,actuate:false,shelly:false};
+            var permLabels = {searches:'Sea',database:'Dat',history:'His',utilities:'Uti',actuate:'Act',shelly:'She'};
             var permCol = '';
             if (u.is_admin) {
                 permCol = '<span style="font-size:11px;color:#8e44ad">All (admin)</span>';
             } else if (IS_ADMIN) {
-                ['searches','database','history','utilities','actuate'].forEach(function(g){
+                ['searches','database','history','utilities','actuate','shelly'].forEach(function(g){
                     var on = perms[g];
                     permCol += '<button class="perm-btn ' + (on ? 'perm-on' : 'perm-off') + '" onclick="togglePerm(\\'' + u.id + '\\',\\'' + g + '\\',' + !on + ')" title="' + g + '">' + permLabels[g] + '</button>';
                 });
             } else {
-                ['searches','database','history','utilities','actuate'].forEach(function(g){
+                ['searches','database','history','utilities','actuate','shelly'].forEach(function(g){
                     var on = perms[g];
                     permCol += '<span class="perm-btn ' + (on ? 'perm-on' : 'perm-off') + '" style="cursor:default" title="' + g + '">' + permLabels[g] + '</span>';
                 });
@@ -8056,7 +8238,8 @@ function addUser() {
         database: document.getElementById('add-perm-database').checked,
         history: document.getElementById('add-perm-history').checked,
         utilities: document.getElementById('add-perm-utilities').checked,
-        actuate: document.getElementById('add-perm-actuate').checked
+        actuate: document.getElementById('add-perm-actuate').checked,
+        shelly: document.getElementById('add-perm-shelly').checked
     };
     fetch('/api/allowed-users', {method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({email: email, name: name, permissions: perms})
@@ -12632,6 +12815,464 @@ def actuate_query():
         return jsonify({"ok": r.ok, "upstream_status": r.status_code, "upstream_body": body})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
+
+
+# ── Shelly Relay Control ──────────────────────────────────────────────────────
+
+SHELLY_TEMPLATE = r"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>(function(){var _f=window.fetch;window.fetch=function(u,o){o=o||{};var m=(o.method||'GET').toUpperCase();if(m!=='GET'&&m!=='HEAD'){o.headers=o.headers||{};o.headers['X-CSRF-Token']=document.querySelector('meta[name="csrf-token"]').content;}return _f.call(this,u,o);};})();</script>
+    <title>Tower Relay Control — Alarm Watch</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer" />
+    <style>
+        *{box-sizing:border-box;}
+        body{font-family:Arial,sans-serif;margin:0;padding:0;background:#f4f4f4;color:#333;}
+        .page-header{background:#1a252f;color:white;padding:14px 24px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+        .page-header h1{margin:0;font-size:18px;display:flex;align-items:center;gap:10px;}
+        .page-header h1 i{color:#e67e22;}
+        .header-right{margin-left:auto;display:flex;align-items:center;gap:12px;}
+        .header-right a{color:#aac;font-size:12px;text-decoration:none;display:flex;align-items:center;gap:5px;}
+        .header-right a:hover{color:white;}
+        .header-avatar{width:24px;height:24px;border-radius:50%;border:1px solid #555;}
+        .header-email{font-size:11px;color:#7fb3d8;}
+        .header-signout{background:rgba(231,76,60,0.15);border:1px solid rgba(231,76,60,0.4);border-radius:6px;padding:4px 10px;font-size:11px;color:#e98 !important;}
+        .content{max-width:1200px;margin:20px auto;padding:0 20px;}
+
+        /* MQTT status */
+        .mqtt-status{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 12px;border-radius:12px;background:#1e2d3d;}
+        .mqtt-dot{width:8px;height:8px;border-radius:50%;display:inline-block;}
+        .mqtt-dot.online{background:#27ae60;box-shadow:0 0 6px #27ae60;}
+        .mqtt-dot.offline{background:#e74c3c;box-shadow:0 0 6px #e74c3c;}
+
+        /* Device cards */
+        .devices-grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(320px, 1fr));gap:16px;margin-bottom:24px;}
+        .device-card{background:white;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.08);overflow:hidden;transition:box-shadow .2s;}
+        .device-card:hover{box-shadow:0 4px 16px rgba(0,0,0,0.12);}
+        .device-card-header{padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #eee;}
+        .device-name{font-size:16px;font-weight:700;color:#1a252f;}
+        .device-id{font-size:11px;color:#999;font-family:monospace;margin-top:2px;}
+        .device-online{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;}
+        .device-online.is-online{color:#27ae60;}
+        .device-online.is-offline{color:#e74c3c;}
+        .device-card-body{padding:16px 20px;}
+        .device-stat{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f5f5f5;}
+        .device-stat:last-child{border-bottom:none;}
+        .device-stat-label{font-size:12px;color:#888;font-weight:600;}
+        .device-stat-value{font-size:13px;font-weight:600;}
+        .relay-pill{display:inline-block;padding:3px 12px;border-radius:12px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;}
+        .relay-on{background:#d4edda;color:#155724;}
+        .relay-off{background:#f8d7da;color:#721c24;}
+        .temp-value{color:#e67e22;}
+        .toggle-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 20px;border:none;border-radius:6px;font-size:13px;
+                    cursor:pointer;font-weight:700;width:100%;justify-content:center;margin-top:8px;transition:all .15s;}
+        .toggle-btn:hover{opacity:0.85;transform:translateY(-1px);}
+        .toggle-btn.turn-on{background:#27ae60;color:white;}
+        .toggle-btn.turn-off{background:#e74c3c;color:white;}
+        .toggle-btn:disabled{opacity:0.5;cursor:not-allowed;transform:none;}
+        .last-seen{font-size:11px;color:#aaa;}
+
+        /* Admin section */
+        .admin-card{background:white;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.08);padding:20px;margin-bottom:24px;}
+        .admin-card h2{margin:0 0 12px;font-size:16px;color:#1a252f;}
+        .admin-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+        .admin-row input{font-size:13px;padding:7px 12px;border:1px solid #ccc;border-radius:5px;}
+        .btn-add{background:#3498db;color:white;border:none;padding:8px 16px;border-radius:5px;font-size:13px;cursor:pointer;font-weight:600;}
+        .btn-add:hover{background:#2980b9;}
+        .btn-del-device{background:none;border:1px solid #e74c3c;color:#e74c3c;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;font-weight:600;}
+        .btn-del-device:hover{background:#e74c3c;color:white;}
+
+        /* Command log */
+        .log-card{background:white;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.08);padding:20px;margin-bottom:24px;}
+        .log-card h2{margin:0 0 12px;font-size:16px;color:#1a252f;}
+        .log-table{width:100%;border-collapse:collapse;font-size:13px;}
+        .log-table th{text-align:left;padding:8px 12px;background:#f8f9fa;border-bottom:2px solid #eee;font-size:12px;color:#666;text-transform:uppercase;letter-spacing:0.3px;}
+        .log-table td{padding:8px 12px;border-bottom:1px solid #f0f0f0;}
+        .log-action-on{color:#27ae60;font-weight:700;}
+        .log-action-off{color:#e74c3c;font-weight:700;}
+
+        /* Empty state */
+        .empty-state{text-align:center;padding:60px 20px;color:#999;}
+        .empty-state i{font-size:48px;color:#ddd;margin-bottom:16px;}
+        .empty-state p{font-size:14px;margin:4px 0;}
+
+        /* Refresh button */
+        .btn-refresh{background:none;border:1px solid #ccc;color:#666;padding:6px 14px;border-radius:5px;font-size:12px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:5px;}
+        .btn-refresh:hover{border-color:#999;color:#333;}
+        .btn-refresh.spinning i{animation:spin 1s linear infinite;}
+        @keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+    </style>
+</head>
+<body>
+<div class="page-header">
+    <h1><i class="fa-solid fa-tower-cell"></i> Tower Relay Control</h1>
+    <div class="mqtt-status">
+        <span class="mqtt-dot {{ 'online' if mqtt_connected else 'offline' }}"></span>
+        <span style="color:{{ '#7fb3d8' if mqtt_connected else '#e98' }}">MQTT {{ 'Connected' if mqtt_connected else 'Disconnected' }}</span>
+    </div>
+    <div class="header-right">
+        {% if has_pspla_access %}
+        <a href="/"><i class="fa-solid fa-gauge"></i> Dashboard</a>
+        {% endif %}
+        {% if avatar_url %}
+        <img src="{{ avatar_url }}" class="header-avatar">
+        {% endif %}
+        <span class="header-email">{{ session.get('email','') }}</span>
+        <a href="/account/profile"><i class="fa-solid fa-user-gear"></i> Account</a>
+        <a href="/logout" class="header-signout"><i class="fa-solid fa-right-from-bracket"></i> Sign out</a>
+    </div>
+</div>
+<div class="content">
+
+    <!-- Admin: Add Device -->
+    {% if is_admin %}
+    <div class="admin-card">
+        <h2><i class="fa-solid fa-plus-circle" style="color:#3498db;"></i> Register Device</h2>
+        <div class="admin-row">
+            <input type="text" id="new-device-id" placeholder="Device ID (e.g. shellyplus1-30c9224c9dfc)" style="width:320px;">
+            <input type="text" id="new-device-name" placeholder="Tower name (e.g. Tower 1)" style="width:200px;">
+            <input type="text" id="new-device-model" placeholder="Model (optional)" style="width:160px;">
+            <button class="btn-add" onclick="registerDevice()"><i class="fa-solid fa-plus"></i> Add</button>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Devices -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <h2 style="margin:0;font-size:16px;color:#1a252f;"><i class="fa-solid fa-tower-cell" style="color:#e67e22;"></i> Devices</h2>
+        <button class="btn-refresh" onclick="loadDevices(this)"><i class="fa-solid fa-arrows-rotate"></i> Refresh</button>
+    </div>
+    <div id="devices-grid" class="devices-grid">
+        <div class="empty-state" id="devices-empty">
+            <i class="fa-solid fa-tower-cell"></i>
+            <p><strong>No devices registered</strong></p>
+            <p>Add a Shelly device above to get started.</p>
+        </div>
+    </div>
+
+    <!-- Command Log -->
+    <div class="log-card">
+        <h2><i class="fa-solid fa-clock-rotate-left" style="color:#8e44ad;"></i> Command Log <span style="font-size:12px;font-weight:400;color:#999;">(last 50)</span></h2>
+        <div id="log-loading" style="color:#999;font-size:13px;padding:8px 0;"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</div>
+        <table class="log-table" id="log-table" style="display:none;">
+            <thead><tr><th>Time</th><th>Tower</th><th>Device</th><th>Action</th><th>By</th><th>Status</th></tr></thead>
+            <tbody id="log-body"></tbody>
+        </table>
+        <div id="log-empty" style="display:none;color:#999;font-size:13px;padding:8px 0;">No commands logged yet.</div>
+    </div>
+</div>
+
+<script>
+var IS_ADMIN = {{ 'true' if is_admin else 'false' }};
+var DEVICES = [];
+
+function fmt(ts) {
+    if (!ts) return '—';
+    var d = new Date(ts);
+    return d.toLocaleDateString('en-NZ') + ' ' + d.toLocaleTimeString('en-NZ', {hour:'2-digit',minute:'2-digit'});
+}
+
+function timeAgo(ts) {
+    if (!ts) return 'Never';
+    var diff = (Date.now() - new Date(ts).getTime()) / 1000;
+    if (diff < 60) return Math.floor(diff) + 's ago';
+    if (diff < 3600) return Math.floor(diff/60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff/3600) + 'h ago';
+    return Math.floor(diff/86400) + 'd ago';
+}
+
+function loadDevices(btn) {
+    if (btn) { btn.classList.add('spinning'); }
+    fetch('/api/shelly/devices').then(function(r){return r.json();}).then(function(data){
+        if (btn) btn.classList.remove('spinning');
+        if (!data.ok) { alert('Failed to load devices'); return; }
+        DEVICES = data.devices || [];
+        renderDevices();
+    }).catch(function(){ if (btn) btn.classList.remove('spinning'); });
+}
+
+function renderDevices() {
+    var grid = document.getElementById('devices-grid');
+    var empty = document.getElementById('devices-empty');
+    if (!DEVICES.length) { grid.innerHTML = ''; grid.appendChild(empty); empty.style.display = ''; return; }
+    empty.style.display = 'none';
+    var html = '';
+    DEVICES.forEach(function(d) {
+        var online = d.online && d.last_seen && (Date.now() - new Date(d.last_seen).getTime()) < 300000;
+        var relayOn = d.relay_state === true;
+        var temp = d.temperature_c != null ? d.temperature_c.toFixed(1) + '°C' : '—';
+        html += '<div class="device-card" id="card-' + d.device_id + '">' +
+            '<div class="device-card-header">' +
+                '<div>' +
+                    '<div class="device-name">' + (d.name || d.device_id) + '</div>' +
+                    '<div class="device-id">' + d.device_id + '</div>' +
+                '</div>' +
+                '<div class="device-online ' + (online ? 'is-online' : 'is-offline') + '">' +
+                    '<i class="fa-solid fa-circle" style="font-size:8px;"></i> ' + (online ? 'Online' : 'Offline') +
+                '</div>' +
+            '</div>' +
+            '<div class="device-card-body">' +
+                '<div class="device-stat"><span class="device-stat-label">Relay</span>' +
+                    '<span class="relay-pill ' + (relayOn ? 'relay-on' : 'relay-off') + '">' + (relayOn ? 'ON' : 'OFF') + '</span></div>' +
+                '<div class="device-stat"><span class="device-stat-label">Temperature</span>' +
+                    '<span class="device-stat-value temp-value">' + temp + '</span></div>' +
+                '<div class="device-stat"><span class="device-stat-label">Model</span>' +
+                    '<span class="device-stat-value">' + (d.model || '—') + '</span></div>' +
+                '<div class="device-stat"><span class="device-stat-label">Firmware</span>' +
+                    '<span class="device-stat-value">' + (d.firmware || '—') + '</span></div>' +
+                '<div class="device-stat"><span class="device-stat-label">Last Seen</span>' +
+                    '<span class="last-seen">' + (d.last_seen ? timeAgo(d.last_seen) + ' (' + fmt(d.last_seen) + ')' : 'Never') + '</span></div>' +
+                '<button class="toggle-btn ' + (relayOn ? 'turn-off' : 'turn-on') + '" onclick="toggleRelay(\'' + d.device_id + '\',' + !relayOn + ')" id="toggle-' + d.device_id + '">' +
+                    '<i class="fa-solid fa-power-off"></i> Turn ' + (relayOn ? 'OFF' : 'ON') +
+                '</button>' +
+                (IS_ADMIN ? '<button class="btn-del-device" style="margin-top:8px;width:100%;" onclick="removeDevice(\'' + d.id + '\',\'' + (d.name || d.device_id) + '\')"><i class="fa-solid fa-trash"></i> Remove Device</button>' : '') +
+            '</div>' +
+        '</div>';
+    });
+    grid.innerHTML = html;
+}
+
+function toggleRelay(deviceId, turnOn) {
+    var btn = document.getElementById('toggle-' + deviceId);
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Sending...'; }
+    fetch('/api/shelly/toggle', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({device_id: deviceId, on: turnOn})
+    }).then(function(r){return r.json();}).then(function(data){
+        if (!data.ok) { alert('Failed: ' + (data.error || 'Unknown error')); }
+        // Reload after short delay to allow MQTT status to update
+        setTimeout(function(){ loadDevices(); loadLog(); }, 1500);
+    }).catch(function(e){ alert('Error: ' + e); if (btn) btn.disabled = false; });
+}
+
+function registerDevice() {
+    var deviceId = document.getElementById('new-device-id').value.trim();
+    var name = document.getElementById('new-device-name').value.trim();
+    var model = document.getElementById('new-device-model').value.trim();
+    if (!deviceId) { alert('Enter a device ID.'); return; }
+    if (!name) { alert('Enter a tower name.'); return; }
+    fetch('/api/shelly/register', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({device_id: deviceId, name: name, model: model})
+    }).then(function(r){return r.json();}).then(function(data){
+        if (data.ok) {
+            document.getElementById('new-device-id').value = '';
+            document.getElementById('new-device-name').value = '';
+            document.getElementById('new-device-model').value = '';
+            loadDevices();
+        } else { alert('Failed: ' + (data.error || 'Unknown error')); }
+    });
+}
+
+function removeDevice(id, name) {
+    if (!confirm('Remove device "' + name + '"? This only removes it from the dashboard, not the physical device.')) return;
+    fetch('/api/shelly/register', {method:'DELETE', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({id: id})
+    }).then(function(r){return r.json();}).then(function(data){
+        if (data.ok) loadDevices();
+        else alert('Failed to remove device.');
+    });
+}
+
+function loadLog() {
+    fetch('/api/shelly/log').then(function(r){return r.json();}).then(function(data){
+        var el = document.getElementById('log-loading');
+        var t = document.getElementById('log-table');
+        var b = document.getElementById('log-body');
+        var empty = document.getElementById('log-empty');
+        el.style.display = 'none';
+        var rows = data.log || [];
+        if (!rows.length) { t.style.display = 'none'; empty.style.display = ''; return; }
+        empty.style.display = 'none';
+        t.style.display = '';
+        b.innerHTML = '';
+        rows.forEach(function(r) {
+            var tr = document.createElement('tr');
+            var actionClass = r.action === 'on' ? 'log-action-on' : 'log-action-off';
+            tr.innerHTML = '<td style="white-space:nowrap;">' + fmt(r.timestamp) + '</td>' +
+                '<td><strong>' + (r.device_name || '—') + '</strong></td>' +
+                '<td style="font-family:monospace;font-size:11px;color:#999;">' + (r.device_id || '') + '</td>' +
+                '<td class="' + actionClass + '">' + (r.action === 'on' ? '● ON' : '● OFF') + '</td>' +
+                '<td>' + (r.triggered_by || '—') + '</td>' +
+                '<td>' + (r.success ? '<i class="fa-solid fa-check" style="color:#27ae60;"></i>' : '<i class="fa-solid fa-xmark" style="color:#e74c3c;"></i>') + '</td>';
+            b.appendChild(tr);
+        });
+    });
+}
+
+// Initial load
+loadDevices();
+loadLog();
+// Auto-refresh every 15 seconds
+setInterval(function(){ loadDevices(); loadLog(); }, 15000);
+</script>
+</body>
+</html>
+"""
+
+
+@app.route("/shelly")
+def shelly_page():
+    _require_dashboard_auth()
+    perm_block = _require_permission('shelly')
+    if perm_block:
+        return perm_block
+    has_pspla_access = _is_admin() or any(
+        (session.get("permissions") or _DEFAULT_PERMISSIONS).get(g)
+        for g in ("searches", "database", "history", "utilities")
+    )
+    return render_template_string(
+        SHELLY_TEMPLATE,
+        is_admin=_is_admin(),
+        has_pspla_access=has_pspla_access,
+        mqtt_connected=_mqtt_connected,
+        avatar_url=session.get("avatar_url", ""),
+    )
+
+
+@app.route("/api/shelly/devices")
+def shelly_devices_api():
+    _require_dashboard_auth()
+    perm_block = _require_permission('shelly')
+    if perm_block:
+        return perm_block
+    try:
+        headers = {"apikey": SUPABASE_SERVICE_KEY,
+                   "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                   "Content-Type": "application/json"}
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/shelly_devices",
+            params={"select": "*", "order": "name.asc"},
+            headers=headers, timeout=10
+        )
+        devices = r.json() if r.ok else []
+        return jsonify({"ok": True, "devices": devices})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/shelly/toggle", methods=["POST"])
+def shelly_toggle():
+    _require_dashboard_auth()
+    perm_block = _require_permission('shelly')
+    if perm_block:
+        return perm_block
+    data = request.get_json(silent=True) or {}
+    device_id = data.get("device_id", "").strip()
+    turn_on = data.get("on", False)
+    if not device_id:
+        return jsonify({"ok": False, "error": "Missing device_id"}), 400
+    # Validate device_id exists in our registered devices (prevents arbitrary MQTT topic publishing)
+    try:
+        _chk_headers = {"apikey": SUPABASE_SERVICE_KEY,
+                        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        _chk = requests.get(
+            f"{SUPABASE_URL}/rest/v1/shelly_devices",
+            params={"device_id": f"eq.{device_id}", "select": "device_id"},
+            headers=_chk_headers, timeout=10
+        )
+        if not _chk.json():
+            return jsonify({"ok": False, "error": "Device not registered"}), 404
+    except Exception:
+        pass  # allow command through if DB check fails (don't block on transient errors)
+    # Send MQTT command
+    success, detail = mqtt_send_command(device_id, "Switch.Set", {"id": 0, "on": turn_on})
+    # Log the command
+    try:
+        user_email = session.get("email", "unknown")
+        log_entry = {
+            "device_id": device_id,
+            "action": "on" if turn_on else "off",
+            "triggered_by": user_email,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "success": success,
+        }
+        headers = {"apikey": SUPABASE_SERVICE_KEY,
+                   "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                   "Content-Type": "application/json",
+                   "Prefer": "return=minimal"}
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/shelly_command_log",
+            headers=headers, json=log_entry, timeout=10
+        )
+    except Exception as e:
+        print(f"[shelly] Failed to log command: {e}")
+    return jsonify({"ok": success, "detail": detail, "action": "on" if turn_on else "off"})
+
+
+@app.route("/api/shelly/log")
+def shelly_command_log_api():
+    _require_dashboard_auth()
+    perm_block = _require_permission('shelly')
+    if perm_block:
+        return perm_block
+    try:
+        headers = {"apikey": SUPABASE_SERVICE_KEY,
+                   "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                   "Content-Type": "application/json"}
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/shelly_command_log",
+            params={"select": "*", "order": "timestamp.desc", "limit": "50"},
+            headers=headers, timeout=10
+        )
+        log_rows = r.json() if r.ok else []
+        # Enrich with device names
+        device_names = {}
+        for d in (requests.get(
+            f"{SUPABASE_URL}/rest/v1/shelly_devices",
+            params={"select": "device_id,name"},
+            headers=headers, timeout=10
+        ).json() or []):
+            device_names[d["device_id"]] = d.get("name", "")
+        for row in log_rows:
+            row["device_name"] = device_names.get(row.get("device_id", ""), "")
+        return jsonify({"ok": True, "log": log_rows})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/shelly/register", methods=["POST", "DELETE"])
+def shelly_register():
+    _require_dashboard_auth()
+    if not _is_admin():
+        return jsonify({"ok": False, "error": "Admin only"}), 403
+    headers = {"apikey": SUPABASE_SERVICE_KEY,
+               "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+               "Content-Type": "application/json"}
+    if request.method == "DELETE":
+        data = request.get_json(silent=True) or {}
+        device_db_id = data.get("id", "")
+        if not device_db_id:
+            return jsonify({"ok": False, "error": "Missing id"}), 400
+        r = requests.delete(
+            f"{SUPABASE_URL}/rest/v1/shelly_devices",
+            params={"id": f"eq.{device_db_id}"},
+            headers=headers, timeout=10
+        )
+        return jsonify({"ok": r.ok})
+    # POST — register new device
+    data = request.get_json(silent=True) or {}
+    device_id = data.get("device_id", "").strip()
+    name = data.get("name", "").strip()
+    model = data.get("model", "").strip()
+    if not device_id or not name:
+        return jsonify({"ok": False, "error": "device_id and name required"}), 400
+    entry = {
+        "device_id": device_id,
+        "name": name,
+        "model": model or None,
+        "relay_state": False,
+        "online": False,
+        "added_at": datetime.now(timezone.utc).isoformat(),
+    }
+    headers["Prefer"] = "return=minimal"
+    r = requests.post(
+        f"{SUPABASE_URL}/rest/v1/shelly_devices",
+        headers=headers, json=entry, timeout=10
+    )
+    return jsonify({"ok": r.ok, "error": "" if r.ok else r.text})
 
 
 if __name__ == "__main__":
