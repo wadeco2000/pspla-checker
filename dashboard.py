@@ -138,12 +138,11 @@ def _mqtt_on_connect(client, userdata, flags, rc, properties=None):
         _mqtt_connected = True
         _mqtt_connected_since = datetime.now(timezone.utc).isoformat()
         print("[mqtt] Connected to broker")
-        # Subscribe to status notifications from all Shelly devices
-        client.subscribe("shellyplus1-+/events/rpc")
-        client.subscribe("shellyplus1-+/online")
-        # Gen3 devices may use different prefix
-        client.subscribe("shellyplus1g3-+/events/rpc")
-        client.subscribe("shellyplus1g3-+/online")
+        # Subscribe to all Shelly device topics using wildcard
+        # '+' matches any single topic level (i.e. any device ID)
+        client.subscribe("+/events/rpc")
+        client.subscribe("+/online")
+        client.subscribe("+/rpc")
     else:
         _mqtt_connected = False
         print(f"[mqtt] Connection failed with code {rc}")
