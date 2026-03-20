@@ -13031,7 +13031,15 @@ SHELLY_TEMPLATE = r"""
                     <select id="diag-test-device" style="font-size:12px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;">
                         <option value="">Select device...</option>
                     </select>
-                    <button class="btn-test" onclick="sendTestCommand()"><i class="fa-solid fa-flask"></i> Send GetStatus</button>
+                    <select id="diag-test-method" style="font-size:12px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;">
+                        <option value="Shelly.GetStatus">Shelly.GetStatus</option>
+                        <option value="Shelly.GetDeviceInfo">Shelly.GetDeviceInfo</option>
+                        <option value="Switch.GetStatus">Switch.GetStatus</option>
+                        <option value="Wifi.GetStatus">Wifi.GetStatus</option>
+                        <option value="Shelly.CheckForUpdate">Shelly.CheckForUpdate</option>
+                        <option value="Shelly.Reboot">Shelly.Reboot</option>
+                    </select>
+                    <button class="btn-test" onclick="sendTestCommand()"><i class="fa-solid fa-flask"></i> Send</button>
                     <button class="btn-refresh" onclick="loadDiag()" style="padding:4px 10px;font-size:11px;"><i class="fa-solid fa-arrows-rotate"></i></button>
                 </div>
             </div>
@@ -13270,13 +13278,15 @@ function loadDiag() {
 
 function sendTestCommand() {
     var deviceId = document.getElementById('diag-test-device').value;
+    var method = document.getElementById('diag-test-method').value;
     if (!deviceId) { alert('Select a device first.'); return; }
-    fetch('/api/shelly/test-command', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({device_id: deviceId})
+    if (method === 'Shelly.Reboot' && !confirm('Reboot this device?')) return;
+    fetch('/api/shelly/command', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({device_id: deviceId, method: method})
     }).then(function(r){return r.json();}).then(function(data){
         if (data.ok) {
-            alert('GetStatus command sent to ' + deviceId + '. Check the MQTT log below for a response (may take a few seconds).');
-            setTimeout(loadDiag, 3000);
+            alert(method + ' sent to ' + deviceId + '. Check the MQTT log below for a response (may take a few seconds).');
+            setTimeout(function(){ loadDiag(); loadLog(); }, 3000);
         } else {
             alert('Failed: ' + (data.detail || data.error || 'Unknown error'));
         }
