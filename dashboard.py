@@ -638,7 +638,7 @@ _ROUTE_PERMISSIONS = {
     'shelly_page': 'shelly', 'shelly_devices_api': 'shelly',
     'shelly_toggle': 'shelly', 'shelly_command_log_api': 'shelly',
     'shelly_register': 'shelly', 'shelly_diagnostics': 'shelly',
-    'shelly_test_command': 'shelly',
+    'shelly_test_command': 'shelly', 'shelly_command': 'shelly',
 }
 
 # ── TOTP 2FA helpers ──────────────────────────────────────────────────────────
@@ -12941,6 +12941,15 @@ SHELLY_TEMPLATE = r"""
         .btn-test{background:#8e44ad;color:white;border:none;padding:6px 14px;border-radius:5px;font-size:12px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:5px;}
         .btn-test:hover{background:#7d3c98;}
 
+        /* Device command buttons */
+        .cmd-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;}
+        .cmd-btn{flex:1;min-width:0;display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:6px 8px;border:1px solid #ccc;border-radius:5px;font-size:11px;cursor:pointer;font-weight:600;background:#f8f9fa;color:#555;transition:all .15s;}
+        .cmd-btn:hover{background:#e9ecef;border-color:#999;color:#333;}
+        .cmd-btn:disabled{opacity:0.5;cursor:not-allowed;}
+        .cmd-btn.cmd-danger{border-color:#e74c3c;color:#e74c3c;}
+        .cmd-btn.cmd-danger:hover{background:#e74c3c;color:white;}
+        .cmd-response{margin-top:8px;background:#1a252f;border-radius:6px;padding:10px;font-family:monospace;font-size:11px;color:#a0d0a0;max-height:200px;overflow-y:auto;display:none;white-space:pre-wrap;word-break:break-all;}
+
         /* Refresh button */
         .btn-refresh{background:none;border:1px solid #ccc;color:#666;padding:6px 14px;border-radius:5px;font-size:12px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:5px;}
         .btn-refresh:hover{border-color:#999;color:#333;}
@@ -13096,6 +13105,14 @@ function renderDevices() {
                 '<button class="toggle-btn ' + (relayOn ? 'turn-off' : 'turn-on') + '" onclick="toggleRelay(\'' + d.device_id + '\',' + !relayOn + ')" id="toggle-' + d.device_id + '">' +
                     '<i class="fa-solid fa-power-off"></i> Turn ' + (relayOn ? 'OFF' : 'ON') +
                 '</button>' +
+                '<div class="cmd-row">' +
+                    '<button class="cmd-btn" onclick="sendCmd(\'' + d.device_id + '\',\'Shelly.GetStatus\',this)"><i class="fa-solid fa-circle-info"></i> Status</button>' +
+                    '<button class="cmd-btn" onclick="sendCmd(\'' + d.device_id + '\',\'Shelly.GetDeviceInfo\',this)"><i class="fa-solid fa-microchip"></i> Info</button>' +
+                    '<button class="cmd-btn" onclick="sendCmd(\'' + d.device_id + '\',\'Switch.GetStatus\',this)"><i class="fa-solid fa-toggle-on"></i> Relay</button>' +
+                    '<button class="cmd-btn" onclick="sendCmd(\'' + d.device_id + '\',\'Wifi.GetStatus\',this)"><i class="fa-solid fa-wifi"></i> Wifi</button>' +
+                    '<button class="cmd-btn cmd-danger" onclick="if(confirm(\'Reboot \' + \'' + (d.name || d.device_id) + '\' + \'?\'))sendCmd(\'' + d.device_id + '\',\'Shelly.Reboot\',this)"><i class="fa-solid fa-rotate"></i> Reboot</button>' +
+                '</div>' +
+                '<div class="cmd-response" id="resp-' + d.device_id + '"></div>' +
                 (IS_ADMIN ? '<button class="btn-del-device" style="margin-top:8px;width:100%;" onclick="removeDevice(\'' + d.id + '\',\'' + (d.name || d.device_id) + '\')"><i class="fa-solid fa-trash"></i> Remove Device</button>' : '') +
             '</div>' +
         '</div>';
@@ -13114,6 +13131,27 @@ function toggleRelay(deviceId, turnOn) {
         setTimeout(function(){ loadDevices(); loadLog(); }, 1500);
     }).catch(function(e){ alert('Error: ' + e); if (btn) btn.disabled = false; });
 }
+
+function sendCmd(deviceId, method, btn) {
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+    var respEl = document.getElementById('resp-' + deviceId);
+    fetch('/api/shelly/command', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({device_id: deviceId, method: method})
+    }).then(function(r){return r.json();}).then(function(data){
+        if (btn) { btn.disabled = false; btn.innerHTML = btn.getAttribute('data-orig') || btn.innerHTML; }
+        if (respEl) {
+            respEl.style.display = '';
+            respEl.textContent = method + ' → ' + (data.ok ? 'Sent' : 'Failed: ' + (data.detail || data.error)) +
+                '\n\nResponse will appear in MQTT diagnostics log below.';
+            setTimeout(function(){ if (diagOpen) loadDiag(); loadLog(); }, 3000);
+        }
+    }).catch(function(e){ if (btn) btn.disabled = false; alert('Error: ' + e); });
+}
+
+// Store original button HTML for restore after loading
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.cmd-btn').forEach(function(b){ b.setAttribute('data-orig', b.innerHTML); });
+});
 
 function registerDevice() {
     var deviceId = document.getElementById('new-device-id').value.trim();
@@ -13157,11 +13195,12 @@ function loadLog() {
         b.innerHTML = '';
         rows.forEach(function(r) {
             var tr = document.createElement('tr');
-            var actionClass = r.action === 'on' ? 'log-action-on' : 'log-action-off';
+            var actionClass = r.action === 'on' ? 'log-action-on' : r.action === 'off' ? 'log-action-off' : '';
+            var actionLabel = r.action === 'on' ? '● ON' : r.action === 'off' ? '● OFF' : r.action;
             tr.innerHTML = '<td style="white-space:nowrap;">' + fmt(r.timestamp) + '</td>' +
                 '<td><strong>' + (r.device_name || '—') + '</strong></td>' +
                 '<td style="font-family:monospace;font-size:11px;color:#999;">' + (r.device_id || '') + '</td>' +
-                '<td class="' + actionClass + '">' + (r.action === 'on' ? '● ON' : '● OFF') + '</td>' +
+                '<td class="' + actionClass + '">' + actionLabel + '</td>' +
                 '<td>' + (r.triggered_by || '—') + '</td>' +
                 '<td>' + (r.success ? '<i class="fa-solid fa-check" style="color:#27ae60;"></i>' : '<i class="fa-solid fa-xmark" style="color:#e74c3c;"></i>') + '</td>';
             b.appendChild(tr);
@@ -13455,6 +13494,54 @@ def shelly_test_command():
     # without changing anything
     success, detail = mqtt_send_command(device_id, "Shelly.GetStatus", {})
     return jsonify({"ok": success, "detail": detail, "method": "Shelly.GetStatus"})
+
+
+# Allowed RPC methods (whitelist to prevent arbitrary command execution)
+_SHELLY_ALLOWED_COMMANDS = {
+    "Shelly.GetStatus", "Shelly.GetDeviceInfo", "Shelly.Reboot",
+    "Switch.GetStatus", "Switch.Set",
+    "Wifi.GetStatus", "Shelly.CheckForUpdate", "Shelly.Update",
+}
+
+@app.route("/api/shelly/command", methods=["POST"])
+def shelly_command():
+    _require_dashboard_auth()
+    perm_block = _require_permission('shelly')
+    if perm_block:
+        return perm_block
+    data = request.get_json(silent=True) or {}
+    device_id = data.get("device_id", "").strip()
+    method = data.get("method", "").strip()
+    params = data.get("params", {})
+    if not device_id:
+        return jsonify({"ok": False, "error": "Missing device_id"}), 400
+    if not method:
+        return jsonify({"ok": False, "error": "Missing method"}), 400
+    if method not in _SHELLY_ALLOWED_COMMANDS:
+        return jsonify({"ok": False, "error": f"Method '{method}' not allowed"}), 403
+    # Send the command
+    success, detail = mqtt_send_command(device_id, method, params)
+    # Log to command log
+    try:
+        user_email = session.get("email", "unknown")
+        log_entry = {
+            "device_id": device_id,
+            "action": method,
+            "triggered_by": user_email,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "success": success,
+        }
+        log_headers = {"apikey": SUPABASE_SERVICE_KEY,
+                       "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                       "Content-Type": "application/json",
+                       "Prefer": "return=minimal"}
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/shelly_command_log",
+            headers=log_headers, json=log_entry, timeout=10
+        )
+    except Exception as e:
+        print(f"[shelly] Failed to log command: {e}")
+    return jsonify({"ok": success, "detail": detail, "method": method})
 
 
 if __name__ == "__main__":
