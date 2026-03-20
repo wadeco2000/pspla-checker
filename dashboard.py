@@ -13025,8 +13025,7 @@ SHELLY_TEMPLATE = r"""
 </div>
 <div class="content">
 
-    <!-- Admin: Add Device -->
-    {% if is_admin %}
+    <!-- Register Device -->
     <div class="admin-card">
         <h2><i class="fa-solid fa-plus-circle" style="color:#3498db;"></i> Register Device</h2>
         <div class="admin-row">
@@ -13036,7 +13035,6 @@ SHELLY_TEMPLATE = r"""
             <button class="btn-add" onclick="registerDevice()"><i class="fa-solid fa-plus"></i> Add</button>
         </div>
     </div>
-    {% endif %}
 
     <!-- Devices -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
@@ -13596,12 +13594,16 @@ def shelly_command_log_api():
 @app.route("/api/shelly/register", methods=["POST", "DELETE"])
 def shelly_register():
     _require_dashboard_auth()
-    if not _is_admin():
-        return jsonify({"ok": False, "error": "Admin only"}), 403
+    perm_block = _require_permission('shelly')
+    if perm_block:
+        return perm_block
     headers = {"apikey": SUPABASE_SERVICE_KEY,
                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                "Content-Type": "application/json"}
     if request.method == "DELETE":
+        # Delete is admin-only
+        if not _is_admin():
+            return jsonify({"ok": False, "error": "Admin only"}), 403
         data = request.get_json(silent=True) or {}
         device_db_id = data.get("id", "")
         if not device_db_id:
