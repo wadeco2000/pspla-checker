@@ -163,13 +163,33 @@ def _mqtt_on_message(client, userdata, msg):
         except (json.JSONDecodeError, ValueError):
             payload = raw_payload
         # Log to in-memory debug buffer
+        _now = datetime.now(timezone.utc).isoformat()
+        _payload_for_log = payload if isinstance(payload, (dict, list, bool)) else str(payload)
         _mqtt_message_log.append({
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": _now,
             "topic": topic,
-            "payload": payload if isinstance(payload, (dict, list, bool)) else str(payload),
+            "payload": _payload_for_log,
         })
         if len(_mqtt_message_log) > _MQTT_LOG_MAX:
             _mqtt_message_log.pop(0)
+        # Log to persistent Supabase response log
+        try:
+            if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+                _parts = topic.split("/")
+                _dev_id = _parts[0] if _parts else ""
+                _log_headers = {"apikey": SUPABASE_SERVICE_KEY,
+                                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                                "Content-Type": "application/json",
+                                "Prefer": "return=minimal"}
+                requests.post(
+                    f"{SUPABASE_URL}/rest/v1/shelly_response_log",
+                    headers=_log_headers,
+                    json={"device_id": _dev_id, "topic": topic,
+                          "payload": _payload_for_log, "timestamp": _now},
+                    timeout=10
+                )
+        except Exception as _le:
+            print(f"[mqtt] Failed to log response: {_le}")
         # Extract device ID from topic (e.g. "shellyplus1-30c9224c9dfc/events/rpc")
         parts = topic.split("/")
         device_id = parts[0] if parts else ""
@@ -639,6 +659,7 @@ _ROUTE_PERMISSIONS = {
     'shelly_toggle': 'shelly', 'shelly_command_log_api': 'shelly',
     'shelly_register': 'shelly', 'shelly_diagnostics': 'shelly',
     'shelly_test_command': 'shelly', 'shelly_command': 'shelly',
+    'shelly_response_log_api': 'shelly',
 }
 
 # ── TOTP 2FA helpers ──────────────────────────────────────────────────────────
@@ -13015,6 +13036,22 @@ SHELLY_TEMPLATE = r"""
         <div id="log-empty" style="display:none;color:#999;font-size:13px;padding:8px 0;">No commands logged yet.</div>
     </div>
 
+    <!-- Response Log -->
+    <div class="log-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+            <h2 style="margin:0;"><i class="fa-solid fa-reply" style="color:#27ae60;"></i> Device Responses <span style="font-size:12px;font-weight:400;color:#999;">(last 50)</span></h2>
+            <button class="diag-toggle" id="resp-toggle-btn" onclick="toggleRespLog()"><i class="fa-solid fa-chevron-down"></i> Show</button>
+        </div>
+        <div id="resp-log-body" style="display:none;">
+            <div id="resp-log-loading" style="color:#999;font-size:13px;padding:8px 0;"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</div>
+            <table class="log-table" id="resp-log-table" style="display:none;">
+                <thead><tr><th>Time</th><th>Device</th><th>Topic</th><th>Payload</th></tr></thead>
+                <tbody id="resp-log-tbody"></tbody>
+            </table>
+            <div id="resp-log-empty" style="display:none;color:#999;font-size:13px;padding:8px 0;">No device responses recorded yet.</div>
+        </div>
+    </div>
+
     <!-- Diagnostics -->
     <div class="diag-card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
@@ -13216,6 +13253,42 @@ function loadLog() {
     });
 }
 
+// Response Log
+var respLogOpen = false;
+function toggleRespLog() {
+    respLogOpen = !respLogOpen;
+    document.getElementById('resp-log-body').style.display = respLogOpen ? '' : 'none';
+    var btn = document.getElementById('resp-toggle-btn');
+    btn.innerHTML = respLogOpen ? '<i class="fa-solid fa-chevron-up"></i> Hide' : '<i class="fa-solid fa-chevron-down"></i> Show';
+    btn.classList.toggle('active', respLogOpen);
+    if (respLogOpen) loadRespLog();
+}
+
+function loadRespLog() {
+    fetch('/api/shelly/response-log').then(function(r){return r.json();}).then(function(data){
+        var el = document.getElementById('resp-log-loading');
+        var t = document.getElementById('resp-log-table');
+        var b = document.getElementById('resp-log-tbody');
+        var empty = document.getElementById('resp-log-empty');
+        el.style.display = 'none';
+        var rows = data.responses || [];
+        if (!rows.length) { t.style.display = 'none'; empty.style.display = ''; return; }
+        empty.style.display = 'none';
+        t.style.display = '';
+        b.innerHTML = '';
+        rows.forEach(function(r) {
+            var tr = document.createElement('tr');
+            var payloadStr = typeof r.payload === 'object' ? JSON.stringify(r.payload, null, 2) : String(r.payload || '');
+            if (payloadStr.length > 200) payloadStr = payloadStr.substring(0, 200) + '...';
+            tr.innerHTML = '<td style="white-space:nowrap;">' + fmt(r.timestamp) + '</td>' +
+                '<td style="font-family:monospace;font-size:11px;">' + (r.device_id || '') + '</td>' +
+                '<td style="font-family:monospace;font-size:11px;color:#3498db;">' + (r.topic || '') + '</td>' +
+                '<td style="font-family:monospace;font-size:11px;color:#27ae60;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + payloadStr.replace(/"/g, '&quot;') + '">' + payloadStr.replace(/</g, '&lt;') + '</td>';
+            b.appendChild(tr);
+        });
+    });
+}
+
 // Diagnostics
 var diagOpen = false;
 function toggleDiag() {
@@ -13297,7 +13370,7 @@ function sendTestCommand() {
 loadDevices();
 loadLog();
 // Auto-refresh every 15 seconds
-setInterval(function(){ loadDevices(); loadLog(); if (diagOpen) loadDiag(); }, 15000);
+setInterval(function(){ loadDevices(); loadLog(); if (respLogOpen) loadRespLog(); if (diagOpen) loadDiag(); }, 15000);
 </script>
 </body>
 </html>
@@ -13488,6 +13561,29 @@ def shelly_diagnostics():
         "messages": list(reversed(_mqtt_message_log)),  # newest first
         "message_count": len(_mqtt_message_log),
     })
+
+
+@app.route("/api/shelly/response-log")
+def shelly_response_log_api():
+    _require_dashboard_auth()
+    perm_block = _require_permission('shelly')
+    if perm_block:
+        return perm_block
+    try:
+        device_id = request.args.get("device_id", "")
+        headers = {"apikey": SUPABASE_SERVICE_KEY,
+                   "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                   "Content-Type": "application/json"}
+        params = {"select": "*", "order": "timestamp.desc", "limit": "50"}
+        if device_id:
+            params["device_id"] = f"eq.{device_id}"
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/shelly_response_log",
+            params=params, headers=headers, timeout=10
+        )
+        return jsonify({"ok": True, "responses": r.json() if r.ok else []})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route("/api/shelly/test-command", methods=["POST"])
