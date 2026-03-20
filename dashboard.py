@@ -13043,6 +13043,19 @@ SHELLY_TEMPLATE = r"""
             <button class="diag-toggle" id="resp-toggle-btn" onclick="toggleRespLog()"><i class="fa-solid fa-chevron-down"></i> Show</button>
         </div>
         <div id="resp-log-body" style="display:none;">
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+                <span style="font-size:12px;font-weight:600;color:#888;">Filter:</span>
+                <select id="resp-filter-device" style="font-size:12px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;" onchange="loadRespLog()">
+                    <option value="">All devices</option>
+                </select>
+                <select id="resp-filter-type" style="font-size:12px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;" onchange="filterRespRows()">
+                    <option value="all">All messages</option>
+                    <option value="rpc-response">RPC responses (to our commands)</option>
+                    <option value="status-update">Status updates (unsolicited)</option>
+                    <option value="online">Online/offline events</option>
+                </select>
+                <button class="btn-refresh" onclick="loadRespLog()" style="padding:4px 10px;font-size:11px;"><i class="fa-solid fa-arrows-rotate"></i></button>
+            </div>
             <div id="resp-log-loading" style="color:#999;font-size:13px;padding:8px 0;"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</div>
             <table class="log-table" id="resp-log-table" style="display:none;">
                 <thead><tr><th>Time</th><th>Device</th><th>Topic</th><th>Payload</th></tr></thead>
@@ -13264,29 +13277,86 @@ function toggleRespLog() {
     if (respLogOpen) loadRespLog();
 }
 
+var _respRows = []; // store for client-side filtering
+
+function classifyMsg(r) {
+    // Classify message type based on topic and payload
+    var topic = r.topic || '';
+    var p = r.payload;
+    if (topic.endsWith('/online')) return 'online';
+    if (typeof p === 'object' && p !== null && 'id' in p && 'src' in p) return 'rpc-response';
+    return 'status-update';
+}
+
 function loadRespLog() {
-    fetch('/api/shelly/response-log').then(function(r){return r.json();}).then(function(data){
+    var deviceFilter = document.getElementById('resp-filter-device').value;
+    var url = '/api/shelly/response-log' + (deviceFilter ? '?device_id=' + encodeURIComponent(deviceFilter) : '');
+    fetch(url).then(function(r){return r.json();}).then(function(data){
         var el = document.getElementById('resp-log-loading');
-        var t = document.getElementById('resp-log-table');
-        var b = document.getElementById('resp-log-tbody');
-        var empty = document.getElementById('resp-log-empty');
         el.style.display = 'none';
-        var rows = data.responses || [];
-        if (!rows.length) { t.style.display = 'none'; empty.style.display = ''; return; }
-        empty.style.display = 'none';
-        t.style.display = '';
-        b.innerHTML = '';
-        rows.forEach(function(r) {
-            var tr = document.createElement('tr');
-            var payloadStr = typeof r.payload === 'object' ? JSON.stringify(r.payload, null, 2) : String(r.payload || '');
-            if (payloadStr.length > 200) payloadStr = payloadStr.substring(0, 200) + '...';
-            tr.innerHTML = '<td style="white-space:nowrap;">' + fmt(r.timestamp) + '</td>' +
-                '<td style="font-family:monospace;font-size:11px;">' + (r.device_id || '') + '</td>' +
-                '<td style="font-family:monospace;font-size:11px;color:#3498db;">' + (r.topic || '') + '</td>' +
-                '<td style="font-family:monospace;font-size:11px;color:#27ae60;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + payloadStr.replace(/"/g, '&quot;') + '">' + payloadStr.replace(/</g, '&lt;') + '</td>';
-            b.appendChild(tr);
-        });
+        _respRows = data.responses || [];
+        // Populate device filter dropdown (preserve selection)
+        var sel = document.getElementById('resp-filter-device');
+        var curVal = sel.value;
+        var devices = {};
+        _respRows.forEach(function(r){ if (r.device_id) devices[r.device_id] = true; });
+        // Only rebuild if empty or new devices appeared
+        if (sel.options.length <= 1) {
+            DEVICES.forEach(function(d){ devices[d.device_id] = true; });
+            Object.keys(devices).sort().forEach(function(did){
+                var name = '';
+                DEVICES.forEach(function(d){ if (d.device_id === did) name = d.name; });
+                var opt = document.createElement('option');
+                opt.value = did;
+                opt.textContent = name ? name + ' (' + did + ')' : did;
+                sel.appendChild(opt);
+            });
+            if (curVal) sel.value = curVal;
+        }
+        filterRespRows();
     });
+}
+
+function filterRespRows() {
+    var typeFilter = document.getElementById('resp-filter-type').value;
+    var t = document.getElementById('resp-log-table');
+    var b = document.getElementById('resp-log-tbody');
+    var empty = document.getElementById('resp-log-empty');
+    var filtered = _respRows;
+    if (typeFilter !== 'all') {
+        filtered = _respRows.filter(function(r){ return classifyMsg(r) === typeFilter; });
+    }
+    if (!filtered.length) { t.style.display = 'none'; empty.style.display = ''; return; }
+    empty.style.display = 'none';
+    t.style.display = '';
+    b.innerHTML = '';
+    filtered.forEach(function(r) {
+        var tr = document.createElement('tr');
+        var payloadStr = typeof r.payload === 'object' ? JSON.stringify(r.payload, null, 2) : String(r.payload || '');
+        var shortPayload = payloadStr.length > 200 ? payloadStr.substring(0, 200) + '...' : payloadStr;
+        var msgType = classifyMsg(r);
+        var typeIcon = msgType === 'rpc-response' ? '<span title="RPC response" style="color:#8e44ad;">&#9654;</span> ' :
+                       msgType === 'online' ? '<span title="Online/offline" style="color:#3498db;">&#9679;</span> ' :
+                       '<span title="Status update" style="color:#e67e22;">&#9650;</span> ';
+        tr.innerHTML = '<td style="white-space:nowrap;">' + fmt(r.timestamp) + '</td>' +
+            '<td style="font-family:monospace;font-size:11px;">' + (r.device_id || '') + '</td>' +
+            '<td style="font-family:monospace;font-size:11px;color:#3498db;">' + typeIcon + (r.topic || '') + '</td>' +
+            '<td style="font-family:monospace;font-size:11px;color:#27ae60;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;" title="Click to expand" onclick="expandPayload(this, \'' + btoa(encodeURIComponent(payloadStr)) + '\')">' + shortPayload.replace(/</g, '&lt;') + '</td>';
+        b.appendChild(tr);
+    });
+}
+
+function expandPayload(td, encoded) {
+    var full = decodeURIComponent(atob(encoded));
+    if (td.style.whiteSpace === 'pre-wrap') {
+        td.style.whiteSpace = 'nowrap';
+        td.style.maxWidth = '400px';
+        td.textContent = full.length > 200 ? full.substring(0, 200) + '...' : full;
+    } else {
+        td.style.whiteSpace = 'pre-wrap';
+        td.style.maxWidth = 'none';
+        td.textContent = full;
+    }
 }
 
 // Diagnostics
