@@ -5102,7 +5102,33 @@ _SUB_NAVBAR = """
 
 
 def _sub_navbar_for(active_page):
-    """Return the sub-navbar HTML with the active page highlighted."""
+    """Return the sub-navbar HTML with the active page highlighted and
+    filtered by user permissions. Partner-only users see only My Account."""
+    # Check if user has any PSPLA access
+    _perms = session.get('permissions') or _DEFAULT_PERMISSIONS
+    _has_pspla = _is_admin() or any(_perms.get(g) for g in ('searches', 'database', 'history', 'utilities'))
+    if not _has_pspla:
+        # Partner-only user (shelly/actuate only) — minimal navbar
+        _brand = "PSPLA Checker" if not _perms.get('shelly') else "Tower Control"
+        _brand_href = "/shelly" if _perms.get('shelly') else "/actuate" if _perms.get('actuate') else "/"
+        return f"""<style>
+.sub-nav{{background:#2c3e50;padding:8px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-family:Arial,sans-serif;}}
+.sub-nav a.sn-brand{{display:flex;align-items:center;gap:8px;text-decoration:none;color:white;font-weight:bold;font-size:15px;}}
+.sub-nav a.sn-brand span{{font-size:10px;color:#7fb3d8;display:block;font-weight:normal;}}
+.sub-nav .sn-links{{display:flex;gap:4px;flex-wrap:wrap;margin-left:auto;}}
+.sub-nav .sn-links a{{color:#bdc3c7;text-decoration:none;font-size:12px;padding:4px 10px;border-radius:3px;transition:background .15s;}}
+.sub-nav .sn-links a:hover{{background:rgba(255,255,255,0.1);color:white;}}
+.sub-nav .sn-links a.sn-active{{background:rgba(255,255,255,0.15);color:white;font-weight:600;}}
+</style>
+<nav class="sub-nav">
+  <a class="sn-brand" href="{_brand_href}">
+    <div>{_brand}<span>by Alarm Watch</span></div>
+  </a>
+  <div class="sn-links">
+    <a href="/account/profile"{"" if active_page != "account/profile" else ' class="sn-active"'}>My Account</a>
+  </div>
+</nav>"""
+    # Full PSPLA user — show everything
     return _SUB_NAVBAR.replace(
         f'href="/{active_page}"',
         f'href="/{active_page}" class="sn-active"'
