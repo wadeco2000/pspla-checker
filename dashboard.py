@@ -14626,7 +14626,7 @@ def club_fitness_check_bookings():
             timeout=30
         )
         if not br.ok:
-            return jsonify({"ok": False, "error": f"Bookafy API error: {br.status_code}"}), 502
+            return jsonify({"ok": False, "error": f"Bookafy API error: {br.status_code}", "body": br.text[:500]}), 502
         bk_data = br.json()
         # Parse response: {"response": {"message": "...", "appointment": [...]}}
         raw = bk_data
@@ -14641,6 +14641,15 @@ def club_fitness_check_bookings():
         appointments = [a for a in raw if isinstance(a, dict) and a.get("is_active", True)]
     except Exception as e:
         return jsonify({"ok": False, "error": f"Bookafy error: {e}"}), 502
+    _debug = {
+        "bookafy_status": br.status_code,
+        "bookafy_appointments_found": len(appointments),
+        "bookafy_emails_in_map": 0,
+        "signups_count": len(signups),
+        "bookafy_key_set": bool(BOOKAFY_API_KEY),
+        "bookafy_key_prefix": BOOKAFY_API_KEY[:6] + "..." if BOOKAFY_API_KEY else "EMPTY",
+        "staff_email": BOOKAFY_STAFF_EMAIL,
+    }
 
     # Step 1: Email matching
     appt_by_email = {}
@@ -14658,6 +14667,9 @@ def club_fitness_check_bookings():
         for em in emails:
             if em not in appt_by_email:
                 appt_by_email[em] = a
+    _debug["bookafy_emails_in_map"] = len(appt_by_email)
+    _debug["sample_bookafy_emails"] = list(appt_by_email.keys())[:5]
+    _debug["sample_signup_emails"] = [(s.get("customer_email") or "").lower().strip() for s in signups[:5]]
 
     matched = {}   # signup stripe_session_id → {appointment_id, date, match_type}
     matched_appt_ids = set()
@@ -14794,6 +14806,7 @@ def club_fitness_check_bookings():
         "manual_matches": sum(1 for m in matched.values() if m["match_type"] == "manual"),
         "unmatched_signups": len([s for s in signups if s["stripe_session_id"] not in matched]),
         "unmatched_appointments": final_unmatched_appts,
+        "_debug": _debug,
     })
 
 
@@ -15625,7 +15638,9 @@ function checkBookings() {
             }
         }
         applyFiltersAndRender();
-        msg('Bookings checked: ' + d.email_matches + ' email, ' + d.ai_matches + ' AI, ' + d.manual_matches + ' manual, ' + d.unmatched_signups + ' unmatched.');
+        var dbg = d._debug || {};
+        msg('Bookings: ' + d.email_matches + ' email, ' + d.ai_matches + ' AI, ' + d.manual_matches + ' manual, ' + d.unmatched_signups + ' unmatched. [BK:' + dbg.bookafy_appointments_found + ' appts, ' + dbg.bookafy_emails_in_map + ' emails, key=' + dbg.bookafy_key_prefix + ', staff=' + dbg.staff_email + ']');
+        if (dbg.bookafy_appointments_found === 0) console.log('DEBUG check-bookings:', JSON.stringify(dbg));
     }).catch(function(e){ msg('Error: ' + e); });
 }
 
