@@ -469,6 +469,9 @@ _RATE_LIMITS = {
     'club_fitness_session_detail': (20, 60), # 20 session detail calls per minute
     'club_fitness_save_weight':  (30, 60),  # 30 weight saves per minute
     'club_fitness_add_cash':     (10, 60),  # 10 cash entries per minute
+    'club_fitness_mappings':     (10, 60),  # 10 mapping ops per minute
+    'club_fitness_mappings_batch': (5, 60), # 5 batch applies per minute
+    'club_fitness_unique_values': (10, 60), # 10 unique value queries per minute
 }
 
 @app.before_request
@@ -681,6 +684,9 @@ _ROUTE_PERMISSIONS = {
     'club_fitness_session_detail': 'club_fitness',
     'club_fitness_save_weight': 'club_fitness',
     'club_fitness_add_cash': 'club_fitness',
+    'club_fitness_mappings': 'club_fitness',
+    'club_fitness_mappings_batch': 'club_fitness',
+    'club_fitness_unique_values': 'club_fitness',
 }
 
 # ── TOTP 2FA helpers ──────────────────────────────────────────────────────────
@@ -14375,6 +14381,126 @@ def club_fitness_session_detail():
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
+@app.route("/api/club-fitness/mappings", methods=["GET", "POST"])
+def club_fitness_mappings():
+    """GET: list all mappings. POST: save/update a mapping."""
+    if request.method == "GET":
+        try:
+            r = requests.get(
+                f"{SUPABASE_URL}/rest/v1/challenge_mappings",
+                params={"select": "*", "order": "field.asc,raw_value.asc"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                timeout=10
+            )
+            return jsonify({"ok": r.ok, "mappings": r.json() if r.ok else []})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 502
+    # POST — save/update mapping
+    data = request.json or {}
+    field = (data.get("field") or "").strip()
+    raw_value = (data.get("raw_value") or "").strip()
+    clean_value = (data.get("clean_value") or "").strip()
+    if field not in ("gym", "goal") or not raw_value:
+        return jsonify({"ok": False, "error": "Invalid field or missing raw_value."}), 400
+    payload = {"field": field, "raw_value": raw_value, "clean_value": clean_value}
+    try:
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/challenge_mappings",
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "resolution=merge-duplicates,return=representation"
+            },
+            json=payload, timeout=10
+        )
+        return jsonify({"ok": r.ok, "mapping": r.json()[0] if r.ok and r.json() else None})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/club-fitness/mappings/batch", methods=["POST"])
+def club_fitness_mappings_batch():
+    """Save multiple mappings at once and apply them to stored signups."""
+    data = request.json or {}
+    mappings = data.get("mappings", [])
+    if not mappings:
+        return jsonify({"ok": False, "error": "No mappings provided."}), 400
+    saved = 0
+    applied = 0
+    for m in mappings:
+        field = (m.get("field") or "").strip()
+        raw_value = (m.get("raw_value") or "").strip()
+        clean_value = (m.get("clean_value") or "").strip()
+        if field not in ("gym", "goal") or not raw_value or not clean_value:
+            continue
+        # Save mapping
+        try:
+            requests.post(
+                f"{SUPABASE_URL}/rest/v1/challenge_mappings",
+                headers={
+                    "apikey": SUPABASE_SERVICE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                    "Content-Type": "application/json",
+                    "Prefer": "resolution=merge-duplicates,return=minimal"
+                },
+                json={"field": field, "raw_value": raw_value, "clean_value": clean_value},
+                timeout=10
+            )
+            saved += 1
+        except Exception:
+            continue
+        # Apply to existing signups
+        col = "custom_field_3" if field == "gym" else "custom_field_2"
+        try:
+            r = requests.patch(
+                f"{SUPABASE_URL}/rest/v1/challenge_signups",
+                params={col: f"eq.{raw_value}"},
+                json={col: clean_value},
+                headers={
+                    "apikey": SUPABASE_SERVICE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                    "Content-Type": "application/json",
+                    "Prefer": "return=minimal"
+                },
+                timeout=15
+            )
+            if r.ok:
+                applied += 1
+        except Exception:
+            pass
+    return jsonify({"ok": True, "saved": saved, "applied": applied})
+
+
+@app.route("/api/club-fitness/unique-values")
+def club_fitness_unique_values():
+    """Get all unique gym and goal values with counts."""
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/challenge_signups",
+            params={"select": "custom_field_2,custom_field_3", "limit": "5000"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+            timeout=30
+        )
+        if not r.ok:
+            return jsonify({"ok": False, "error": "Failed to fetch signups."}), 502
+        gyms = {}
+        goals = {}
+        for row in r.json():
+            g = (row.get("custom_field_3") or "").strip()
+            k = (row.get("custom_field_2") or "").strip()
+            if g:
+                gyms[g] = gyms.get(g, 0) + 1
+            if k:
+                goals[k] = goals.get(k, 0) + 1
+        # Sort by count descending
+        gym_list = [{"value": k, "count": v} for k, v in sorted(gyms.items(), key=lambda x: -x[1])]
+        goal_list = [{"value": k, "count": v} for k, v in sorted(goals.items(), key=lambda x: -x[1])]
+        return jsonify({"ok": True, "gyms": gym_list, "goals": goal_list})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 # ── Club Fitness Template ─────────────────────────────────────────────────────
 
 CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
@@ -14386,6 +14512,7 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
     <script>(function(){var _f=window.fetch;window.fetch=function(u,o){o=o||{};var m=(o.method||'GET').toUpperCase();if(m!=='GET'&&m!=='HEAD'){o.headers=o.headers||{};o.headers['X-CSRF-Token']=document.querySelector('meta[name="csrf-token"]').content;}return _f.call(this,u,o);};})();</script>
     <title>Club Fitness Challenges</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
         *{box-sizing:border-box;}
         body{font-family:Arial,sans-serif;margin:0;padding:0;background:#f4f4f4;color:#333;}
@@ -14446,6 +14573,21 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         .stripe-status .ss-item{display:flex;align-items:center;gap:4px;}
         .stripe-status .ss-dot{width:8px;height:8px;border-radius:50%;display:inline-block;}
         .ss-dot.green{background:#27ae60;} .ss-dot.orange{background:#e67e22;} .ss-dot.red{background:#e74c3c;} .ss-dot.grey{background:#ccc;}
+        .btn-clean{background:#9b59b6;color:white;}
+        .mapping-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:13px;}
+        .mapping-row .mr-raw{flex:1;color:#666;} .mapping-row .mr-arrow{color:#aaa;} .mapping-row .mr-clean{flex:1;}
+        .mapping-row .mr-count{font-size:11px;color:#aaa;min-width:35px;text-align:right;}
+        .mapping-row input{width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:3px;font-size:13px;}
+        .mapping-row .mapped{color:#27ae60;font-weight:600;}
+        .mapping-section{margin-bottom:20px;}
+        .mapping-section h4{margin:0 0 8px;font-size:14px;color:#333;}
+        .charts-row{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px;}
+        @media(max-width:768px){.charts-row{grid-template-columns:1fr;}}
+        .chart-card{background:white;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.08);padding:18px;}
+        .chart-card h3{margin:0 0 12px;font-size:14px;color:#333;}
+        .chart-controls{display:flex;gap:10px;align-items:center;margin-bottom:12px;font-size:12px;}
+        .chart-controls label{font-weight:bold;color:#555;}
+        .chart-controls input[type=date]{padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:12px;}
         /* Modal */
         .modal-bg{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;}
         .modal-bg.active{display:flex;}
@@ -14498,6 +14640,7 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         <button class="btn btn-cash" onclick="showCashModal()" title="Add a walk-in cash payment"><i class="fa-solid fa-money-bill-wave"></i> Add Cash Entry</button>
         <button class="btn btn-fetch" id="btn-fetch" onclick="fetchSignups()" title="Fetch latest entries from Stripe"><i class="fa-solid fa-rotate"></i> Refresh Entries</button>
         <button class="btn btn-export" onclick="exportCSV()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
+        <button class="btn btn-clean" onclick="showCleanModal()"><i class="fa-solid fa-broom"></i> Clean Data</button>
         <span class="count-badge" id="count-badge" style="display:none">0</span>
         <span class="status-msg" id="status-msg"></span>
     </div>
@@ -14534,6 +14677,39 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
                 <tbody id="signups-body"></tbody>
             </table>
             </div>
+        </div>
+    </div>
+
+    <!-- Analytics Charts -->
+    <div class="charts-row" id="charts-section" style="display:none">
+        <div class="chart-card">
+            <h3><i class="fa-solid fa-location-dot" style="color:#3498db"></i> Where do challengers come from?</h3>
+            <div class="chart-controls">
+                <label>From:</label> <input type="date" id="chart-from" onchange="updateCharts()">
+                <label>To:</label> <input type="date" id="chart-to" onchange="updateCharts()">
+            </div>
+            <canvas id="gym-chart" height="280"></canvas>
+        </div>
+        <div class="chart-card">
+            <h3><i class="fa-solid fa-weight-scale" style="color:#e67e22"></i> How much do they want to lose?</h3>
+            <div class="chart-controls">
+                <label>From:</label> <input type="date" id="chart-from2" onchange="updateCharts()">
+                <label>To:</label> <input type="date" id="chart-to2" onchange="updateCharts()">
+            </div>
+            <canvas id="goal-chart" height="280"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Clean Data Modal -->
+<div class="modal-bg" id="clean-modal">
+    <div class="modal" style="width:700px;">
+        <h3><i class="fa-solid fa-broom" style="color:#9b59b6"></i> Clean Data — Map Values</h3>
+        <p style="font-size:12px;color:#888;margin:0 0 12px;">Map raw entries to clean values. Saved mappings apply automatically to future imports.</p>
+        <div id="clean-content"><div class="empty-state"><span class="spinner"></span> Loading unique values...</div></div>
+        <div class="modal-btns">
+            <button class="btn btn-cancel" onclick="closeModal('clean-modal')">Cancel</button>
+            <button class="btn btn-clean" onclick="applyMappings()"><i class="fa-solid fa-check"></i> Apply & Save</button>
         </div>
     </div>
 </div>
@@ -14762,6 +14938,7 @@ function applyFiltersAndRender() {
     } else {
         fc.textContent = '';
     }
+    updateCharts();
 }
 
 function onFilterChange() {
@@ -15078,6 +15255,172 @@ function deleteLink() {
             loadLinks();
             msg('Link deleted.');
         });
+}
+
+/* ── Clean Data ── */
+var _knownGyms = ['Club Fitness','City Fitness','City Gym','Jetts','Iron Alley','Wanganui Bootcamp','Rivercity Boxing','F45','The Zone','Her Fitness','Home Gym','No Gym'];
+var _storedMappings = [];
+
+function showCleanModal() {
+    document.getElementById('clean-content').innerHTML = '<div class="empty-state"><span class="spinner"></span> Loading...</div>';
+    document.getElementById('clean-modal').classList.add('active');
+    // Load existing mappings and unique values in parallel
+    Promise.all([
+        fetch('/api/club-fitness/mappings').then(r=>r.json()),
+        fetch('/api/club-fitness/unique-values').then(r=>r.json())
+    ]).then(function(results){
+        var mapData = results[0], valData = results[1];
+        _storedMappings = mapData.mappings || [];
+        var gymMap = {}, goalMap = {};
+        _storedMappings.forEach(function(m){ if(m.field==='gym') gymMap[m.raw_value]=m.clean_value; if(m.field==='goal') goalMap[m.raw_value]=m.clean_value; });
+        var html = '<div class="mapping-section"><h4><i class="fa-solid fa-location-dot" style="color:#3498db"></i> Gym Names</h4>';
+        (valData.gyms||[]).forEach(function(g,i){
+            var existing = gymMap[g.value] || '';
+            var suggested = existing || suggestGym(g.value);
+            var isMapped = !!existing;
+            html += '<div class="mapping-row"><span class="mr-count">' + g.count + 'x</span><span class="mr-raw">' + esc(g.value) + '</span><span class="mr-arrow">→</span>';
+            html += '<span class="mr-clean"><input type="text" id="gym-map-' + i + '" data-raw="' + esc(g.value).replace(/"/g,'&quot;') + '" value="' + esc(suggested).replace(/"/g,'&quot;') + '" list="gym-suggestions"' + (isMapped ? ' class="mapped"' : '') + '></span></div>';
+        });
+        html += '<datalist id="gym-suggestions">';
+        _knownGyms.forEach(function(g){ html += '<option value="' + esc(g) + '">'; });
+        html += '</datalist></div>';
+        html += '<div class="mapping-section"><h4><i class="fa-solid fa-weight-scale" style="color:#e67e22"></i> Weight Loss Goals</h4>';
+        (valData.goals||[]).forEach(function(g,i){
+            var existing = goalMap[g.value] || '';
+            var suggested = existing || suggestGoal(g.value);
+            var isMapped = !!existing;
+            html += '<div class="mapping-row"><span class="mr-count">' + g.count + 'x</span><span class="mr-raw">' + esc(g.value) + '</span><span class="mr-arrow">→</span>';
+            html += '<span class="mr-clean"><input type="text" id="goal-map-' + i + '" data-raw="' + esc(g.value).replace(/"/g,'&quot;') + '" value="' + esc(suggested).replace(/"/g,'&quot;') + '"' + (isMapped ? ' class="mapped"' : '') + '></span></div>';
+        });
+        html += '</div>';
+        document.getElementById('clean-content').innerHTML = html;
+    }).catch(function(e){ document.getElementById('clean-content').innerHTML = '<div class="empty-state" style="color:#e74c3c">Error loading data.</div>'; });
+}
+
+function suggestGym(raw) {
+    var r = raw.toLowerCase().replace(/[^a-z0-9 ]/g,'').trim();
+    if (/^(no|nope|n\/a|na|none|not |n0|n\. a)/i.test(raw)) return 'No Gym';
+    if (/^(yes|yours)/i.test(raw) && !/city|jett|iron|zone|her |boot/i.test(raw)) {
+        if (/club/i.test(raw)) return 'Club Fitness';
+        return '';
+    }
+    for (var i = 0; i < _knownGyms.length; i++) {
+        var kg = _knownGyms[i].toLowerCase().replace(/[^a-z0-9 ]/g,'');
+        if (r.indexOf(kg) >= 0 || r.replace(/ /g,'').indexOf(kg.replace(/ /g,'')) >= 0) return _knownGyms[i];
+    }
+    if (/club ?fit/i.test(raw)) return 'Club Fitness';
+    if (/city ?fit/i.test(raw)) return 'City Fitness';
+    if (/city ?gym/i.test(raw)) return 'City Gym';
+    if (/jett?s/i.test(raw)) return 'Jetts';
+    if (/iron ?alley/i.test(raw)) return 'Iron Alley';
+    if (/bootcamp/i.test(raw)) return 'Wanganui Bootcamp';
+    if (/river ?city ?box/i.test(raw)) return 'Rivercity Boxing';
+    if (/home ?gym/i.test(raw)) return 'Home Gym';
+    if (/her ?fitness/i.test(raw)) return 'Her Fitness';
+    if (/the ?zone/i.test(raw)) return 'The Zone';
+    if (/f45/i.test(raw)) return 'F45';
+    return '';
+}
+
+function suggestGoal(raw) {
+    var r = raw.toLowerCase().replace(/\s+/g,'');
+    if (/^510kg?$/.test(r)) return '5-10kg';
+    if (/^1015kg?$/.test(r)) return '10-15kg';
+    if (/^under5kg?$/.test(r)) return 'Under 5kg';
+    if (/^15kg?$/.test(r)) return '15kg+';
+    if (/^(\d+)kg?s?$/.test(r)) return r.match(/^(\d+)/)[1] + 'kg';
+    if (/^(\d+)\s*-\s*(\d+)/.test(raw)) return raw.match(/(\d+)\s*-\s*(\d+)/)[1] + '-' + raw.match(/(\d+)\s*-\s*(\d+)/)[2] + 'kg';
+    if (/^(\d+)\s*to\s*(\d+)/i.test(raw)) return raw.match(/(\d+)\s*to\s*(\d+)/i)[1] + '-' + raw.match(/(\d+)\s*to\s*(\d+)/i)[2] + 'kg';
+    if (/^(\d+)\s*kgs?$/.test(r)) return r.match(/(\d+)/)[1] + 'kg';
+    if (/^(\d+)$/.test(r)) return r + 'kg';
+    return '';
+}
+
+function applyMappings() {
+    var batch = [];
+    // Collect gym mappings
+    document.querySelectorAll('[id^="gym-map-"]').forEach(function(el){
+        var raw = el.getAttribute('data-raw');
+        var clean = el.value.trim();
+        if (clean && clean !== raw) batch.push({field:'gym', raw_value:raw, clean_value:clean});
+    });
+    // Collect goal mappings
+    document.querySelectorAll('[id^="goal-map-"]').forEach(function(el){
+        var raw = el.getAttribute('data-raw');
+        var clean = el.value.trim();
+        if (clean && clean !== raw) batch.push({field:'goal', raw_value:raw, clean_value:clean});
+    });
+    if (!batch.length) { alert('No mappings to apply.'); return; }
+    msg('Applying ' + batch.length + ' mappings...');
+    fetch('/api/club-fitness/mappings/batch', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({mappings: batch})
+    }).then(r=>r.json()).then(d=>{
+        if (!d.ok) { alert('Error: ' + (d.error||'Unknown')); return; }
+        closeModal('clean-modal');
+        msg('Applied ' + d.saved + ' mappings, updated ' + d.applied + ' entries.');
+        // Reload data
+        var pl = getSelectedPL();
+        if (pl) loadStored(pl);
+    });
+}
+
+/* ── Charts ── */
+var _gymChart = null, _goalChart = null;
+var _chartColors = ['#3498db','#e67e22','#27ae60','#e74c3c','#9b59b6','#1abc9c','#f39c12','#2c3e50','#d35400','#8e44ad','#16a085','#c0392b','#2980b9','#7f8c8d'];
+
+function updateCharts() {
+    if (!_allRows.length) { document.getElementById('charts-section').style.display = 'none'; return; }
+    document.getElementById('charts-section').style.display = '';
+    var from1 = document.getElementById('chart-from').value;
+    var to1 = document.getElementById('chart-to').value;
+    var from2 = document.getElementById('chart-from2').value;
+    var to2 = document.getElementById('chart-to2').value;
+    // Filter rows by date for each chart
+    var gymRows = _allRows.filter(function(r){
+        if (from1 && r.created_at < from1) return false;
+        if (to1 && r.created_at > to1 + 'T23:59:59') return false;
+        return true;
+    });
+    var goalRows = _allRows.filter(function(r){
+        if (from2 && r.created_at < from2) return false;
+        if (to2 && r.created_at > to2 + 'T23:59:59') return false;
+        return true;
+    });
+    // Count gyms
+    var gymCounts = {};
+    gymRows.forEach(function(r){
+        var g = (r.custom_field_3||'').trim();
+        if (g) gymCounts[g] = (gymCounts[g]||0) + 1;
+    });
+    // Count goals
+    var goalCounts = {};
+    goalRows.forEach(function(r){
+        var g = (r.custom_field_2||'').trim();
+        if (g) goalCounts[g] = (goalCounts[g]||0) + 1;
+    });
+    renderPie('gym-chart', gymCounts, '_gymChart');
+    renderPie('goal-chart', goalCounts, '_goalChart');
+}
+
+function renderPie(canvasId, counts, chartVar) {
+    var labels = Object.keys(counts).sort(function(a,b){ return counts[b]-counts[a]; });
+    var data = labels.map(function(l){ return counts[l]; });
+    var ctx = document.getElementById(canvasId).getContext('2d');
+    if (window[chartVar]) window[chartVar].destroy();
+    window[chartVar] = new Chart(ctx, {
+        type: 'pie',
+        data: {
+            labels: labels,
+            datasets: [{data: data, backgroundColor: _chartColors.slice(0, labels.length)}]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: {position: 'right', labels: {font: {size: 11}, boxWidth: 12}},
+                tooltip: {callbacks: {label: function(c){ return c.label + ': ' + c.raw + ' (' + Math.round(c.raw/data.reduce(function(a,b){return a+b;},0)*100) + '%)'; }}}
+            }
+        }
+    });
 }
 
 // Init
