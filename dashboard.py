@@ -7049,7 +7049,7 @@ Here are the commits (oldest first at bottom):
 {commit_text}"""
 
         response = client.messages.create(
-            model="claude-haiku-4-20250414",
+            model="claude-haiku-4-5-20251001",
             max_tokens=4096,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -14747,7 +14747,7 @@ def club_fitness_ai_suggest():
     try:
         client = anthropic.Anthropic(api_key=api_key)
         resp = client.messages.create(
-            model="claude-haiku-4-20250414",
+            model="claude-haiku-4-5-20251001",
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -14907,7 +14907,7 @@ def club_fitness_check_bookings():
                 try:
                     client = anthropic.Anthropic(api_key=api_key)
                     resp = client.messages.create(
-                        model="claude-haiku-4-20250414",
+                        model="claude-haiku-4-5-20251001",
                         max_tokens=2000,
                         messages=[{"role": "user", "content": prompt}]
                     )
@@ -15167,7 +15167,7 @@ def club_fitness_preview_variations():
         client = anthropic.Anthropic(api_key=api_key)
         _sample_template = template.replace("{first_name}", "Sarah").replace("{last_challenge}", "January")
         resp = client.messages.create(
-            model="claude-haiku-4-20250414",
+            model="claude-haiku-4-5-20251001",
             max_tokens=3000,
             messages=[{"role": "user", "content":
                 f"Generate 5 slightly different versions of this email.\n"
@@ -15209,7 +15209,7 @@ def club_fitness_campaign_send_test():
         try:
             client = anthropic.Anthropic(api_key=api_key)
             resp = client.messages.create(
-                model="claude-haiku-4-20250414",
+                model="claude-haiku-4-5-20251001",
                 max_tokens=1000,
                 messages=[{"role": "user", "content":
                     f"Rewrite this email template with slight natural variations.\n"
@@ -15275,7 +15275,7 @@ def club_fitness_campaign_send():
             _batch = recipients[_bi:_bi + _batch_size]
             try:
                 resp = client.messages.create(
-                    model="claude-haiku-4-20250414",
+                    model="claude-haiku-4-5-20251001",
                     max_tokens=4000,
                     messages=[{"role": "user", "content":
                         f"I need {len(_batch)} slightly different versions of this email template.\n"
