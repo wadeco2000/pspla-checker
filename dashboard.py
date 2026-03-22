@@ -6479,7 +6479,7 @@ SEARCH_HISTORY_TEMPLATE = """<!DOCTYPE html>
 </div>
 <script>
 var TYPE_LABELS   = {full:'Full','google-weekly':'Weekly',facebook:'Facebook','google-partial':'Partial',directories:'Directories','bulk-recheck':'Bulk Recheck','facebook-fix':'FB Fix'};
-var STATUS_COLORS = {completed:'#27ae60',stopped:'#e67e22',error:'#e74c3c',running:'#e67e22',crashed:'#c0392b'};
+var STATUS_COLORS = {completed:'#27ae60',stopped:'#e67e22',error:'#e74c3c',running:'#e67e22',crashed:'#c0392b',interrupted:'#3498db'};
 var _allRows = [];
 
 function fmt(iso) {

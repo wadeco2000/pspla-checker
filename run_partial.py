@@ -17,7 +17,8 @@ from searcher import (
     find_email_via_google, find_facebook_url, find_linkedin_url,
     get_root_domain, get_domain_record,
     company_exists, process_and_save_company, check_schema,
-    write_status, clear_status, append_history, record_search_start, check_pause, check_and_launch_queue,
+    write_status, clear_status, append_history, record_search_start, check_pause,
+    check_and_launch_queue, install_graceful_shutdown,
     SKIP_DOMAINS, SERPAPI_EXHAUSTED, run_facebook_search,
     is_directory_listing_url,
     reset_session_log, get_session_log, send_search_email,
@@ -71,6 +72,7 @@ def run_partial(triggered_by="manual", fresh=False, triggered_by_user=None):
     _hist_config = {"regions": regions, "terms": google_terms,
                      "include_facebook": include_facebook, "include_nationwide": include_nationwide}
     record_search_start("google-partial", started_iso, triggered_by, config=_hist_config, triggered_by_user=triggered_by_user)
+    install_graceful_shutdown("google-partial", started_iso, triggered_by, triggered_by_user)
     total_found = 0
     total_new = 0
     found_urls = set()

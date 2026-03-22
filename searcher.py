@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import time
+import signal
 import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -4325,6 +4326,32 @@ def clear_status():
     })
 
 
+def install_graceful_shutdown(run_type, started_iso, triggered_by="manual", triggered_by_user=None):
+    """Install a SIGTERM handler so deploy restarts write a proper status instead of 'crashed'."""
+    def _handle_sigterm(signum, frame):
+        print(f"\n  [SIGTERM] Process interrupted (likely deploy restart)")
+        try:
+            append_history(run_type, started_iso, 0, 0,
+                           "interrupted", triggered_by,
+                           notes="Interrupted by container restart (deploy or Azure recycle).",
+                           triggered_by_user=triggered_by_user)
+        except Exception:
+            pass
+        try:
+            clear_status()
+            for flag in [RUNNING_FLAG, PAUSE_FLAG]:
+                if os.path.exists(flag):
+                    os.remove(flag)
+            _upsert_search_state({"is_running": False, "paused": False, "stop_requested": False})
+        except Exception:
+            pass
+        sys.exit(0)
+    # SIGTERM on Linux (Azure), SIGBREAK on Windows
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, _handle_sigterm)
+
+
 def check_and_launch_queue():
     """Check if there are queued searches and launch the next one."""
     if not os.path.exists(QUEUE_FILE):
@@ -6059,6 +6086,7 @@ def run_search(triggered_by="manual", triggered_by_user=None):
     _full_config = {"regions": list(NZ_REGIONS), "terms": list(SEARCH_TERMS),
                     "includes": ["facebook", "nzsa", "linkedin"]}
     record_search_start("full", started_iso, triggered_by, config=_full_config, triggered_by_user=triggered_by_user)
+    install_graceful_shutdown("full", started_iso, triggered_by, triggered_by_user)
     reset_session_log()
     reset_token_usage()
     reset_serp_query_count()

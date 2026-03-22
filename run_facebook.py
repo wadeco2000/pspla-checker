@@ -13,7 +13,8 @@ from datetime import datetime, timezone
 import traceback as _tb
 
 from searcher import (
-    run_facebook_search, check_schema, clear_status, check_and_launch_queue,
+    run_facebook_search, check_schema, clear_status,
+    check_and_launch_queue, install_graceful_shutdown,
     append_history, record_search_start, RUNNING_FLAG, PAUSE_FLAG,
     reset_session_log, reset_token_usage, get_session_log, send_search_email,
     clear_fb_progress, is_schedule_enabled,
@@ -59,6 +60,7 @@ if __name__ == "__main__":
     reset_serp_query_count()
     open(RUNNING_FLAG, "w").close()
     record_search_start("facebook", started_iso, triggered_by, config=_config, triggered_by_user=_tbu)
+    install_graceful_shutdown("facebook", started_iso, triggered_by, _tbu)
     try:
         fb_found, fb_new = run_facebook_search(set(), fresh=fresh, time_filter=fb_time_filter)
         append_history("facebook", started_iso, fb_found, fb_new, "completed", triggered_by, config=_config, triggered_by_user=_tbu)

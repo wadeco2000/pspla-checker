@@ -17,7 +17,8 @@ from searcher import (
     find_email_via_google, find_facebook_url, find_linkedin_url,
     get_root_domain, get_domain_record,
     company_exists, process_and_save_company, check_schema,
-    write_status, clear_status, append_history, record_search_start, check_pause, check_and_launch_queue,
+    write_status, clear_status, append_history, record_search_start, check_pause,
+    check_and_launch_queue, install_graceful_shutdown,
     RUNNING_FLAG, PAUSE_FLAG, SKIP_DOMAINS, NZ_REGIONS, SERPAPI_EXHAUSTED,
     is_directory_listing_url,
     reset_session_log, reset_token_usage, get_session_log, send_search_email,
@@ -57,6 +58,7 @@ def run_weekly(triggered_by="manual", triggered_by_user=None):
     reset_token_usage()
     reset_serp_query_count()
     record_search_start("google-weekly", started_iso, triggered_by, config=_config, triggered_by_user=triggered_by_user)
+    install_graceful_shutdown("google-weekly", started_iso, triggered_by, triggered_by_user)
     total_found = 0
     total_new = 0
     found_urls = set()

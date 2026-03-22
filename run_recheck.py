@@ -21,7 +21,8 @@ from searcher import (
     check_pspla, check_pspla_individual, check_companies_office, check_nzsa,
     find_facebook_url, scrape_facebook_page, find_linkedin_url, scrape_linkedin_page,
     get_google_business_profile, detect_services,
-    write_audit, write_status, clear_status, append_history, record_search_start, check_pause, check_and_launch_queue,
+    write_audit, write_status, clear_status, append_history, record_search_start, check_pause,
+    check_and_launch_queue, install_graceful_shutdown,
     reset_session_log, get_session_log, send_search_email, _push_search_status,
     patch_company, enrich_existing_record,
     reset_token_usage, reset_serp_query_count,
@@ -521,6 +522,7 @@ def run_recheck(triggered_by="manual", triggered_by_user=None):
     open(RUNNING_FLAG, "w").close()
     _hist_config = {"checks": checks, "check_labels": check_label, "scope": scope_label}
     record_search_start("bulk-recheck", started_iso, triggered_by, config=_hist_config, triggered_by_user=triggered_by_user)
+    install_graceful_shutdown("bulk-recheck", started_iso, triggered_by, triggered_by_user)
 
     total_processed = 0
     total_updated = 0

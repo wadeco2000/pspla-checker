@@ -17,7 +17,8 @@ import traceback as _tb
 
 from searcher import (
     run_nzsa_import, run_linkedin_import, check_schema,
-    clear_status, append_history, record_search_start, check_and_launch_queue,
+    clear_status, append_history, record_search_start,
+    check_and_launch_queue, install_graceful_shutdown,
     reset_session_log, get_session_log, send_search_email,
     clear_dir_progress, reset_token_usage, is_schedule_enabled,
     reset_serp_query_count,
@@ -73,6 +74,7 @@ if __name__ == "__main__":
     reset_serp_query_count()
     open(RUNNING_FLAG, "w").close()
     record_search_start("directories", started_iso, triggered_by, config=_config, triggered_by_user=_tbu)
+    install_graceful_shutdown("directories", started_iso, triggered_by, _tbu)
 
     found_urls = set()
     total_found = 0

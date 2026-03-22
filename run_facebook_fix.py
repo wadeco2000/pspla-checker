@@ -23,7 +23,7 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 from searcher import (
     check_schema, clear_status, append_history, record_search_start,
-    check_pause, check_and_launch_queue, write_status,
+    check_pause, check_and_launch_queue, install_graceful_shutdown, write_status,
     scrape_facebook_page, scrape_website, extract_company_info,
     get_google_business_profile, check_pspla, check_companies_office,
     check_nzsa, detect_services, gather_service_text,
@@ -343,6 +343,7 @@ if __name__ == "__main__":
 
     started_iso = datetime.now(timezone.utc).isoformat()
     record_search_start("facebook-fix", started_iso, triggered_by, triggered_by_user=_tbu)
+    install_graceful_shutdown("facebook-fix", started_iso, triggered_by, _tbu)
 
     total_processed = 0
     total_enriched = 0
