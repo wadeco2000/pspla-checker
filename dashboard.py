@@ -467,6 +467,7 @@ _RATE_LIMITS = {
     'club_fitness_stripe_links': (5, 60),   # 5 Stripe link list calls per minute
     'club_fitness_session_detail': (20, 60), # 20 session detail calls per minute
     'club_fitness_save_weight':  (30, 60),  # 30 weight saves per minute
+    'club_fitness_add_cash':     (10, 60),  # 10 cash entries per minute
 }
 
 @app.before_request
@@ -677,6 +678,7 @@ _ROUTE_PERMISSIONS = {
     'club_fitness_stripe_links': 'club_fitness',
     'club_fitness_session_detail': 'club_fitness',
     'club_fitness_save_weight': 'club_fitness',
+    'club_fitness_add_cash': 'club_fitness',
 }
 
 # ── TOTP 2FA helpers ──────────────────────────────────────────────────────────
@@ -13898,6 +13900,50 @@ def club_fitness_signups():
     return jsonify({"ok": True, "signups": stripe_rows, "count": len(stripe_rows), "payment_link": pl})
 
 
+@app.route("/api/club-fitness/add-cash", methods=["POST"])
+def club_fitness_add_cash():
+    """Add a manual cash payment entry to challenge_signups."""
+    data = request.json or {}
+    pl = _validate_payment_link(data.get("payment_link", "").strip())
+    if not pl:
+        return jsonify({"ok": False, "error": "No valid payment_link."}), 400
+    name = (data.get("name") or "").strip()
+    email = (data.get("email") or "").strip()
+    phone = (data.get("phone") or "").strip()
+    if not name or not email or not phone:
+        return jsonify({"ok": False, "error": "Name, email, and phone are required."}), 400
+    import uuid
+    from datetime import datetime, timezone
+    cash_id = f"cash_{uuid.uuid4().hex[:16]}"
+    now_iso = datetime.now(timezone.utc).isoformat()
+    entry = {
+        "stripe_session_id": cash_id,
+        "payment_link": pl,
+        "created_at": now_iso,
+        "card_name": f"[CASH] {name}",
+        "customer_email": email,
+        "customer_phone": phone,
+        "custom_field_1": data.get("custom_field_1", ""),
+        "custom_field_2": data.get("custom_field_2", ""),
+        "custom_field_3": data.get("custom_field_3", ""),
+        "synced_at": now_iso,
+    }
+    try:
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/challenge_signups",
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal"
+            },
+            json=entry, timeout=15
+        )
+        return jsonify({"ok": r.ok})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 @app.route("/api/club-fitness/save-weight", methods=["POST"])
 def club_fitness_save_weight():
     """Save gym_scales_weight or final_weight for a signup entry."""
@@ -14296,6 +14342,9 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         .filter-check{display:flex;align-items:center;gap:5px;font-size:12px;color:#555;cursor:pointer;white-space:nowrap;}
         .filter-check input{margin:0;}
         .wt-input{width:80px;padding:4px 6px;border:1px solid #ddd;border-radius:3px;font-size:12px;text-align:center;transition:border-color .3s;}
+        .btn-cash{background:#2ecc71;color:white;}
+        .cash-badge{display:inline-block;background:#2ecc71;color:white;font-size:10px;font-weight:bold;padding:2px 6px;border-radius:3px;margin-right:4px;}
+        tr.cash-row td{background:#f0faf0 !important;}
         /* Modal */
         .modal-bg{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;}
         .modal-bg.active{display:flex;}
@@ -14346,6 +14395,7 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         <button class="btn btn-del" id="btn-del-link" onclick="deleteLink()" style="display:none">Delete</button>
         <div style="flex:1"></div>
         <button class="btn btn-fetch" id="btn-fetch" onclick="fetchSignups()"><i class="fa-solid fa-rotate"></i> Sync from Stripe</button>
+        <button class="btn btn-cash" onclick="showCashModal()"><i class="fa-solid fa-money-bill-wave"></i> Add Cash Entry</button>
         <button class="btn btn-export" onclick="exportCSV()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
         <span class="count-badge" id="count-badge" style="display:none">0</span>
         <span class="status-msg" id="status-msg"></span>
@@ -14423,6 +14473,29 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         <div class="modal-btns">
             <button class="btn btn-cancel" onclick="closeModal('edit-modal')">Cancel</button>
             <button class="btn btn-fetch" onclick="updateLink()">Save Changes</button>
+        </div>
+    </div>
+</div>
+
+<!-- Cash Entry Modal -->
+<div class="modal-bg" id="cash-modal">
+    <div class="modal">
+        <h3><i class="fa-solid fa-money-bill-wave" style="color:#2ecc71"></i> Add Cash Entry</h3>
+        <label>Name <span style="color:#e74c3c">*</span></label>
+        <input type="text" id="cash-name" placeholder="Full name">
+        <label>Email <span style="color:#e74c3c">*</span></label>
+        <input type="text" id="cash-email" placeholder="email@example.com">
+        <label>Phone <span style="color:#e74c3c">*</span></label>
+        <input type="text" id="cash-phone" placeholder="021 123 4567">
+        <label id="cash-cf1-label" style="display:none">Custom Field 1</label>
+        <input type="text" id="cash-cf1" style="display:none">
+        <label id="cash-cf2-label" style="display:none">Custom Field 2</label>
+        <input type="text" id="cash-cf2" style="display:none">
+        <label id="cash-cf3-label" style="display:none">Custom Field 3</label>
+        <input type="text" id="cash-cf3" style="display:none">
+        <div class="modal-btns">
+            <button class="btn btn-cancel" onclick="closeModal('cash-modal')">Cancel</button>
+            <button class="btn btn-cash" onclick="saveCashEntry()"><i class="fa-solid fa-plus"></i> Add Entry</button>
         </div>
     </div>
 </div>
@@ -14601,13 +14674,15 @@ function renderTable(rows) {
     badge.textContent = rows.length;
     rows.forEach(function(r, i){
         var tr = document.createElement('tr');
-        tr.className = 'data-row';
-        tr.setAttribute('data-sid', r.stripe_session_id || '');
-        var dt = r.created_at ? new Date(r.created_at).toLocaleString('en-NZ', {dateStyle:'medium',timeStyle:'short'}) : '';
         var sid = r.stripe_session_id || '';
+        var isCash = sid.indexOf('cash_') === 0;
+        tr.className = 'data-row' + (isCash ? ' cash-row' : '');
+        tr.setAttribute('data-sid', sid);
+        var dt = r.created_at ? new Date(r.created_at).toLocaleString('en-NZ', {dateStyle:'medium',timeStyle:'short'}) : '';
+        var nameDisplay = isCash ? '<span class="cash-badge">CASH</span>' + esc((r.card_name||'').replace('[CASH] ','')) : esc(r.card_name||'');
         tr.innerHTML = '<td>' + (i+1) + '</td>' +
             '<td>' + esc(dt) + '</td>' +
-            '<td>' + esc(r.card_name||'') + '</td>' +
+            '<td>' + nameDisplay + '</td>' +
             '<td>' + esc(r.customer_email||'') + '</td>' +
             '<td>' + esc(r.customer_phone||'') + '</td>' +
             '<td>' + esc(r.custom_field_1||'') + '</td>' +
@@ -14677,6 +14752,49 @@ function saveWeight(el) {
             if (row) row[field] = value;
         }
     }).catch(function(){ el.style.borderColor = '#e74c3c'; });
+}
+
+function showCashModal() {
+    var pl = getSelectedPL();
+    if (!pl) { alert('Select a payment link first.'); return; }
+    document.getElementById('cash-name').value = '';
+    document.getElementById('cash-email').value = '';
+    document.getElementById('cash-phone').value = '';
+    document.getElementById('cash-cf1').value = '';
+    document.getElementById('cash-cf2').value = '';
+    document.getElementById('cash-cf3').value = '';
+    // Show custom field inputs if we know the labels
+    var cf1Label = _currentLink && _currentLink.col_1_name ? _currentLink.col_1_name : (_allRows.length && _allRows[0].custom_field_1_label ? _allRows[0].custom_field_1_label : '');
+    var cf2Label = _currentLink && _currentLink.col_2_name ? _currentLink.col_2_name : (_allRows.length && _allRows[0].custom_field_2_label ? _allRows[0].custom_field_2_label : '');
+    var cf3Label = _currentLink && _currentLink.col_3_name ? _currentLink.col_3_name : (_allRows.length && _allRows[0].custom_field_3_label ? _allRows[0].custom_field_3_label : '');
+    if (cf1Label) { document.getElementById('cash-cf1-label').textContent = cf1Label; document.getElementById('cash-cf1-label').style.display = ''; document.getElementById('cash-cf1').style.display = ''; }
+    else { document.getElementById('cash-cf1-label').style.display = 'none'; document.getElementById('cash-cf1').style.display = 'none'; }
+    if (cf2Label) { document.getElementById('cash-cf2-label').textContent = cf2Label; document.getElementById('cash-cf2-label').style.display = ''; document.getElementById('cash-cf2').style.display = ''; }
+    else { document.getElementById('cash-cf2-label').style.display = 'none'; document.getElementById('cash-cf2').style.display = 'none'; }
+    if (cf3Label) { document.getElementById('cash-cf3-label').textContent = cf3Label; document.getElementById('cash-cf3-label').style.display = ''; document.getElementById('cash-cf3').style.display = ''; }
+    else { document.getElementById('cash-cf3-label').style.display = 'none'; document.getElementById('cash-cf3').style.display = 'none'; }
+    document.getElementById('cash-modal').classList.add('active');
+}
+
+function saveCashEntry() {
+    var name = document.getElementById('cash-name').value.trim();
+    var email = document.getElementById('cash-email').value.trim();
+    var phone = document.getElementById('cash-phone').value.trim();
+    if (!name || !email || !phone) { alert('Name, email, and phone are required.'); return; }
+    var pl = getSelectedPL();
+    fetch('/api/club-fitness/add-cash', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+            payment_link: pl, name: name, email: email, phone: phone,
+            custom_field_1: document.getElementById('cash-cf1').value.trim(),
+            custom_field_2: document.getElementById('cash-cf2').value.trim(),
+            custom_field_3: document.getElementById('cash-cf3').value.trim()
+        })
+    }).then(r=>r.json()).then(d=>{
+        if (!d.ok) { alert('Error: ' + (d.error||'Unknown')); return; }
+        closeModal('cash-modal');
+        msg('Cash entry added.');
+        loadStored(pl);
+    });
 }
 
 function exportCSV() {
