@@ -14628,21 +14628,17 @@ def club_fitness_check_bookings():
         if not br.ok:
             return jsonify({"ok": False, "error": f"Bookafy API error: {br.status_code}"}), 502
         bk_data = br.json()
-        # Handle response format — could be list or nested
-        if isinstance(bk_data, dict) and "response" in bk_data:
-            appointments = bk_data["response"] if isinstance(bk_data["response"], list) else [bk_data["response"].get("appointment", bk_data["response"])]
-        elif isinstance(bk_data, list):
-            appointments = bk_data
-        else:
-            appointments = []
-        # Flatten if wrapped
-        flat_appts = []
-        for a in appointments:
-            if isinstance(a, dict) and "appointment" in a:
-                flat_appts.append(a["appointment"])
-            elif isinstance(a, dict) and "id" in a:
-                flat_appts.append(a)
-        appointments = [a for a in flat_appts if a.get("is_active", True)]
+        # Parse response: {"response": {"message": "...", "appointment": [...]}}
+        raw = bk_data
+        if isinstance(raw, dict) and "response" in raw:
+            raw = raw["response"]
+        if isinstance(raw, dict) and "appointment" in raw:
+            raw = raw["appointment"]
+        if isinstance(raw, dict):
+            raw = [raw]  # Single appointment
+        if not isinstance(raw, list):
+            raw = []
+        appointments = [a for a in raw if isinstance(a, dict) and a.get("is_active", True)]
     except Exception as e:
         return jsonify({"ok": False, "error": f"Bookafy error: {e}"}), 502
 
