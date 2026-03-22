@@ -87,7 +87,7 @@ def _find_real_website(company_name, region):
         return None
 
     # Directory/social domains to skip
-    skip = SKIP_DOMAINS | {
+    skip = set(SKIP_DOMAINS) | {
         "facebook.com", "fb.com", "instagram.com", "twitter.com",
         "linkedin.com", "youtube.com", "tiktok.com",
         "yellowpages.co.nz", "yell.co.nz", "finda.co.nz",
