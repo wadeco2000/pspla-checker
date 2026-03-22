@@ -49,6 +49,9 @@ STRIPE_DEFAULT_PAYMENT_LINK = os.getenv("STRIPE_DEFAULT_PAYMENT_LINK", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 BOOKAFY_API_KEY = os.getenv("BOOKAFY_API_KEY", "")
 BOOKAFY_STAFF_EMAIL = os.getenv("BOOKAFY_STAFF_EMAIL", "mat@clubfitness.co.nz")
+CF_SMTP_USER = os.getenv("CF_SMTP_USER", "")
+CF_SMTP_PASS = os.getenv("CF_SMTP_PASS", "")
+CF_SMTP_FROM_NAME = os.getenv("CF_SMTP_FROM_NAME", "Club Fitness Whanganui")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PAUSE_FLAG = os.path.join(BASE_DIR, "pause.flag")
@@ -516,6 +519,10 @@ _RATE_LIMITS = {
     'club_fitness_ai_suggest':   (3, 60),  # 3 AI suggest calls per minute
     'club_fitness_check_bookings': (3, 60), # 3 booking checks per minute
     'club_fitness_save_booking_match': (20, 60), # 20 manual matches per minute
+    'club_fitness_campaign_recipients': (5, 60),
+    'club_fitness_campaign_send_test': (5, 60),
+    'club_fitness_campaign_send': (2, 300),     # 2 campaign sends per 5 min
+    'club_fitness_campaign_clear': (2, 300),
 }
 
 @app.before_request
@@ -734,6 +741,10 @@ _ROUTE_PERMISSIONS = {
     'club_fitness_ai_suggest': 'club_fitness',
     'club_fitness_check_bookings': 'club_fitness',
     'club_fitness_save_booking_match': 'club_fitness',
+    'club_fitness_campaign_recipients': 'club_fitness',
+    'club_fitness_campaign_send_test': 'club_fitness',
+    'club_fitness_campaign_send': 'club_fitness',
+    'club_fitness_campaign_clear': 'club_fitness',
 }
 
 # ── TOTP 2FA helpers ──────────────────────────────────────────────────────────
@@ -14586,11 +14597,13 @@ def club_fitness_check_bookings():
     pl = _validate_payment_link(data.get("payment_link", "").strip())
     if not pl:
         return jsonify({"ok": False, "error": "No valid payment_link."}), 400
-    # Fetch signups from Supabase
+    from datetime import datetime, timezone, timedelta
+    # Only check signups from last 6 weeks
+    cutoff = (datetime.now(timezone.utc) - timedelta(weeks=6)).isoformat()
     try:
         sr = requests.get(
             f"{SUPABASE_URL}/rest/v1/challenge_signups",
-            params={"payment_link": f"eq.{pl}", "select": "*"},
+            params={"payment_link": f"eq.{pl}", "select": "*", "created_at": f"gte.{cutoff}"},
             headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
             timeout=30
         )
@@ -14598,7 +14611,6 @@ def club_fitness_check_bookings():
     except Exception as e:
         return jsonify({"ok": False, "error": f"Supabase error: {e}"}), 502
     # Fetch Bookafy appointments (today → 6 weeks ahead)
-    from datetime import datetime, timezone, timedelta
     now = datetime.now(timezone.utc)
     end = now + timedelta(weeks=6)
     try:
@@ -14821,6 +14833,236 @@ def club_fitness_save_booking_match():
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
+@app.route("/api/club-fitness/campaign-recipients")
+def club_fitness_campaign_recipients():
+    """Get list of past signups who are NOT in the latest 6 weeks (eligible for campaign email)."""
+    try:
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(weeks=6)).isoformat()
+        # Get ALL signups
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/challenge_signups",
+            params={"select": "stripe_session_id,card_name,customer_email,customer_phone,created_at,campaign_email_sent_at,campaign_id", "limit": "5000"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+            timeout=30
+        )
+        if not r.ok:
+            return jsonify({"ok": False, "error": "Failed to fetch signups."}), 502
+        all_signups = r.json()
+        # Split into recent (last 6 weeks) and older
+        recent_emails = set()
+        for s in all_signups:
+            if s.get("created_at") and s["created_at"] >= cutoff:
+                email = (s.get("customer_email") or "").lower().strip()
+                if email:
+                    recent_emails.add(email)
+        # Build eligible list: older entries whose email is NOT in recent
+        seen_emails = set()
+        eligible = []
+        for s in all_signups:
+            if s.get("created_at") and s["created_at"] >= cutoff:
+                continue  # Skip recent entries
+            email = (s.get("customer_email") or "").lower().strip()
+            if not email or email in recent_emails or email in seen_emails:
+                continue  # Skip: already in new challenge, or duplicate
+            seen_emails.add(email)
+            name = (s.get("card_name") or "").replace("[CASH] ", "").strip()
+            eligible.append({
+                "stripe_session_id": s["stripe_session_id"],
+                "name": name,
+                "first_name": name.split()[0] if name else "",
+                "email": email,
+                "last_sent": s.get("campaign_email_sent_at"),
+                "campaign_id": s.get("campaign_id"),
+            })
+        return jsonify({"ok": True, "recipients": eligible, "count": len(eligible),
+                        "recent_count": len(recent_emails), "total": len(all_signups)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/club-fitness/campaign-send-test", methods=["POST"])
+def club_fitness_campaign_send_test():
+    """Send a test campaign email to a specified address."""
+    if not CF_SMTP_USER or not CF_SMTP_PASS:
+        return jsonify({"ok": False, "error": "CF_SMTP_USER/CF_SMTP_PASS not configured."}), 500
+    data = request.json or {}
+    test_email = (data.get("test_email") or "").strip()
+    template = (data.get("template") or "").strip()
+    subject = (data.get("subject") or "").strip()
+    if not test_email or not template or not subject:
+        return jsonify({"ok": False, "error": "test_email, template, and subject are required."}), 400
+    # Generate one variation using Haiku
+    import anthropic, json
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    variation = template.replace("{first_name}", "Wade")
+    if api_key:
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+            resp = client.messages.create(
+                model="claude-haiku-4-20250414",
+                max_tokens=1000,
+                messages=[{"role": "user", "content":
+                    f"Rewrite this email template with slight natural variations. "
+                    f"Swap the greeting (hi/hey/hello/good morning/kia ora), "
+                    f"vary transitional phrases slightly (I was hoping/I was wondering/I wanted to reach out), "
+                    f"and swap the sign-off (thanks/cheers/have a great day/take care/kind regards). "
+                    f"Keep the core message identical. Use the name 'Wade' as the recipient. "
+                    f"Return ONLY the email body text, no subject line, no explanation.\n\n"
+                    f"TEMPLATE:\n{template.replace('{first_name}', 'Wade')}"
+                }]
+            )
+            variation = resp.content[0].text.strip()
+        except Exception:
+            pass
+    # Send test email
+    try:
+        import smtplib
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"[TEST] {subject}"
+        msg["From"] = f"{CF_SMTP_FROM_NAME} <{CF_SMTP_USER}>"
+        msg["To"] = test_email
+        msg.attach(MIMEText(variation, "plain"))
+        # Also send HTML version
+        html_body = variation.replace("\n", "<br>")
+        msg.attach(MIMEText(f"<html><body style='font-family:Arial,sans-serif;font-size:14px;color:#333;'>{html_body}</body></html>", "html"))
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(CF_SMTP_USER, CF_SMTP_PASS)
+            server.sendmail(CF_SMTP_USER, test_email, msg.as_string())
+        return jsonify({"ok": True, "preview": variation, "sent_to": test_email, "sent_from": CF_SMTP_USER})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/club-fitness/campaign-send", methods=["POST"])
+def club_fitness_campaign_send():
+    """Send campaign emails to selected recipients with Haiku-generated variations."""
+    if not CF_SMTP_USER or not CF_SMTP_PASS:
+        return jsonify({"ok": False, "error": "CF_SMTP_USER/CF_SMTP_PASS not configured."}), 500
+    data = request.json or {}
+    recipients = data.get("recipients", [])
+    template = (data.get("template") or "").strip()
+    subject = (data.get("subject") or "").strip()
+    campaign_id = (data.get("campaign_id") or "").strip()
+    if not recipients or not template or not subject:
+        return jsonify({"ok": False, "error": "recipients, template, and subject required."}), 400
+    if len(recipients) > 450:
+        return jsonify({"ok": False, "error": f"Max 450 emails per batch (Gmail limit). You selected {len(recipients)}."}), 400
+    import anthropic, json, smtplib, time as _t
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from datetime import datetime, timezone
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    # Generate all variations in one batch
+    variations = {}
+    if api_key and len(recipients) > 0:
+        names_list = [r.get("first_name", "there") for r in recipients]
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+            resp = client.messages.create(
+                model="claude-haiku-4-20250414",
+                max_tokens=4000,
+                messages=[{"role": "user", "content":
+                    f"I need {len(recipients)} slightly different versions of this email template. "
+                    f"For each version: swap the greeting (hi/hey/hello/good morning/kia ora/g'day), "
+                    f"vary transitional phrases slightly, "
+                    f"and swap the sign-off (thanks/cheers/have a great day/take care/kind regards/all the best). "
+                    f"Keep the core message and meaning identical each time. "
+                    f"The recipient names in order are: {json.dumps(names_list)}. "
+                    f"Use {{first_name}} placeholder where the name goes.\n\n"
+                    f"TEMPLATE:\n{template}\n\n"
+                    f"Respond ONLY with a JSON array of strings, one per recipient. No explanation."
+                }]
+            )
+            text = resp.content[0].text.strip()
+            if text.startswith("```"):
+                text = text.split("```")[1]
+                if text.startswith("json"):
+                    text = text[4:]
+            var_list = json.loads(text)
+            for i, r in enumerate(recipients):
+                if i < len(var_list):
+                    variations[r["email"]] = var_list[i].replace("{first_name}", r.get("first_name", "there"))
+        except Exception as e:
+            print(f"[campaign] AI variation error: {e}")
+    # Send emails
+    sent = 0
+    errors = 0
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.ehlo()
+        server.starttls()
+        server.login(CF_SMTP_USER, CF_SMTP_PASS)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"SMTP login failed: {e}"}), 502
+    for r in recipients:
+        email = r["email"]
+        first_name = r.get("first_name", "there")
+        body = variations.get(email, template.replace("{first_name}", first_name))
+        try:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = f"{CF_SMTP_FROM_NAME} <{CF_SMTP_USER}>"
+            msg["To"] = email
+            msg.attach(MIMEText(body, "plain"))
+            html_body = body.replace("\n", "<br>")
+            msg.attach(MIMEText(f"<html><body style='font-family:Arial,sans-serif;font-size:14px;color:#333;'>{html_body}</body></html>", "html"))
+            server.sendmail(CF_SMTP_USER, email, msg.as_string())
+            sent += 1
+            # Mark as sent in Supabase
+            try:
+                requests.patch(
+                    f"{SUPABASE_URL}/rest/v1/challenge_signups",
+                    params={"customer_email": f"ilike.{email}"},
+                    json={"campaign_email_sent_at": now_iso, "campaign_id": campaign_id},
+                    headers={
+                        "apikey": SUPABASE_SERVICE_KEY,
+                        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                        "Content-Type": "application/json",
+                        "Prefer": "return=minimal"
+                    },
+                    timeout=10
+                )
+            except Exception:
+                pass
+            _t.sleep(2)  # 2 second delay between emails
+        except Exception as e:
+            print(f"[campaign] Failed to send to {email}: {e}")
+            errors += 1
+    try:
+        server.quit()
+    except Exception:
+        pass
+    return jsonify({"ok": True, "sent": sent, "errors": errors, "total": len(recipients),
+                    "sent_from": CF_SMTP_USER})
+
+
+@app.route("/api/club-fitness/campaign-clear", methods=["POST"])
+def club_fitness_campaign_clear():
+    """Clear campaign_email_sent_at for all signups (for next campaign)."""
+    try:
+        r = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/challenge_signups",
+            params={"campaign_email_sent_at": "not.is.null"},
+            json={"campaign_email_sent_at": None, "campaign_id": None},
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal"
+            },
+            timeout=15
+        )
+        return jsonify({"ok": r.ok})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 # ── Club Fitness Template ─────────────────────────────────────────────────────
 
 CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
@@ -14899,6 +15141,18 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         .appt-email{color:#27ae60;} .appt-ai{color:#9b59b6;} .appt-manual{color:#3498db;} .appt-none{color:#ccc;}
         .appt-change{cursor:pointer;font-size:10px;color:#888;margin-left:4px;text-decoration:underline;}
         .appt-match-btn{font-size:11px;cursor:pointer;color:#e67e22;border:1px solid #e67e22;background:none;border-radius:3px;padding:2px 8px;}
+        .btn-campaign{background:#c0392b;color:white;}
+        .campaign-panel{display:none;background:white;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.08);padding:18px;margin-bottom:18px;}
+        .campaign-panel.active{display:block;}
+        .sender-banner{background:#ffeaea;border:2px solid #e74c3c;border-radius:6px;padding:10px 16px;margin-bottom:14px;font-size:13px;color:#c0392b;font-weight:bold;display:flex;align-items:center;gap:8px;}
+        .campaign-template{width:100%;min-height:120px;padding:10px;border:1px solid #ccc;border-radius:4px;font-size:13px;font-family:Arial,sans-serif;resize:vertical;}
+        .campaign-subject{width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;margin-bottom:8px;}
+        .recipient-list{max-height:300px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:4px;margin:10px 0;}
+        .recipient-row{display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid #f0f0f0;font-size:12px;}
+        .recipient-row:hover{background:#f5f5f5;}
+        .recipient-row .rr-name{flex:1;font-weight:600;} .recipient-row .rr-email{flex:1;color:#666;}
+        .rr-sent{color:#27ae60;font-size:11px;}
+        .campaign-stats{font-size:12px;color:#666;margin:8px 0;}
         .mapping-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:13px;}
         .mapping-row .mr-raw{flex:1;color:#666;} .mapping-row .mr-arrow{color:#aaa;} .mapping-row .mr-clean{flex:1;}
         .mapping-row .mr-count{font-size:11px;color:#aaa;min-width:35px;text-align:right;}
@@ -14968,6 +15222,7 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         <button class="btn btn-export" onclick="exportCSV()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
         <button class="btn btn-clean" onclick="showCleanModal()"><i class="fa-solid fa-broom"></i> Clean Data</button>
         <button class="btn btn-booking" onclick="checkBookings()"><i class="fa-solid fa-calendar-check"></i> Check Bookings</button>
+        <button class="btn btn-campaign" onclick="toggleCampaign()"><i class="fa-solid fa-envelope"></i> Email Campaign</button>
         <span class="count-badge" id="count-badge" style="display:none">0</span>
         <span class="status-msg" id="status-msg"></span>
     </div>
@@ -15043,6 +15298,39 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         </div>
     </div>
 </div>
+
+    <!-- Email Campaign Panel -->
+    <div class="campaign-panel" id="campaign-panel">
+        <h3><i class="fa-solid fa-envelope" style="color:#c0392b"></i> Email Campaign</h3>
+        <div class="sender-banner"><i class="fa-solid fa-triangle-exclamation"></i> Sending as: <span id="campaign-sender"></span></div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:300px;">
+                <label style="font-size:12px;font-weight:bold;color:#555;">Subject Line</label>
+                <input type="text" class="campaign-subject" id="campaign-subject" placeholder="e.g. Ready for the next challenge?">
+                <label style="font-size:12px;font-weight:bold;color:#555;">Email Template <span style="color:#888;font-weight:normal;">(use {first_name} for their name)</span></label>
+                <textarea class="campaign-template" id="campaign-template" placeholder="Hi {first_name},&#10;&#10;We've got a new challenge starting soon and thought you might be interested...&#10;&#10;Cheers,&#10;Club Fitness Whanganui"></textarea>
+                <div style="display:flex;gap:8px;margin-top:8px;">
+                    <button class="btn btn-sm" style="background:#3498db;color:white;" onclick="testCampaignEmail()"><i class="fa-solid fa-flask"></i> Send Test to Me</button>
+                    <button class="btn btn-sm" style="background:#c0392b;color:white;" onclick="sendCampaign()"><i class="fa-solid fa-paper-plane"></i> Send to Selected</button>
+                    <button class="btn btn-sm" style="background:#e2e8f0;color:#555;" onclick="clearCampaignStatus()"><i class="fa-solid fa-rotate-left"></i> Clear Sent Status</button>
+                </div>
+            </div>
+            <div style="flex:1;min-width:300px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <label style="font-size:12px;font-weight:bold;color:#555;">Recipients <span class="campaign-stats" id="campaign-stats"></span></label>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn btn-sm" style="background:#f0f0f0;color:#555;font-size:11px;" onclick="selectAllRecipients(true)">Select All</button>
+                        <button class="btn btn-sm" style="background:#f0f0f0;color:#555;font-size:11px;" onclick="selectAllRecipients(false)">Deselect All</button>
+                        <button class="btn btn-sm" style="background:#f0f0f0;color:#555;font-size:11px;" onclick="loadCampaignRecipients()"><i class="fa-solid fa-rotate"></i></button>
+                    </div>
+                </div>
+                <div class="recipient-list" id="recipient-list">
+                    <div class="empty-state">Click Email Campaign to load recipients.</div>
+                </div>
+                <div class="campaign-stats" id="campaign-selected-count"></div>
+            </div>
+        </div>
+    </div>
 
 <!-- Manual Match Modal -->
 <div class="modal-bg" id="match-modal">
@@ -15362,6 +15650,105 @@ function clearBookingMatch(sid) {
         if (row) { row.bookafy_appointment_id = ''; row.bookafy_appointment_date = ''; row.bookafy_match_type = ''; }
         applyFiltersAndRender();
         msg('Match removed.');
+    });
+}
+
+/* ── Email Campaign ── */
+var _campaignRecipients = [];
+
+function toggleCampaign() {
+    var panel = document.getElementById('campaign-panel');
+    if (panel.classList.contains('active')) {
+        panel.classList.remove('active');
+    } else {
+        panel.classList.add('active');
+        document.getElementById('campaign-sender').textContent = '{{ cf_smtp_user }}';
+        loadCampaignRecipients();
+    }
+}
+
+function loadCampaignRecipients() {
+    document.getElementById('recipient-list').innerHTML = '<div class="empty-state"><span class="spinner"></span> Loading...</div>';
+    fetch('/api/club-fitness/campaign-recipients').then(r=>r.json()).then(d=>{
+        if (!d.ok) { document.getElementById('recipient-list').innerHTML = '<div class="empty-state" style="color:red">Error: ' + esc(d.error) + '</div>'; return; }
+        _campaignRecipients = d.recipients;
+        document.getElementById('campaign-stats').textContent = '(' + d.count + ' eligible, ' + d.recent_count + ' already in current challenge)';
+        renderRecipients();
+    });
+}
+
+function renderRecipients() {
+    var html = '';
+    var selectedCount = 0;
+    _campaignRecipients.forEach(function(r, i){
+        var sent = r.last_sent ? '<span class="rr-sent"><i class="fa-solid fa-check"></i> Sent ' + new Date(r.last_sent).toLocaleDateString('en-NZ') + '</span>' : '';
+        var checked = r._selected !== false ? 'checked' : '';
+        if (r._selected !== false) selectedCount++;
+        html += '<div class="recipient-row">';
+        html += '<input type="checkbox" id="rcpt-' + i + '" ' + checked + ' onchange="_campaignRecipients[' + i + ']._selected=this.checked;updateSelectedCount()">';
+        html += '<span class="rr-name">' + esc(r.name) + '</span>';
+        html += '<span class="rr-email">' + esc(r.email) + '</span>';
+        html += sent;
+        html += '</div>';
+    });
+    if (!html) html = '<div class="empty-state">No eligible recipients found.</div>';
+    document.getElementById('recipient-list').innerHTML = html;
+    updateSelectedCount();
+}
+
+function updateSelectedCount() {
+    var count = _campaignRecipients.filter(function(r){ return r._selected !== false; }).length;
+    document.getElementById('campaign-selected-count').textContent = count + ' of ' + _campaignRecipients.length + ' selected';
+}
+
+function selectAllRecipients(val) {
+    _campaignRecipients.forEach(function(r){ r._selected = val; });
+    renderRecipients();
+}
+
+function testCampaignEmail() {
+    var subject = document.getElementById('campaign-subject').value.trim();
+    var template = document.getElementById('campaign-template').value.trim();
+    if (!subject || !template) { alert('Enter a subject and template first.'); return; }
+    var testEmail = prompt('Send test email to:', '{{ user_email }}');
+    if (!testEmail) return;
+    msg('Sending test email...');
+    fetch('/api/club-fitness/campaign-send-test', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({test_email: testEmail, subject: subject, template: template})
+    }).then(r=>r.json()).then(d=>{
+        if (!d.ok) { msg('Error: ' + (d.error||'Unknown')); alert('Error: ' + (d.error||'Unknown')); return; }
+        msg('Test email sent to ' + d.sent_to + ' from ' + d.sent_from);
+        alert('Test sent to ' + d.sent_to + ' from ' + d.sent_from + '\n\nCheck your inbox.');
+    });
+}
+
+function sendCampaign() {
+    var subject = document.getElementById('campaign-subject').value.trim();
+    var template = document.getElementById('campaign-template').value.trim();
+    if (!subject || !template) { alert('Enter a subject and template first.'); return; }
+    var selected = _campaignRecipients.filter(function(r){ return r._selected !== false; });
+    if (!selected.length) { alert('No recipients selected.'); return; }
+    if (selected.length > 450) { alert('Gmail limits to ~450 emails per batch. Please deselect some and send in batches.'); return; }
+    var sender = document.getElementById('campaign-sender').textContent;
+    if (!confirm('Send ' + selected.length + ' emails?\n\nFrom: ' + sender + '\nSubject: ' + subject + '\n\nThis will take about ' + Math.ceil(selected.length * 2 / 60) + ' minutes.')) return;
+    msg('Sending ' + selected.length + ' emails... please wait.');
+    var campaignId = 'campaign_' + Date.now();
+    fetch('/api/club-fitness/campaign-send', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({recipients: selected, subject: subject, template: template, campaign_id: campaignId})
+    }).then(r=>r.json()).then(d=>{
+        if (!d.ok) { msg('Error: ' + (d.error||'Unknown')); return; }
+        msg('Campaign complete: ' + d.sent + ' sent, ' + d.errors + ' errors. From: ' + d.sent_from);
+        alert('Campaign complete!\n\n' + d.sent + ' emails sent\n' + d.errors + ' errors\nSent from: ' + d.sent_from);
+        loadCampaignRecipients();
+    });
+}
+
+function clearCampaignStatus() {
+    if (!confirm('Clear all "sent" markers? This lets you re-send to everyone in the next campaign.')) return;
+    fetch('/api/club-fitness/campaign-clear', {method:'POST'}).then(r=>r.json()).then(d=>{
+        if (!d.ok) { alert('Error clearing.'); return; }
+        msg('Campaign sent status cleared.');
+        loadCampaignRecipients();
     });
 }
 
@@ -15966,6 +16353,7 @@ def club_fitness_page():
         user_avatar=session.get("avatar_url", ""),
         default_payment_link=STRIPE_DEFAULT_PAYMENT_LINK,
         git_version=_get_git_version(),
+        cf_smtp_user=CF_SMTP_USER,
     )
 
 
