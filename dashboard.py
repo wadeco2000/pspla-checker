@@ -14605,12 +14605,12 @@ def club_fitness_check_bookings():
         br = requests.get(
             "https://app.bookafy.com/api/v3/appointments",
             params={
-                "api_key": BOOKAFY_API_KEY,
                 "email": BOOKAFY_STAFF_EMAIL,
                 "from_date": now.strftime("%Y-%m-%dT00:00:00"),
                 "end_date": end.strftime("%Y-%m-%dT23:59:59"),
                 "per_page": "200",
             },
+            headers={"api-key": BOOKAFY_API_KEY},
             timeout=30
         )
         if not br.ok:
