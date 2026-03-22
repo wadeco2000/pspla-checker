@@ -15228,38 +15228,39 @@ def club_fitness_campaign_send():
     from email.mime.text import MIMEText
     from datetime import datetime, timezone
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    # Generate all variations in one batch
+    # Pre-generate variations in batches of 10
     variations = {}
     if api_key and ai_instructions and len(recipients) > 0:
-        names_list = [r.get("first_name", "there") for r in recipients]
-        try:
-            client = anthropic.Anthropic(api_key=api_key)
-            resp = client.messages.create(
-                model="claude-haiku-4-20250414",
-                max_tokens=4000,
-                messages=[{"role": "user", "content":
-                    f"I need {len(recipients)} slightly different versions of this email template.\n"
-                    f"{ai_instructions}\n"
-                    f"Keep the core message and meaning identical each time. "
-                    f"Do NOT change any dates, month names, or specific details. "
-                    f"Keep {{first_name}} and {{last_challenge}} as literal placeholders — do NOT replace them. "
-                    f"The recipient names in order are: {json.dumps(names_list)}. "
-                    f"Use {{first_name}} placeholder where the name goes.\n\n"
-                    f"TEMPLATE:\n{template}\n\n"
-                    f"Respond ONLY with a JSON array of strings, one per recipient. No explanation."
-                }]
-            )
-            text = resp.content[0].text.strip()
-            if text.startswith("```"):
-                text = text.split("```")[1]
-                if text.startswith("json"):
-                    text = text[4:]
-            var_list = json.loads(text)
-            for i, r in enumerate(recipients):
-                if i < len(var_list):
-                    variations[r["email"]] = var_list[i].replace("{first_name}", r.get("first_name", "there"))
-        except Exception as e:
-            print(f"[campaign] AI variation error: {e}")
+        _batch_size = 10
+        client = anthropic.Anthropic(api_key=api_key)
+        for _bi in range(0, len(recipients), _batch_size):
+            _batch = recipients[_bi:_bi + _batch_size]
+            try:
+                resp = client.messages.create(
+                    model="claude-haiku-4-20250414",
+                    max_tokens=4000,
+                    messages=[{"role": "user", "content":
+                        f"I need {len(_batch)} slightly different versions of this email template.\n"
+                        f"{ai_instructions}\n"
+                        f"Keep the core message and meaning identical each time. "
+                        f"Do NOT change any dates, month names, URLs, or specific details. "
+                        f"Keep {{first_name}} and {{last_challenge}} as literal placeholders — do NOT replace them.\n\n"
+                        f"TEMPLATE:\n{template}\n\n"
+                        f"Respond ONLY with a JSON array of {len(_batch)} strings. No explanation, no markdown."
+                    }]
+                )
+                text = resp.content[0].text.strip()
+                if text.startswith("```"):
+                    text = text.split("```")[1]
+                    if text.startswith("json"):
+                        text = text[4:]
+                var_list = json.loads(text)
+                for j, br in enumerate(_batch):
+                    if j < len(var_list):
+                        variations[br["email"]] = var_list[j]
+            except Exception as e:
+                print(f"[campaign] AI variation batch {_bi}-{_bi+len(_batch)} error: {e}")
+        print(f"[campaign] Generated {len(variations)} AI variations for {len(recipients)} recipients")
     # Send emails
     sent = 0
     errors = 0
@@ -15275,7 +15276,7 @@ def club_fitness_campaign_send():
         email = r["email"]
         first_name = r.get("first_name", "there")
         last_challenge = r.get("last_challenge", "")
-        body = variations.get(email, template.replace("{first_name}", first_name))
+        body = variations.get(email, template)
         body = body.replace("{first_name}", first_name).replace("{last_challenge}", last_challenge)
         try:
             msg = MIMEMultipart("alternative")
