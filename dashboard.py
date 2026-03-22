@@ -44,6 +44,8 @@ MQTT_BROKER_USER = os.getenv("MQTT_BROKER_USER", "")
 MQTT_BROKER_PASS = os.getenv("MQTT_BROKER_PASS", "")
 RECAPTCHA_SITE_KEY = os.getenv("RECAPTCHA_SITE_KEY", "")
 RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY", "")
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_DEFAULT_PAYMENT_LINK = os.getenv("STRIPE_DEFAULT_PAYMENT_LINK", "")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PAUSE_FLAG = os.path.join(BASE_DIR, "pause.flag")
@@ -457,6 +459,11 @@ _RATE_LIMITS = {
     'clear_db':                (2, 300),     # 2 clear attempts per 5 min
     'export_csv':              (5, 60),      # 5 exports per minute
     'actuate_query':           (60, 60),     # 60 Actuate API calls per minute
+    'club_fitness_signups':    (10, 60),     # 10 Stripe fetches per minute
+    'club_fitness_sync':       (5, 60),      # 5 syncs per minute
+    'club_fitness_export':     (5, 60),      # 5 exports per minute
+    'club_fitness_stored':     (10, 60),     # 10 reads per minute
+    'club_fitness_links':      (10, 60),     # 10 link ops per minute
 }
 
 @app.before_request
@@ -594,9 +601,9 @@ def _is_admin():
     return bool(email and NOTIFY_EMAIL and email == NOTIFY_EMAIL.lower().strip())
 
 # ── Per-user permissions ────────────────────────────────────────────────────
-_PERMISSION_GROUPS = ['searches', 'database', 'history', 'utilities', 'actuate', 'shelly']
-_PERMISSION_LABELS = {'searches': 'Searches', 'database': 'Database', 'history': 'History', 'utilities': 'Utilities', 'actuate': 'Actuate', 'shelly': 'Shelly'}
-_DEFAULT_PERMISSIONS = {'searches': True, 'database': True, 'history': True, 'utilities': True, 'actuate': False, 'shelly': False}
+_PERMISSION_GROUPS = ['searches', 'database', 'history', 'utilities', 'actuate', 'shelly', 'club_fitness']
+_PERMISSION_LABELS = {'searches': 'Searches', 'database': 'Database', 'history': 'History', 'utilities': 'Utilities', 'actuate': 'Actuate', 'shelly': 'Shelly', 'club_fitness': 'Club Fitness'}
+_DEFAULT_PERMISSIONS = {'searches': True, 'database': True, 'history': True, 'utilities': True, 'actuate': False, 'shelly': False, 'club_fitness': False}
 
 def _has_permission(group):
     """Check if current user has access to a permission group."""
@@ -659,6 +666,11 @@ _ROUTE_PERMISSIONS = {
     'shelly_register': 'shelly', 'shelly_diagnostics': 'shelly',
     'shelly_test_command': 'shelly', 'shelly_command': 'shelly',
     'shelly_response_log_api': 'shelly',
+    # club_fitness
+    'club_fitness_page': 'club_fitness', 'club_fitness_signups': 'club_fitness',
+    'club_fitness_sync': 'club_fitness', 'club_fitness_export': 'club_fitness',
+    'club_fitness_stored': 'club_fitness', 'club_fitness_links': 'club_fitness',
+    'club_fitness_delete_link': 'club_fitness',
 }
 
 # ── TOTP 2FA helpers ──────────────────────────────────────────────────────────
@@ -7150,10 +7162,28 @@ def _send_welcome_email(to_email, to_name, added_by, permissions=None):
     # Detect partner-only users (actuate/shelly only, no PSPLA access)
     _pspla_groups = ['searches', 'database', 'history', 'utilities']
     _has_pspla = any(perms.get(g) for g in _pspla_groups)
-    actuate_only = perms.get('actuate', False) and not _has_pspla and not perms.get('shelly', False)
-    shelly_only = perms.get('shelly', False) and not _has_pspla and not perms.get('actuate', False)
+    actuate_only = perms.get('actuate', False) and not _has_pspla and not perms.get('shelly', False) and not perms.get('club_fitness', False)
+    shelly_only = perms.get('shelly', False) and not _has_pspla and not perms.get('actuate', False) and not perms.get('club_fitness', False)
+    club_fitness_only = perms.get('club_fitness', False) and not _has_pspla and not perms.get('actuate', False) and not perms.get('shelly', False)
 
-    if shelly_only:
+    if club_fitness_only:
+        subject = "You've been granted access \u2014 Club Fitness Challenges"
+        site_url = "https://www.psplachecker.co.nz/club-fitness"
+        intro_text = ("You've been granted access to the <strong>Club Fitness Challenges</strong> portal \u2014 "
+                      "view challenge signups, export participant lists, and manage payment link data.")
+        features_html = (
+            '<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f3cb\ufe0f &nbsp;View challenge signups in real time</td></tr>'
+            '<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f4e5 &nbsp;Export participant CSV for challenge software</td></tr>'
+            '<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f4be &nbsp;Sync signups to database for marketing</td></tr>'
+            '<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f517 &nbsp;Manage multiple payment links per challenge</td></tr>'
+        )
+        features_plain = ("- View challenge signups in real time\n"
+                          "- Export participant CSV for challenge software\n"
+                          "- Sync signups to database for marketing\n"
+                          "- Manage multiple payment links per challenge")
+        header_subtitle = "Club Fitness Challenges \u2014 Access Granted"
+        footer_text = "Club Fitness Challenges &nbsp;\u00b7&nbsp; New Zealand &nbsp;\u00b7&nbsp; For authorised users only"
+    elif shelly_only:
         subject = "You've been granted access \u2014 Alarm Watch Tower Control"
         site_url = "https://www.psplachecker.co.nz/shelly"
         intro_text = ("You've been granted access to the <strong>Tower Control</strong> panel \u2014 "
@@ -7221,6 +7251,9 @@ def _send_welcome_email(to_email, to_name, added_by, permissions=None):
         if perms.get('shelly'):
             _feat_rows.append('<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f5fc &nbsp;Alarm tower relay control</td></tr>')
             _feat_plain.append("- Alarm tower relay control")
+        if perms.get('club_fitness'):
+            _feat_rows.append('<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f3cb\ufe0f &nbsp;Club Fitness challenge signups</td></tr>')
+            _feat_plain.append("- Club Fitness challenge signups")
         features_html = "".join(_feat_rows)
         features_plain = "\n".join(_feat_plain)
         header_subtitle = "PSPLA Licence Checker \u2014 Access Granted"
@@ -8194,6 +8227,7 @@ tr:last-child td{border-bottom:none}
         <label><input type="checkbox" id="add-perm-utilities" checked> Utilities</label>
         <label><input type="checkbox" id="add-perm-actuate"> Actuate</label>
         <label><input type="checkbox" id="add-perm-shelly"> Shelly</label>
+        <label><input type="checkbox" id="add-perm-club_fitness"> CF</label>
       </div>
     </div>
     <div id="users-loading" class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</div>
@@ -8262,18 +8296,18 @@ function loadUsers() {
             var avatarHtml = u.avatar_url
                 ? '<img src="' + u.avatar_url + '" style="width:24px;height:24px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:6px">'
                 : '<i class="fa-solid fa-user-circle" style="font-size:22px;color:#ccc;vertical-align:middle;margin-right:6px"></i>';
-            var perms = u.permissions || {searches:true,database:true,history:true,utilities:true,actuate:false,shelly:false};
-            var permLabels = {searches:'Sea',database:'Dat',history:'His',utilities:'Uti',actuate:'Act',shelly:'She'};
+            var perms = u.permissions || {searches:true,database:true,history:true,utilities:true,actuate:false,shelly:false,club_fitness:false};
+            var permLabels = {searches:'Sea',database:'Dat',history:'His',utilities:'Uti',actuate:'Act',shelly:'She',club_fitness:'CF'};
             var permCol = '';
             if (u.is_admin) {
                 permCol = '<span style="font-size:11px;color:#8e44ad">All (admin)</span>';
             } else if (IS_ADMIN) {
-                ['searches','database','history','utilities','actuate','shelly'].forEach(function(g){
+                ['searches','database','history','utilities','actuate','shelly','club_fitness'].forEach(function(g){
                     var on = perms[g];
                     permCol += '<button class="perm-btn ' + (on ? 'perm-on' : 'perm-off') + '" onclick="togglePerm(\\'' + u.id + '\\',\\'' + g + '\\',' + !on + ')" title="' + g + '">' + permLabels[g] + '</button>';
                 });
             } else {
-                ['searches','database','history','utilities','actuate','shelly'].forEach(function(g){
+                ['searches','database','history','utilities','actuate','shelly','club_fitness'].forEach(function(g){
                     var on = perms[g];
                     permCol += '<span class="perm-btn ' + (on ? 'perm-on' : 'perm-off') + '" style="cursor:default" title="' + g + '">' + permLabels[g] + '</span>';
                 });
@@ -8303,7 +8337,8 @@ function addUser() {
         history: document.getElementById('add-perm-history').checked,
         utilities: document.getElementById('add-perm-utilities').checked,
         actuate: document.getElementById('add-perm-actuate').checked,
-        shelly: document.getElementById('add-perm-shelly').checked
+        shelly: document.getElementById('add-perm-shelly').checked,
+        club_fitness: document.getElementById('add-perm-club_fitness').checked
     };
     fetch('/api/allowed-users', {method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({email: email, name: name, permissions: perms})
@@ -13745,6 +13780,693 @@ def shelly_command():
     except Exception as e:
         print(f"[shelly] Failed to log command: {e}")
     return jsonify({"ok": success, "detail": detail, "method": method})
+
+
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║  CLUB FITNESS — Challenge signups via Stripe payment links              ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+import re as _re_mod
+
+def _cf_value(cf_item):
+    """Extract value from a Stripe custom field regardless of type (text/numeric/dropdown)."""
+    if not cf_item:
+        return ""
+    for t in ("text", "numeric", "dropdown"):
+        sub = cf_item.get(t)
+        if sub and isinstance(sub, dict):
+            return str(sub.get("value", ""))
+    return ""
+
+def _cf_label(cf_item):
+    """Extract display label from a Stripe custom field."""
+    if not cf_item:
+        return ""
+    lbl = cf_item.get("label", {})
+    if isinstance(lbl, dict):
+        return str(lbl.get("custom", "") or lbl.get("type", ""))
+    return str(lbl)
+
+def _stripe_sessions_to_rows(sessions_iter):
+    """Convert Stripe checkout session iterator to list of dicts."""
+    from datetime import datetime, timezone
+    rows = []
+    for s in sessions_iter:
+        cf = s.get("custom_fields") or []
+        rows.append({
+            "stripe_session_id": s["id"],
+            "created_at": datetime.fromtimestamp(s["created"], tz=timezone.utc).isoformat(),
+            "card_name": (s.get("customer_details") or {}).get("name", "") or "",
+            "customer_email": (s.get("customer_details") or {}).get("email", "") or "",
+            "customer_phone": (s.get("customer_details") or {}).get("phone", "") or "",
+            "custom_field_1": _cf_value(cf[0]) if len(cf) > 0 else "",
+            "custom_field_2": _cf_value(cf[1]) if len(cf) > 1 else "",
+            "custom_field_3": _cf_value(cf[2]) if len(cf) > 2 else "",
+            "custom_field_1_label": _cf_label(cf[0]) if len(cf) > 0 else "",
+            "custom_field_2_label": _cf_label(cf[1]) if len(cf) > 1 else "",
+            "custom_field_3_label": _cf_label(cf[2]) if len(cf) > 2 else "",
+        })
+    return rows
+
+_PLINK_RE = _re_mod.compile(r'^plink_[a-zA-Z0-9_]+$')
+
+def _validate_payment_link(pl):
+    """Validate and return payment link ID, or None."""
+    if pl and _PLINK_RE.match(pl):
+        return pl
+    return None
+
+
+@app.route("/api/club-fitness/signups")
+def club_fitness_signups():
+    """Fetch signups from Stripe for a given payment link."""
+    if not STRIPE_SECRET_KEY:
+        return jsonify({"ok": False, "error": "STRIPE_SECRET_KEY not configured."}), 500
+    pl = _validate_payment_link(request.args.get("payment_link", "").strip())
+    if not pl:
+        pl = _validate_payment_link(STRIPE_DEFAULT_PAYMENT_LINK)
+    if not pl:
+        return jsonify({"ok": False, "error": "No valid payment_link provided."}), 400
+    try:
+        import stripe
+        stripe.api_key = STRIPE_SECRET_KEY
+        it = stripe.checkout.Session.list(payment_link=pl, status="complete", limit=100).auto_paging_iter()
+        rows = _stripe_sessions_to_rows(it)
+        return jsonify({"ok": True, "signups": rows, "count": len(rows), "payment_link": pl})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/club-fitness/sync", methods=["POST"])
+def club_fitness_sync():
+    """Fetch from Stripe and upsert to Supabase challenge_signups table."""
+    if not STRIPE_SECRET_KEY:
+        return jsonify({"ok": False, "error": "STRIPE_SECRET_KEY not configured."}), 500
+    data = request.json or {}
+    pl = _validate_payment_link(data.get("payment_link", "").strip())
+    if not pl:
+        pl = _validate_payment_link(STRIPE_DEFAULT_PAYMENT_LINK)
+    if not pl:
+        return jsonify({"ok": False, "error": "No valid payment_link provided."}), 400
+    try:
+        import stripe
+        stripe.api_key = STRIPE_SECRET_KEY
+        it = stripe.checkout.Session.list(payment_link=pl, status="complete", limit=100).auto_paging_iter()
+        rows = _stripe_sessions_to_rows(it)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Stripe error: {e}"}), 502
+
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    synced = 0
+    for row in rows:
+        row["payment_link"] = pl
+        row["synced_at"] = now_iso
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/challenge_signups",
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "resolution=merge-duplicates,return=minimal"
+            },
+            json=row, timeout=15
+        )
+        if r.ok:
+            synced += 1
+    return jsonify({"ok": True, "synced": synced, "total": len(rows), "payment_link": pl})
+
+
+@app.route("/api/club-fitness/export")
+def club_fitness_export():
+    """Export signups as CSV with custom column name overrides."""
+    source = request.args.get("source", "live").strip()
+    pl = _validate_payment_link(request.args.get("payment_link", "").strip())
+    if not pl:
+        pl = _validate_payment_link(STRIPE_DEFAULT_PAYMENT_LINK)
+    if not pl:
+        return jsonify({"ok": False, "error": "No valid payment_link provided."}), 400
+
+    # Get column name overrides from challenge_links
+    col_names = ["Custom Field 1", "Custom Field 2", "Custom Field 3"]
+    try:
+        lr = requests.get(
+            f"{SUPABASE_URL}/rest/v1/challenge_links",
+            params={"payment_link_id": f"eq.{pl}", "select": "*"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+            timeout=10
+        )
+        if lr.ok and lr.json():
+            link_data = lr.json()[0]
+            if link_data.get("col_1_name"):
+                col_names[0] = link_data["col_1_name"]
+            if link_data.get("col_2_name"):
+                col_names[1] = link_data["col_2_name"]
+            if link_data.get("col_3_name"):
+                col_names[2] = link_data["col_3_name"]
+    except Exception:
+        pass
+
+    rows = []
+    if source == "stored":
+        try:
+            sr = requests.get(
+                f"{SUPABASE_URL}/rest/v1/challenge_signups",
+                params={"payment_link": f"eq.{pl}", "select": "*", "order": "created_at.asc"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                timeout=30
+            )
+            if sr.ok:
+                rows = sr.json()
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 502
+    else:
+        if not STRIPE_SECRET_KEY:
+            return jsonify({"ok": False, "error": "STRIPE_SECRET_KEY not configured."}), 500
+        try:
+            import stripe
+            stripe.api_key = STRIPE_SECRET_KEY
+            it = stripe.checkout.Session.list(payment_link=pl, status="complete", limit=100).auto_paging_iter()
+            rows = _stripe_sessions_to_rows(it)
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 502
+
+    # If live rows have labels but no column overrides, use Stripe labels
+    if rows and col_names[0] == "Custom Field 1" and rows[0].get("custom_field_1_label"):
+        col_names[0] = rows[0]["custom_field_1_label"]
+    if rows and col_names[1] == "Custom Field 2" and rows[0].get("custom_field_2_label"):
+        col_names[1] = rows[0]["custom_field_2_label"]
+    if rows and col_names[2] == "Custom Field 3" and rows[0].get("custom_field_3_label"):
+        col_names[2] = rows[0]["custom_field_3_label"]
+
+    import csv, io
+    output = io.StringIO()
+    fieldnames = ["Created (UTC)", "Card Name", "Customer Email", "Customer Phone",
+                  col_names[0], col_names[1], col_names[2]]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    for r in rows:
+        writer.writerow({
+            "Created (UTC)": r.get("created_at", ""),
+            "Card Name": r.get("card_name", ""),
+            "Customer Email": r.get("customer_email", ""),
+            "Customer Phone": r.get("customer_phone", ""),
+            col_names[0]: r.get("custom_field_1", ""),
+            col_names[1]: r.get("custom_field_2", ""),
+            col_names[2]: r.get("custom_field_3", ""),
+        })
+    resp = app.make_response(output.getvalue())
+    resp.headers["Content-Type"] = "text/csv; charset=utf-8"
+    resp.headers["Content-Disposition"] = "attachment; filename=challenge_signups.csv"
+    return resp
+
+
+@app.route("/api/club-fitness/stored")
+def club_fitness_stored():
+    """Fetch signups stored in Supabase."""
+    pl = _validate_payment_link(request.args.get("payment_link", "").strip())
+    params = {"select": "*", "order": "created_at.asc"}
+    if pl:
+        params["payment_link"] = f"eq.{pl}"
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/challenge_signups",
+            params=params,
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+            timeout=30
+        )
+        if r.ok:
+            data = r.json()
+            return jsonify({"ok": True, "signups": data, "count": len(data)})
+        return jsonify({"ok": False, "error": f"Supabase error: {r.status_code}"}), 502
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/club-fitness/links", methods=["GET", "POST"])
+def club_fitness_links():
+    """GET: list saved links. POST: create/update a link with overrides."""
+    if request.method == "GET":
+        try:
+            r = requests.get(
+                f"{SUPABASE_URL}/rest/v1/challenge_links",
+                params={"select": "*", "order": "created_at.desc"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                timeout=10
+            )
+            return jsonify({"ok": r.ok, "links": r.json() if r.ok else []})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 502
+
+    # POST — create or update
+    data = request.json or {}
+    pl = _validate_payment_link(data.get("payment_link_id", "").strip())
+    if not pl:
+        return jsonify({"ok": False, "error": "Invalid payment_link_id format."}), 400
+    label = (data.get("label", "") or "").strip()
+    if not label:
+        return jsonify({"ok": False, "error": "Label is required."}), 400
+    payload = {
+        "payment_link_id": pl,
+        "label": label,
+        "col_1_name": (data.get("col_1_name", "") or "").strip() or None,
+        "col_2_name": (data.get("col_2_name", "") or "").strip() or None,
+        "col_3_name": (data.get("col_3_name", "") or "").strip() or None,
+    }
+    try:
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/challenge_links",
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "resolution=merge-duplicates,return=representation"
+            },
+            json=payload, timeout=10
+        )
+        return jsonify({"ok": r.ok, "link": r.json()[0] if r.ok and r.json() else None})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/club-fitness/links/<uid>", methods=["DELETE"])
+def club_fitness_delete_link(uid):
+    """Delete a saved payment link."""
+    if not _re_mod.match(r'^[0-9a-f\-]{36}$', uid):
+        return jsonify({"ok": False, "error": "Invalid ID."}), 400
+    try:
+        r = requests.delete(
+            f"{SUPABASE_URL}/rest/v1/challenge_links",
+            params={"id": f"eq.{uid}"},
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Prefer": "return=minimal"
+            },
+            timeout=10
+        )
+        return jsonify({"ok": r.ok})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+# ── Club Fitness Template ─────────────────────────────────────────────────────
+
+CLUB_FITNESS_TEMPLATE = r"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>(function(){var _f=window.fetch;window.fetch=function(u,o){o=o||{};var m=(o.method||'GET').toUpperCase();if(m!=='GET'&&m!=='HEAD'){o.headers=o.headers||{};o.headers['X-CSRF-Token']=document.querySelector('meta[name="csrf-token"]').content;}return _f.call(this,u,o);};})();</script>
+    <title>Club Fitness Challenges</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer" />
+    <style>
+        *{box-sizing:border-box;}
+        body{font-family:Arial,sans-serif;margin:0;padding:0;background:#f4f4f4;color:#333;}
+        .page-header{background:#1a252f;color:white;padding:14px 24px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+        .page-header h1{margin:0;font-size:18px;display:flex;align-items:center;gap:10px;}
+        .page-header h1 i{color:#27ae60;}
+        .header-right{margin-left:auto;display:flex;align-items:center;gap:12px;}
+        .header-right a{color:#aac;font-size:12px;text-decoration:none;display:flex;align-items:center;gap:5px;}
+        .header-right a:hover{color:white;}
+        .header-avatar{width:24px;height:24px;border-radius:50%;border:1px solid #555;}
+        .header-email{font-size:11px;color:#7fb3d8;}
+        .header-signout{background:rgba(231,76,60,0.15);border:1px solid rgba(231,76,60,0.4);border-radius:6px;padding:4px 10px;font-size:11px;color:#e98 !important;}
+        .content{max-width:1400px;margin:20px auto;padding:0 20px;}
+        .ctrl-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:18px;
+                   background:white;padding:14px 18px;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.08);}
+        .ctrl-row label{font-size:12px;font-weight:bold;color:#555;}
+        .ctrl-row select,.ctrl-row input[type=text]{font-size:13px;padding:6px 10px;border:1px solid #ccc;border-radius:4px;}
+        .ctrl-row select{min-width:200px;}
+        .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 16px;border:none;border-radius:5px;font-size:13px;
+             cursor:pointer;font-weight:600;transition:opacity .15s;}
+        .btn:hover{opacity:0.85;}
+        .btn-fetch{background:#27ae60;color:white;}
+        .btn-sync{background:#3498db;color:white;}
+        .btn-export{background:#8e44ad;color:white;}
+        .btn-add{background:#e67e22;color:white;}
+        .btn-del{background:none;border:1px solid #e74c3c;color:#e74c3c;padding:4px 10px;font-size:11px;border-radius:4px;cursor:pointer;}
+        .btn-edit{background:none;border:1px solid #3498db;color:#3498db;padding:4px 10px;font-size:11px;border-radius:4px;cursor:pointer;}
+        .btn:disabled{opacity:0.5;cursor:not-allowed;}
+        .count-badge{background:#27ae60;color:white;padding:4px 12px;border-radius:12px;font-size:13px;font-weight:bold;}
+        .card{background:white;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.08);overflow:hidden;margin-bottom:18px;}
+        .card-header{background:#f8f9fa;padding:12px 18px;border-bottom:1px solid #e2e8f0;font-weight:bold;font-size:14px;display:flex;align-items:center;gap:8px;}
+        .card-body{padding:18px;}
+        table{width:100%;border-collapse:collapse;font-size:13px;}
+        th{background:#f8f9fa;padding:10px 12px;text-align:left;font-size:12px;color:#555;border-bottom:2px solid #e2e8f0;white-space:nowrap;}
+        td{padding:8px 12px;border-bottom:1px solid #f0f0f0;}
+        tr:hover td{background:#f5fdf5;}
+        .empty-state{text-align:center;padding:40px;color:#999;font-size:14px;}
+        .spinner{display:inline-block;width:16px;height:16px;border:2px solid #ccc;border-top-color:#27ae60;border-radius:50%;animation:spin 0.6s linear infinite;}
+        @keyframes spin{to{transform:rotate(360deg);}}
+        .status-msg{font-size:12px;color:#666;margin-left:8px;}
+        /* Modal */
+        .modal-bg{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;}
+        .modal-bg.active{display:flex;}
+        .modal{background:white;border-radius:10px;padding:24px;width:450px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.2);}
+        .modal h3{margin:0 0 16px;font-size:16px;}
+        .modal label{display:block;font-size:12px;font-weight:bold;color:#555;margin:8px 0 4px;}
+        .modal input[type=text]{width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;}
+        .modal-btns{display:flex;gap:10px;margin-top:16px;justify-content:flex-end;}
+        .modal-btns .btn{padding:8px 20px;}
+        .btn-cancel{background:#e2e8f0;color:#555;}
+        @media(max-width:768px){
+            .ctrl-row{flex-direction:column;align-items:stretch;}
+            .ctrl-row select{width:100%;}
+            .header-right{flex-wrap:wrap;}
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-header">
+    <h1><i class="fa-solid fa-dumbbell"></i> Club Fitness Challenges</h1>
+    <div class="header-right">
+        {% if has_pspla_access %}<a href="/"><i class="fa-solid fa-arrow-left"></i> Dashboard</a>{% endif %}
+        <a href="/account/profile"><i class="fa-solid fa-user-gear"></i> My Account</a>
+        {% if user_avatar %}<img src="{{ user_avatar }}" class="header-avatar" alt="">{% endif %}
+        <span class="header-email">{{ user_email }}</span>
+        <a href="/logout" class="header-signout"><i class="fa-solid fa-right-from-bracket"></i> Sign out</a>
+    </div>
+</div>
+
+<div class="content">
+
+    <!-- Controls -->
+    <div class="ctrl-row">
+        <label>Payment Link:</label>
+        <select id="link-select" onchange="onLinkChange()">
+            <option value="">— Select a link —</option>
+        </select>
+        <button class="btn btn-add" onclick="showAddModal()"><i class="fa-solid fa-plus"></i> Add Link</button>
+        <button class="btn btn-edit" id="btn-edit-link" onclick="showEditModal()" style="display:none"><i class="fa-solid fa-pen"></i> Edit</button>
+        <button class="btn btn-del" id="btn-del-link" onclick="deleteLink()" style="display:none">Delete</button>
+        <div style="flex:1"></div>
+        <button class="btn btn-fetch" id="btn-fetch" onclick="fetchSignups()"><i class="fa-solid fa-rotate"></i> Fetch Signups</button>
+        <button class="btn btn-sync" onclick="syncToDb()"><i class="fa-solid fa-database"></i> Sync to DB</button>
+        <button class="btn btn-export" onclick="exportCSV()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
+        <span class="count-badge" id="count-badge" style="display:none">0</span>
+        <span class="status-msg" id="status-msg"></span>
+    </div>
+
+    <!-- Results Table -->
+    <div class="card">
+        <div class="card-header"><i class="fa-solid fa-users"></i> Challenge Signups</div>
+        <div class="card-body" id="table-area">
+            <div class="empty-state" id="empty-msg">Select a payment link and click Fetch Signups to get started.</div>
+            <div style="overflow-x:auto">
+            <table id="signups-table" style="display:none">
+                <thead><tr>
+                    <th>#</th>
+                    <th>Created (UTC)</th>
+                    <th>Card Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th id="th-cf1">Custom Field 1</th>
+                    <th id="th-cf2">Custom Field 2</th>
+                    <th id="th-cf3">Custom Field 3</th>
+                </tr></thead>
+                <tbody id="signups-body"></tbody>
+            </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Link Modal -->
+<div class="modal-bg" id="add-modal">
+    <div class="modal">
+        <h3><i class="fa-solid fa-plus" style="color:#e67e22"></i> Add Payment Link</h3>
+        <label>Payment Link ID</label>
+        <input type="text" id="add-pl-id" placeholder="plink_abc123...">
+        <label>Label</label>
+        <input type="text" id="add-pl-label" placeholder="e.g. 8 Week Challenge Jan 2026">
+        <label>Custom Column 1 Name (optional)</label>
+        <input type="text" id="add-col1" placeholder="e.g. Emergency Contact">
+        <label>Custom Column 2 Name (optional)</label>
+        <input type="text" id="add-col2" placeholder="e.g. Medical Conditions">
+        <label>Custom Column 3 Name (optional)</label>
+        <input type="text" id="add-col3" placeholder="e.g. T-Shirt Size">
+        <div class="modal-btns">
+            <button class="btn btn-cancel" onclick="closeModal('add-modal')">Cancel</button>
+            <button class="btn btn-fetch" onclick="saveLink()">Save Link</button>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Link Modal -->
+<div class="modal-bg" id="edit-modal">
+    <div class="modal">
+        <h3><i class="fa-solid fa-pen" style="color:#3498db"></i> Edit Payment Link</h3>
+        <label>Payment Link ID</label>
+        <input type="text" id="edit-pl-id" readonly style="background:#f0f0f0;color:#888;">
+        <label>Label</label>
+        <input type="text" id="edit-pl-label">
+        <label>Custom Column 1 Name (optional)</label>
+        <input type="text" id="edit-col1">
+        <label>Custom Column 2 Name (optional)</label>
+        <input type="text" id="edit-col2">
+        <label>Custom Column 3 Name (optional)</label>
+        <input type="text" id="edit-col3">
+        <div class="modal-btns">
+            <button class="btn btn-cancel" onclick="closeModal('edit-modal')">Cancel</button>
+            <button class="btn btn-fetch" onclick="updateLink()">Save Changes</button>
+        </div>
+    </div>
+</div>
+
+<script>
+var _links = [];
+var _currentLink = null;
+var _defaultPL = '{{ default_payment_link }}';
+
+function msg(t) { document.getElementById('status-msg').textContent = t; }
+function showSpinner() { document.getElementById('status-msg').innerHTML = '<span class="spinner"></span> Loading...'; }
+
+function loadLinks() {
+    fetch('/api/club-fitness/links').then(r=>r.json()).then(d=>{
+        _links = d.links || [];
+        var sel = document.getElementById('link-select');
+        var cur = sel.value;
+        sel.innerHTML = '<option value="">— Select a link —</option>';
+        _links.forEach(function(lk){
+            var opt = document.createElement('option');
+            opt.value = lk.payment_link_id;
+            opt.textContent = lk.label + ' (' + lk.payment_link_id + ')';
+            sel.appendChild(opt);
+        });
+        if (cur) sel.value = cur;
+        onLinkChange();
+    });
+}
+
+function onLinkChange() {
+    var sel = document.getElementById('link-select');
+    var pl = sel.value;
+    _currentLink = _links.find(function(l){ return l.payment_link_id === pl; }) || null;
+    document.getElementById('btn-edit-link').style.display = _currentLink ? '' : 'none';
+    document.getElementById('btn-del-link').style.display = _currentLink ? '' : 'none';
+    // Update custom field headers
+    if (_currentLink) {
+        document.getElementById('th-cf1').textContent = _currentLink.col_1_name || 'Custom Field 1';
+        document.getElementById('th-cf2').textContent = _currentLink.col_2_name || 'Custom Field 2';
+        document.getElementById('th-cf3').textContent = _currentLink.col_3_name || 'Custom Field 3';
+    }
+}
+
+function getSelectedPL() {
+    return document.getElementById('link-select').value || _defaultPL;
+}
+
+function fetchSignups() {
+    var pl = getSelectedPL();
+    if (!pl) { alert('Select or add a payment link first.'); return; }
+    showSpinner();
+    document.getElementById('btn-fetch').disabled = true;
+    fetch('/api/club-fitness/signups?payment_link=' + encodeURIComponent(pl))
+        .then(r=>r.json()).then(d=>{
+            document.getElementById('btn-fetch').disabled = false;
+            if (!d.ok) { msg('Error: ' + d.error); return; }
+            renderTable(d.signups);
+            msg('Fetched ' + d.count + ' signups.');
+        }).catch(e=>{ document.getElementById('btn-fetch').disabled = false; msg('Error: ' + e); });
+}
+
+function renderTable(rows) {
+    var tb = document.getElementById('signups-body');
+    var tbl = document.getElementById('signups-table');
+    var badge = document.getElementById('count-badge');
+    var empty = document.getElementById('empty-msg');
+    tb.innerHTML = '';
+    if (!rows || !rows.length) {
+        tbl.style.display = 'none';
+        empty.style.display = '';
+        empty.textContent = 'No signups found for this payment link.';
+        badge.style.display = 'none';
+        return;
+    }
+    // Update column headers from first row labels if no overrides
+    if (rows[0].custom_field_1_label && (!_currentLink || !_currentLink.col_1_name))
+        document.getElementById('th-cf1').textContent = rows[0].custom_field_1_label;
+    if (rows[0].custom_field_2_label && (!_currentLink || !_currentLink.col_2_name))
+        document.getElementById('th-cf2').textContent = rows[0].custom_field_2_label;
+    if (rows[0].custom_field_3_label && (!_currentLink || !_currentLink.col_3_name))
+        document.getElementById('th-cf3').textContent = rows[0].custom_field_3_label;
+    empty.style.display = 'none';
+    tbl.style.display = '';
+    badge.style.display = '';
+    badge.textContent = rows.length;
+    rows.forEach(function(r, i){
+        var tr = document.createElement('tr');
+        var dt = r.created_at ? new Date(r.created_at).toLocaleString('en-NZ', {dateStyle:'medium',timeStyle:'short'}) : '';
+        tr.innerHTML = '<td>' + (i+1) + '</td>' +
+            '<td>' + dt + '</td>' +
+            '<td>' + (r.card_name||'') + '</td>' +
+            '<td>' + (r.customer_email||'') + '</td>' +
+            '<td>' + (r.customer_phone||'') + '</td>' +
+            '<td>' + (r.custom_field_1||'') + '</td>' +
+            '<td>' + (r.custom_field_2||'') + '</td>' +
+            '<td>' + (r.custom_field_3||'') + '</td>';
+        tb.appendChild(tr);
+    });
+}
+
+function syncToDb() {
+    var pl = getSelectedPL();
+    if (!pl) { alert('Select a payment link first.'); return; }
+    if (!confirm('Sync all signups for this link to the database?')) return;
+    showSpinner();
+    fetch('/api/club-fitness/sync', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({payment_link: pl})
+    }).then(r=>r.json()).then(d=>{
+        if (!d.ok) { msg('Error: ' + d.error); return; }
+        msg('Synced ' + d.synced + ' of ' + d.total + ' records to database.');
+    }).catch(e=>msg('Error: ' + e));
+}
+
+function exportCSV() {
+    var pl = getSelectedPL();
+    if (!pl) { alert('Select a payment link first.'); return; }
+    window.location.href = '/api/club-fitness/export?payment_link=' + encodeURIComponent(pl) + '&source=live';
+}
+
+function showAddModal() {
+    document.getElementById('add-pl-id').value = '';
+    document.getElementById('add-pl-label').value = '';
+    document.getElementById('add-col1').value = '';
+    document.getElementById('add-col2').value = '';
+    document.getElementById('add-col3').value = '';
+    document.getElementById('add-modal').classList.add('active');
+}
+
+function showEditModal() {
+    if (!_currentLink) return;
+    document.getElementById('edit-pl-id').value = _currentLink.payment_link_id;
+    document.getElementById('edit-pl-label').value = _currentLink.label || '';
+    document.getElementById('edit-col1').value = _currentLink.col_1_name || '';
+    document.getElementById('edit-col2').value = _currentLink.col_2_name || '';
+    document.getElementById('edit-col3').value = _currentLink.col_3_name || '';
+    document.getElementById('edit-modal').classList.add('active');
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('active'); }
+
+function saveLink() {
+    var pl = document.getElementById('add-pl-id').value.trim();
+    var label = document.getElementById('add-pl-label').value.trim();
+    if (!pl || !label) { alert('Payment Link ID and Label are required.'); return; }
+    fetch('/api/club-fitness/links', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+            payment_link_id: pl, label: label,
+            col_1_name: document.getElementById('add-col1').value.trim(),
+            col_2_name: document.getElementById('add-col2').value.trim(),
+            col_3_name: document.getElementById('add-col3').value.trim()
+        })
+    }).then(r=>r.json()).then(d=>{
+        if (!d.ok) { alert('Error: ' + (d.error||'Unknown')); return; }
+        closeModal('add-modal');
+        loadLinks();
+        // Auto-select the new link
+        setTimeout(function(){ document.getElementById('link-select').value = pl; onLinkChange(); fetchSignups(); }, 300);
+        msg('Link saved.');
+    });
+}
+
+function updateLink() {
+    if (!_currentLink) return;
+    var label = document.getElementById('edit-pl-label').value.trim();
+    if (!label) { alert('Label is required.'); return; }
+    fetch('/api/club-fitness/links', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+            payment_link_id: _currentLink.payment_link_id, label: label,
+            col_1_name: document.getElementById('edit-col1').value.trim(),
+            col_2_name: document.getElementById('edit-col2').value.trim(),
+            col_3_name: document.getElementById('edit-col3').value.trim()
+        })
+    }).then(r=>r.json()).then(d=>{
+        if (!d.ok) { alert('Error: ' + (d.error||'Unknown')); return; }
+        closeModal('edit-modal');
+        loadLinks();
+        msg('Link updated.');
+    });
+}
+
+function deleteLink() {
+    if (!_currentLink) return;
+    if (!confirm('Delete link "' + _currentLink.label + '"?')) return;
+    fetch('/api/club-fitness/links/' + _currentLink.id, {method:'DELETE'})
+        .then(r=>r.json()).then(d=>{
+            if (!d.ok) { alert('Error deleting link.'); return; }
+            document.getElementById('link-select').value = '';
+            loadLinks();
+            msg('Link deleted.');
+        });
+}
+
+// Init
+loadLinks();
+// Auto-fetch if a default payment link is configured
+{% if default_payment_link %}
+setTimeout(function(){
+    var sel = document.getElementById('link-select');
+    if (!sel.value && '{{ default_payment_link }}') {
+        // Check if default is in the list
+        for (var i = 0; i < sel.options.length; i++) {
+            if (sel.options[i].value === '{{ default_payment_link }}') {
+                sel.value = '{{ default_payment_link }}';
+                onLinkChange();
+                fetchSignups();
+                return;
+            }
+        }
+        // Not in list yet — fetch anyway
+        fetchSignups();
+    }
+}, 500);
+{% endif %}
+</script>
+</body>
+</html>
+"""
+
+
+@app.route("/club-fitness")
+def club_fitness_page():
+    """Club Fitness challenge signups page."""
+    has_pspla_access = _is_admin() or any(
+        (session.get("permissions") or _DEFAULT_PERMISSIONS).get(g)
+        for g in ("searches", "database", "history", "utilities")
+    )
+    return render_template_string(
+        CLUB_FITNESS_TEMPLATE,
+        is_admin=_is_admin(),
+        has_pspla_access=has_pspla_access,
+        user_email=session.get("email", ""),
+        user_avatar=session.get("avatar_url", ""),
+        default_payment_link=STRIPE_DEFAULT_PAYMENT_LINK,
+    )
 
 
 if __name__ == "__main__":

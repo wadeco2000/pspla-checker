@@ -73,6 +73,8 @@ SMTP_PASS=...
 NOTIFY_EMAIL=...
 FACEBOOK_APP_ID=...
 FACEBOOK_APP_SECRET=...
+STRIPE_SECRET_KEY=...                    # Stripe secret API key (server-side only, never expose to frontend)
+STRIPE_DEFAULT_PAYMENT_LINK=...          # optional default payment link ID (plink_xxx)
 ```
 
 **Key separation:** `dashboard.py` and `searcher.py` use `SUPABASE_SERVICE_KEY` (bypasses RLS). The public site JS uses the anon `SUPABASE_KEY` which is subject to RLS. Never swap these.
@@ -574,6 +576,53 @@ Search history now tracks which user triggered each search via `triggered_by_use
 4. Stored in `search_history.json` and Supabase `search_runs` table (`triggered_by_user` column, text, nullable)
 
 **Search History UI:** "User" column added to the table, shows the email of who started the search.
+
+---
+
+## Club Fitness Challenges Page (added 22 Mar 2026)
+
+Standalone page at `/club-fitness` for managing Club Fitness gym challenge signups via Stripe payment links. Permission-gated with `club_fitness` group (default OFF).
+
+**How it works:**
+1. Wade creates a Stripe payment link for each challenge (8 week, 12 week, etc.)
+2. Customers pay via the link — Stripe creates a checkout session
+3. The Club Fitness page fetches all completed sessions for that link via Stripe API
+4. Data displayed in a table, exportable as CSV for import into challenge software
+5. Signups can be synced to Supabase for marketing later
+
+**Environment variables:**
+- `STRIPE_SECRET_KEY` — Stripe secret API key (server-side only, never exposed to frontend)
+- `STRIPE_DEFAULT_PAYMENT_LINK` — optional default plink_xxx ID
+
+**Supabase tables:**
+- `challenge_signups` — stores synced signup data (stripe_session_id as unique dedup key). RLS enabled, no anon policies.
+- `challenge_links` — saved payment links with labels and custom CSV column name overrides. RLS enabled, no anon policies.
+
+**Endpoints:**
+
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/club-fitness` | GET | Page route |
+| `/api/club-fitness/signups` | GET | Fetch from Stripe API |
+| `/api/club-fitness/sync` | POST | Fetch from Stripe, upsert to Supabase |
+| `/api/club-fitness/export` | GET | CSV download (live or stored) |
+| `/api/club-fitness/stored` | GET | Fetch from Supabase |
+| `/api/club-fitness/links` | GET/POST | List/save payment links |
+| `/api/club-fitness/links/<id>` | DELETE | Delete a saved link |
+
+**Payment link management:**
+- Dropdown of saved links with labels (e.g. "8 Week Jan 2026")
+- Add/edit/delete links with custom column name overrides for CSV export
+- Column name overrides stored in `challenge_links` table — used in CSV headers
+- Priority: override name > Stripe label > "Custom Field N"
+
+**Security:**
+- Stripe secret key server-side only, loaded from `.env`
+- Payment link IDs validated with `^plink_[a-zA-Z0-9_]+$` regex
+- All Stripe calls via server proxy (no direct frontend access)
+- Rate limited: signups 10/min, sync 5/min, export 5/min
+- CSRF automatic via existing hook
+- RLS on both tables (no anon access)
 
 ---
 
