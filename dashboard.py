@@ -15253,7 +15253,8 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         .recipient-row{display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid #f0f0f0;font-size:12px;}
         .recipient-row:hover{background:#f5f5f5;}
         .recipient-row .rr-name{flex:1;font-weight:600;} .recipient-row .rr-email{flex:1;color:#666;}
-        .rr-sent{color:#27ae60;font-size:11px;}
+        .recipient-row .rr-last{min-width:65px;font-size:10px;color:#888;text-align:center;}
+        .recipient-row .rr-sent{min-width:80px;color:#27ae60;font-size:11px;text-align:center;}
         .campaign-stats{font-size:12px;color:#666;margin:8px 0;}
         .btn-token{background:#eef;border:1px solid #99b;color:#336;padding:2px 8px;border-radius:3px;font-size:11px;font-family:monospace;cursor:pointer;}
         .btn-token:hover{background:#ddf;}
@@ -15895,7 +15896,12 @@ function sortRecipients(col) {
     if (_rcptSortCol === col) { _rcptSortDir = _rcptSortDir === 'asc' ? 'desc' : 'asc'; }
     else { _rcptSortCol = col; _rcptSortDir = 'asc'; }
     _campaignRecipients.sort(function(a,b){
-        var va = (a[col]||'').toLowerCase(), vb = (b[col]||'').toLowerCase();
+        var va, vb;
+        if (col === 'last_sent') {
+            va = a[col] || ''; vb = b[col] || '';
+        } else {
+            va = (a[col]||'').toLowerCase(); vb = (b[col]||'').toLowerCase();
+        }
         if (va < vb) return _rcptSortDir === 'asc' ? -1 : 1;
         if (va > vb) return _rcptSortDir === 'asc' ? 1 : -1;
         return 0;
@@ -15909,20 +15915,20 @@ function renderRecipients() {
     html += '<span style="width:20px;"></span>';
     html += '<span class="rr-name" onclick="sortRecipients(\'name\')">Name' + arrow('name') + '</span>';
     html += '<span class="rr-email" onclick="sortRecipients(\'email\')">Email' + arrow('email') + '</span>';
-    html += '<span style="min-width:50px;cursor:pointer;" onclick="sortRecipients(\'last_challenge\')">Last' + arrow('last_challenge') + '</span>';
-    html += '<span style="min-width:60px;cursor:pointer;" onclick="sortRecipients(\'last_sent\')">Sent' + arrow('last_sent') + '</span>';
+    html += '<span class="rr-last" onclick="sortRecipients(\'last_challenge\')" style="cursor:pointer;">Last' + arrow('last_challenge') + '</span>';
+    html += '<span class="rr-sent" onclick="sortRecipients(\'last_sent\')" style="cursor:pointer;color:#555;">Sent' + arrow('last_sent') + '</span>';
     html += '</div>';
     var selectedCount = 0;
     _campaignRecipients.forEach(function(r, i){
-        var sent = r.last_sent ? '<span class="rr-sent"><i class="fa-solid fa-check"></i> ' + new Date(r.last_sent).toLocaleDateString('en-NZ') + '</span>' : '';
+        var sent = r.last_sent ? '<i class="fa-solid fa-check" style="color:green;"></i> ' + new Date(r.last_sent).toLocaleDateString('en-NZ') : '';
         var checked = r._selected !== false ? 'checked' : '';
         if (r._selected !== false) selectedCount++;
         html += '<div class="recipient-row">';
         html += '<input type="checkbox" id="rcpt-' + i + '" ' + checked + ' onchange="_campaignRecipients[' + i + ']._selected=this.checked;updateSelectedCount()">';
         html += '<span class="rr-name">' + esc(r.first_name) + ' <span style="color:#aaa;font-weight:normal;font-size:11px">(' + esc(r.name) + ')</span></span>';
         html += '<span class="rr-email">' + esc(r.email) + '</span>';
-        html += '<span style="font-size:10px;color:#888;min-width:50px;">' + esc(r.last_challenge||'') + '</span>';
-        html += sent;
+        html += '<span class="rr-last">' + esc(r.last_challenge||'') + '</span>';
+        html += '<span class="rr-sent">' + (sent ? sent : '') + '</span>';
         html += '</div>';
     });
     if (_campaignRecipients.length === 0) html = '<div class="empty-state">No eligible recipients found.</div>';
