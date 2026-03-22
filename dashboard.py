@@ -519,6 +519,8 @@ _RATE_LIMITS = {
     'club_fitness_ai_suggest':   (3, 60),  # 3 AI suggest calls per minute
     'club_fitness_check_bookings': (3, 60), # 3 booking checks per minute
     'club_fitness_save_booking_match': (20, 60), # 20 manual matches per minute
+    'club_fitness_edit_entry':     (20, 60),  # 20 edits per minute
+    'club_fitness_delete_entry':   (10, 60),  # 10 deletes per minute
     'club_fitness_campaign_recipients': (5, 60),
     'club_fitness_campaign_send_test': (5, 60),
     'club_fitness_campaign_send': (2, 300),     # 2 campaign sends per 5 min
@@ -741,6 +743,8 @@ _ROUTE_PERMISSIONS = {
     'club_fitness_ai_suggest': 'club_fitness',
     'club_fitness_check_bookings': 'club_fitness',
     'club_fitness_save_booking_match': 'club_fitness',
+    'club_fitness_edit_entry': 'club_fitness',
+    'club_fitness_delete_entry': 'club_fitness',
     'club_fitness_campaign_recipients': 'club_fitness',
     'club_fitness_campaign_send_test': 'club_fitness',
     'club_fitness_campaign_send': 'club_fitness',
@@ -6378,7 +6382,7 @@ SEARCH_HISTORY_TEMPLATE = """<!DOCTYPE html>
                 <th>Notes</th>
             </tr>
         </thead>
-        <tbody id="tableBody"><tr><td colspan="11" style="text-align:center;color:#aaa;padding:30px;">Loading...</td></tr></tbody>
+        <tbody id="tableBody"><tr><td colspan="12" style="text-align:center;color:#aaa;padding:30px;">Loading...</td></tr></tbody>
     </table>
 </div>
 <script>
@@ -6464,7 +6468,7 @@ function renderTable() {
     });
     if (!rows.length) {
         document.getElementById('tableBody').innerHTML =
-            '<tr><td colspan="11" style="text-align:center;color:#aaa;padding:30px;">No records match.</td></tr>';
+            '<tr><td colspan="12" style="text-align:center;color:#aaa;padding:30px;">No records match.</td></tr>';
         return;
     }
     var html = '';
@@ -6503,12 +6507,12 @@ function renderTable() {
         var extraRows = '';
         if (cfgDet) {
             extraRows += '<tr id="detail-' + idx + '" style="display:none;">'
-                + '<td colspan="11" style="background:#f0f6ff;padding:10px 14px;font-size:12px;color:#333;">'
+                + '<td colspan="12" style="background:#f0f6ff;padding:10px 14px;font-size:12px;color:#333;">'
                 + cfgDet + '</td></tr>';
         }
         if (notes && notes.length > 60) {
             extraRows += '<tr id="notes-' + idx + '" style="display:none;">'
-                + '<td colspan="11" style="background:#fff8f8;padding:10px 14px;font-size:11px;color:#555;white-space:pre-wrap;font-family:monospace;">'
+                + '<td colspan="12" style="background:#fff8f8;padding:10px 14px;font-size:11px;color:#555;white-space:pre-wrap;font-family:monospace;">'
                 + notes.replace(/</g,'&lt;') + '</td></tr>';
         }
 
@@ -14842,6 +14846,61 @@ def club_fitness_save_booking_match():
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
+@app.route("/api/club-fitness/edit-entry", methods=["POST"])
+def club_fitness_edit_entry():
+    """Edit fields on a challenge signup entry."""
+    data = request.json or {}
+    sid = (data.get("stripe_session_id") or "").strip()
+    if not sid:
+        return jsonify({"ok": False, "error": "Missing stripe_session_id."}), 400
+    allowed_fields = {"card_name", "customer_email", "customer_phone", "custom_field_1", "custom_field_2", "custom_field_3"}
+    update = {}
+    for f in allowed_fields:
+        if f in data:
+            update[f] = (data[f] or "").strip()
+    if not update:
+        return jsonify({"ok": False, "error": "No fields to update."}), 400
+    try:
+        r = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/challenge_signups",
+            params={"stripe_session_id": f"eq.{sid}"},
+            json=update,
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal"
+            },
+            timeout=10
+        )
+        return jsonify({"ok": r.ok})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/club-fitness/delete-entry", methods=["POST"])
+def club_fitness_delete_entry():
+    """Delete a challenge signup entry."""
+    data = request.json or {}
+    sid = (data.get("stripe_session_id") or "").strip()
+    if not sid:
+        return jsonify({"ok": False, "error": "Missing stripe_session_id."}), 400
+    try:
+        r = requests.delete(
+            f"{SUPABASE_URL}/rest/v1/challenge_signups",
+            params={"stripe_session_id": f"eq.{sid}"},
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Prefer": "return=minimal"
+            },
+            timeout=10
+        )
+        return jsonify({"ok": r.ok})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 @app.route("/api/club-fitness/campaign-recipients")
 def club_fitness_campaign_recipients():
     """Get list of past signups who are NOT in the latest 6 weeks (eligible for campaign email)."""
@@ -15179,6 +15238,9 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         .appt-email{color:#27ae60;} .appt-ai{color:#9b59b6;} .appt-manual{color:#3498db;} .appt-none{color:#ccc;}
         .appt-change{cursor:pointer;font-size:10px;color:#888;margin-left:4px;text-decoration:underline;}
         .appt-match-btn{font-size:11px;cursor:pointer;color:#e67e22;border:1px solid #e67e22;background:none;border-radius:3px;padding:2px 8px;}
+        .btn-row-edit{background:none;border:1px solid #3498db;color:#3498db;padding:3px 6px;border-radius:3px;cursor:pointer;font-size:11px;}
+        .btn-row-del{background:none;border:1px solid #e74c3c;color:#e74c3c;padding:3px 6px;border-radius:3px;cursor:pointer;font-size:11px;}
+        .btn-row-edit:hover{background:#3498db;color:white;} .btn-row-del:hover{background:#e74c3c;color:white;}
         .btn-campaign{background:#c0392b;color:white;}
         .campaign-panel{display:none;background:white;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.08);padding:18px;margin-bottom:18px;}
         .campaign-panel.active{display:block;}
@@ -15309,6 +15371,7 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
                     <th data-col="gym_scales_weight" onclick="sortBy('gym_scales_weight')">Gym Scales Weight <span class="sort-arrow" id="sort-gym_scales_weight"></span></th>
                     <th data-col="final_weight" onclick="sortBy('final_weight')">Final Weight <span class="sort-arrow" id="sort-final_weight"></span></th>
                     <th data-col="bookafy_appointment_date" onclick="sortBy('bookafy_appointment_date')">Appointment <span class="sort-arrow" id="sort-bookafy_appointment_date"></span></th>
+                    <th></th>
                 </tr></thead>
                 <tbody id="signups-body"></tbody>
             </table>
@@ -15369,6 +15432,30 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
             </div>
         </div>
     </div>
+
+<!-- Edit Entry Modal -->
+<div class="modal-bg" id="edit-entry-modal">
+    <div class="modal">
+        <h3><i class="fa-solid fa-pen" style="color:#3498db"></i> Edit Entry</h3>
+        <input type="hidden" id="edit-entry-sid">
+        <label>Card Name</label>
+        <input type="text" id="edit-entry-card-name">
+        <label>Email</label>
+        <input type="text" id="edit-entry-email">
+        <label>Phone</label>
+        <input type="text" id="edit-entry-phone">
+        <label>Full Name</label>
+        <input type="text" id="edit-entry-full-name">
+        <label id="edit-entry-cf2-label">Goal</label>
+        <input type="text" id="edit-entry-cf2">
+        <label id="edit-entry-cf3-label">Gym Member</label>
+        <input type="text" id="edit-entry-cf3">
+        <div class="modal-btns">
+            <button class="btn btn-cancel" onclick="closeModal('edit-entry-modal')">Cancel</button>
+            <button class="btn btn-fetch" onclick="saveEditEntry()">Save Changes</button>
+        </div>
+    </div>
+</div>
 
 <!-- Manual Match Modal -->
 <div class="modal-bg" id="match-modal">
@@ -15693,6 +15780,68 @@ function clearBookingMatch(sid) {
     });
 }
 
+/* ── Edit / Delete Entries ── */
+function showEditEntry(sid) {
+    var row = _allRows.find(function(r){ return r.stripe_session_id === sid; });
+    if (!row) return;
+    document.getElementById('edit-entry-sid').value = sid;
+    document.getElementById('edit-entry-card-name').value = row.card_name || '';
+    document.getElementById('edit-entry-email').value = row.customer_email || '';
+    document.getElementById('edit-entry-phone').value = row.customer_phone || '';
+    document.getElementById('edit-entry-full-name').value = row.custom_field_1 || '';
+    document.getElementById('edit-entry-cf2').value = row.custom_field_2 || '';
+    document.getElementById('edit-entry-cf3').value = row.custom_field_3 || '';
+    // Set labels from column headers
+    var cf2Label = document.getElementById('th-cf2');
+    var cf3Label = document.getElementById('th-cf3');
+    if (cf2Label) document.getElementById('edit-entry-cf2-label').textContent = cf2Label.textContent.replace(/[▲▼]/g,'').trim();
+    if (cf3Label) document.getElementById('edit-entry-cf3-label').textContent = cf3Label.textContent.replace(/[▲▼]/g,'').trim();
+    document.getElementById('edit-entry-modal').classList.add('active');
+}
+
+function saveEditEntry() {
+    var sid = document.getElementById('edit-entry-sid').value;
+    if (!sid) return;
+    fetch('/api/club-fitness/edit-entry', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+            stripe_session_id: sid,
+            card_name: document.getElementById('edit-entry-card-name').value.trim(),
+            customer_email: document.getElementById('edit-entry-email').value.trim(),
+            customer_phone: document.getElementById('edit-entry-phone').value.trim(),
+            custom_field_1: document.getElementById('edit-entry-full-name').value.trim(),
+            custom_field_2: document.getElementById('edit-entry-cf2').value.trim(),
+            custom_field_3: document.getElementById('edit-entry-cf3').value.trim()
+        })
+    }).then(r=>r.json()).then(d=>{
+        if (!d.ok) { alert('Error: ' + (d.error||'Unknown')); return; }
+        closeModal('edit-entry-modal');
+        // Update local data
+        var row = _allRows.find(function(r){ return r.stripe_session_id === sid; });
+        if (row) {
+            row.card_name = document.getElementById('edit-entry-card-name').value.trim();
+            row.customer_email = document.getElementById('edit-entry-email').value.trim();
+            row.customer_phone = document.getElementById('edit-entry-phone').value.trim();
+            row.custom_field_1 = document.getElementById('edit-entry-full-name').value.trim();
+            row.custom_field_2 = document.getElementById('edit-entry-cf2').value.trim();
+            row.custom_field_3 = document.getElementById('edit-entry-cf3').value.trim();
+        }
+        applyFiltersAndRender();
+        msg('Entry updated.');
+    });
+}
+
+function deleteEntry(sid, name) {
+    if (!confirm('Delete entry for "' + name.replace('[CASH] ','') + '"? This cannot be undone.')) return;
+    fetch('/api/club-fitness/delete-entry', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({stripe_session_id: sid})
+    }).then(r=>r.json()).then(d=>{
+        if (!d.ok) { alert('Error: ' + (d.error||'Unknown')); return; }
+        _allRows = _allRows.filter(function(r){ return r.stripe_session_id !== sid; });
+        applyFiltersAndRender();
+        msg('Entry deleted.');
+    });
+}
+
 /* ── Email Campaign ── */
 var _campaignRecipients = [];
 
@@ -15894,7 +16043,8 @@ function renderTable(rows) {
             '<td>' + esc(r.custom_field_3||'') + '</td>' +
             '<td><input type="text" class="wt-input" value="' + esc(r.gym_scales_weight||'') + '" data-sid="' + esc(sid) + '" data-field="gym_scales_weight" onchange="saveWeight(this)" onclick="event.stopPropagation()"></td>' +
             '<td><input type="text" class="wt-input" value="' + esc(r.final_weight||'') + '" data-sid="' + esc(sid) + '" data-field="final_weight" onchange="saveWeight(this)" onclick="event.stopPropagation()"></td>' +
-            '<td>' + renderApptCell(r) + '</td>';
+            '<td>' + renderApptCell(r) + '</td>' +
+            '<td style="white-space:nowrap"><button class="btn-row-edit" onclick="event.stopPropagation();showEditEntry(\'' + esc(sid) + '\')"><i class="fa-solid fa-pen"></i></button> <button class="btn-row-del" onclick="event.stopPropagation();deleteEntry(\'' + esc(sid) + '\',\'' + esc(r.card_name||'').replace(/'/g,"\\'") + '\')"><i class="fa-solid fa-trash"></i></button></td>';
         tr.onclick = function(){ toggleDetail(sid, this); };
         tb.appendChild(tr);
     });
@@ -15915,11 +16065,11 @@ function toggleDetail(sid, rowEl) {
     var detailTr = document.createElement('tr');
     detailTr.className = 'detail-row';
     detailTr.setAttribute('data-for', sid);
-    detailTr.innerHTML = '<td colspan="11"><span class="spinner"></span> Loading details...</td>';
+    detailTr.innerHTML = '<td colspan="12"><span class="spinner"></span> Loading details...</td>';
     rowEl.parentNode.insertBefore(detailTr, rowEl.nextSibling);
     fetch('/api/club-fitness/session-detail?session_id=' + encodeURIComponent(sid))
         .then(r=>r.json()).then(d=>{
-            if (!d.ok) { detailTr.innerHTML = '<td colspan="11" style="color:#e74c3c">Error: ' + esc(d.error) + '</td>'; return; }
+            if (!d.ok) { detailTr.innerHTML = '<td colspan="12" style="color:#e74c3c">Error: ' + esc(d.error) + '</td>'; return; }
             var det = d.detail;
             var amt = det.amount_total ? (det.currency + ' $' + (det.amount_total/100).toFixed(2)) : '';
             var prods = (det.products||[]).map(function(p){ return esc(p.description) + ' x' + p.quantity; }).join(', ');
@@ -15927,7 +16077,7 @@ function toggleDetail(sid, rowEl) {
             if (det.metadata && Object.keys(det.metadata).length) {
                 meta = Object.keys(det.metadata).map(function(k){ return '<strong>' + esc(k) + ':</strong> ' + esc(det.metadata[k]); }).join(', ');
             }
-            var html = '<td colspan="11"><div class="detail-grid">';
+            var html = '<td colspan="12"><div class="detail-grid">';
             html += '<div><div class="dg-label">Amount</div><div class="dg-value">' + esc(amt) + '</div></div>';
             html += '<div><div class="dg-label">Payment Status</div><div class="dg-value">' + esc(det.payment_status) + '</div></div>';
             html += '<div><div class="dg-label">Payment Method</div><div class="dg-value">' + esc(det.payment_method) + '</div></div>';
@@ -15937,7 +16087,7 @@ function toggleDetail(sid, rowEl) {
             html += '<div><div class="dg-label">Session ID</div><div class="dg-value" style="font-family:monospace;font-size:11px">' + esc(det.id) + '</div></div>';
             html += '</div></td>';
             detailTr.innerHTML = html;
-        }).catch(function(e){ detailTr.innerHTML = '<td colspan="11" style="color:#e74c3c">Error loading details.</td>'; });
+        }).catch(function(e){ detailTr.innerHTML = '<td colspan="12" style="color:#e74c3c">Error loading details.</td>'; });
 }
 
 /* ── Sync / Export ── */
