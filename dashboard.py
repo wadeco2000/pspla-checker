@@ -15151,6 +15151,44 @@ def club_fitness_campaign_recipients():
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
+@app.route("/api/club-fitness/campaign-preview-variations", methods=["POST"])
+def club_fitness_preview_variations():
+    """Generate 5 sample AI variations of the email template for preview."""
+    data = request.json or {}
+    template = (data.get("template") or "").strip()
+    ai_instructions = (data.get("ai_instructions") or "").strip()
+    if not template:
+        return jsonify({"ok": False, "error": "Template is required."}), 400
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key or not ai_instructions:
+        return jsonify({"ok": False, "error": "AI instructions and API key required."}), 400
+    import anthropic, json
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        _sample_template = template.replace("{first_name}", "Sarah").replace("{last_challenge}", "January")
+        resp = client.messages.create(
+            model="claude-haiku-4-20250414",
+            max_tokens=3000,
+            messages=[{"role": "user", "content":
+                f"Generate 5 slightly different versions of this email.\n"
+                f"{ai_instructions}\n"
+                f"Keep the core message and meaning identical each time. "
+                f"Do NOT change any dates, month names, URLs, or specific details.\n\n"
+                f"TEMPLATE:\n{_sample_template}\n\n"
+                f"Respond ONLY with a JSON array of 5 strings. No explanation, no markdown fences."
+            }]
+        )
+        text = resp.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        variations = json.loads(text)
+        return jsonify({"ok": True, "variations": variations[:5]})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 @app.route("/api/club-fitness/campaign-send-test", methods=["POST"])
 def club_fitness_campaign_send_test():
     """Send a test campaign email to a specified address."""
@@ -15597,10 +15635,18 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
                 <textarea class="campaign-template" id="campaign-template" placeholder="Hi {first_name},&#10;&#10;How are you going since your last challenge back in {last_challenge}? We've got a new one starting soon and thought you might be interested...&#10;&#10;Cheers,&#10;Club Fitness Whanganui"></textarea>
                 <label style="font-size:12px;font-weight:bold;color:#555;margin-top:10px;">AI Variation Instructions <span style="color:#888;font-weight:normal;">(how Haiku should vary the emails)</span></label>
                 <textarea class="campaign-template" id="campaign-ai-prompt" style="min-height:60px;font-size:12px;">Swap the greeting (hi/hey/hello/good morning/kia ora/g'day), vary transitional phrases slightly, and swap the sign-off (thanks/cheers/have a great day/take care/kind regards/all the best). Keep the core message and meaning identical each time.</textarea>
-                <div style="display:flex;gap:8px;margin-top:8px;">
+                <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+                    <button class="btn btn-sm" style="background:#8e44ad;color:white;" onclick="previewVariations()"><i class="fa-solid fa-eye"></i> Preview Variations</button>
                     <button class="btn btn-sm" style="background:#3498db;color:white;" onclick="testCampaignEmail()"><i class="fa-solid fa-flask"></i> Send Test to Me</button>
                     <button class="btn btn-sm" style="background:#c0392b;color:white;" onclick="sendCampaign()"><i class="fa-solid fa-paper-plane"></i> Send to Selected</button>
                     <button class="btn btn-sm" style="background:#e2e8f0;color:#555;" onclick="clearCampaignStatus()"><i class="fa-solid fa-rotate-left"></i> Clear Sent Status</button>
+                </div>
+                <div id="variation-preview" style="display:none;margin-top:12px;border:1px solid #e2e8f0;border-radius:8px;padding:12px;background:#fafbfc;max-height:400px;overflow-y:auto;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <strong style="font-size:13px;color:#555;"><i class="fa-solid fa-eye"></i> AI Variation Preview</strong>
+                        <button class="btn btn-sm" style="background:#e2e8f0;color:#555;font-size:10px;" onclick="document.getElementById('variation-preview').style.display='none'">Close</button>
+                    </div>
+                    <div id="variation-preview-content"></div>
                 </div>
             </div>
             <div style="flex:1;min-width:300px;">
@@ -16119,6 +16165,32 @@ function updateSelectedCount() {
 function selectAllRecipients(val) {
     _campaignRecipients.forEach(function(r){ r._selected = val; });
     renderRecipients();
+}
+
+function previewVariations() {
+    var template = document.getElementById('campaign-template').value;
+    var aiPrompt = document.getElementById('campaign-ai-prompt').value;
+    if (!template.trim()) { alert('Please write an email template first.'); return; }
+    if (!aiPrompt.trim()) { alert('Please add AI variation instructions.'); return; }
+    var previewDiv = document.getElementById('variation-preview');
+    var contentDiv = document.getElementById('variation-preview-content');
+    previewDiv.style.display = 'block';
+    contentDiv.innerHTML = '<div style="text-align:center;padding:20px;color:#888;"><i class="fa-solid fa-spinner fa-spin"></i> Generating 5 sample variations...</div>';
+    fetch('/api/club-fitness/campaign-preview-variations', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': _csrf},
+        body: JSON.stringify({template: template, ai_instructions: aiPrompt})
+    }).then(r => r.json()).then(d => {
+        if (!d.ok) { contentDiv.innerHTML = '<div style="color:red;">Error: ' + esc(d.error) + '</div>'; return; }
+        var html = '';
+        d.variations.forEach(function(v, i) {
+            html += '<div style="background:white;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin-bottom:8px;">';
+            html += '<div style="font-size:10px;color:#888;margin-bottom:4px;font-weight:bold;">Variation ' + (i+1) + '</div>';
+            html += '<div style="font-size:12px;white-space:pre-wrap;color:#333;">' + esc(v) + '</div>';
+            html += '</div>';
+        });
+        contentDiv.innerHTML = html;
+    }).catch(e => { contentDiv.innerHTML = '<div style="color:red;">Error: ' + e + '</div>'; });
 }
 
 function testCampaignEmail() {
