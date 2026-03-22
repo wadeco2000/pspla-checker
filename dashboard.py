@@ -46,6 +46,7 @@ RECAPTCHA_SITE_KEY = os.getenv("RECAPTCHA_SITE_KEY", "")
 RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY", "")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_DEFAULT_PAYMENT_LINK = os.getenv("STRIPE_DEFAULT_PAYMENT_LINK", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PAUSE_FLAG = os.path.join(BASE_DIR, "pause.flag")
@@ -579,7 +580,8 @@ def _safe_error(e, fallback="An error occurred"):
 _AUTH_SKIP = {
     'login_page', 'login_password', 'auth_callback', 'auth_verify', 'auth_logout',
     'service_worker', 'health_check', 'auth_2fa_page', 'auth_2fa_verify',
-    'auth_request_access_page', 'auth_request_access_submit'
+    'auth_request_access_page', 'auth_request_access_submit',
+    'club_fitness_webhook'
 }
 
 @app.route('/health')
@@ -13883,6 +13885,18 @@ def club_fitness_signups():
             )
         except Exception:
             pass
+    # Update last_sync_at on the challenge_links row
+    try:
+        requests.patch(
+            f"{SUPABASE_URL}/rest/v1/challenge_links",
+            params={"payment_link_id": f"eq.{pl}"},
+            json={"last_sync_at": now_iso},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                     "Content-Type": "application/json", "Prefer": "return=minimal"},
+            timeout=10
+        )
+    except Exception:
+        pass
     # Return stored data (includes custom columns like gym_scales_weight, final_weight)
     try:
         sr = requests.get(
@@ -13971,6 +13985,89 @@ def club_fitness_save_weight():
         return jsonify({"ok": r.ok})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/club-fitness/webhook", methods=["POST"])
+def club_fitness_webhook():
+    """Stripe webhook — receives checkout.session.completed events in real time."""
+    import stripe
+    if not STRIPE_WEBHOOK_SECRET:
+        return "Webhook not configured", 500
+    payload = request.get_data(as_text=True)
+    sig_header = request.headers.get("Stripe-Signature", "")
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+    except ValueError:
+        return "Invalid payload", 400
+    except stripe.error.SignatureVerificationError:
+        return "Invalid signature", 400
+    if event["type"] != "checkout.session.completed":
+        return "OK", 200  # Ignore other event types
+    session_obj = event["data"]["object"]
+    # Only process if the payment_link is one we're tracking
+    pl_id = session_obj.get("payment_link", "")
+    if not pl_id:
+        return "OK", 200
+    try:
+        lr = requests.get(
+            f"{SUPABASE_URL}/rest/v1/challenge_links",
+            params={"payment_link_id": f"eq.{pl_id}", "select": "id"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+            timeout=10
+        )
+        if not lr.ok or not lr.json():
+            return "OK", 200  # Not a tracked payment link
+    except Exception:
+        pass  # If we can't check, try to save anyway
+    # Build the row from the session object
+    from datetime import datetime, timezone
+    cf = session_obj.get("custom_fields") or []
+    now_iso = datetime.now(timezone.utc).isoformat()
+    entry = {
+        "stripe_session_id": session_obj["id"],
+        "payment_link": pl_id,
+        "created_at": datetime.fromtimestamp(session_obj["created"], tz=timezone.utc).isoformat(),
+        "card_name": (session_obj.get("customer_details") or {}).get("name", "") or "",
+        "customer_email": (session_obj.get("customer_details") or {}).get("email", "") or "",
+        "customer_phone": (session_obj.get("customer_details") or {}).get("phone", "") or "",
+        "custom_field_1": _cf_value(cf[0]) if len(cf) > 0 else "",
+        "custom_field_2": _cf_value(cf[1]) if len(cf) > 1 else "",
+        "custom_field_3": _cf_value(cf[2]) if len(cf) > 2 else "",
+        "custom_field_1_label": _cf_label(cf[0]) if len(cf) > 0 else "",
+        "custom_field_2_label": _cf_label(cf[1]) if len(cf) > 1 else "",
+        "custom_field_3_label": _cf_label(cf[2]) if len(cf) > 2 else "",
+        "synced_at": now_iso,
+    }
+    try:
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/challenge_signups",
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "resolution=merge-duplicates,return=minimal"
+            },
+            json=entry, timeout=15
+        )
+    except Exception as e:
+        print(f"[club-fitness webhook] Failed to save: {e}")
+    # Update last_webhook_at on the challenge_links row
+    try:
+        requests.patch(
+            f"{SUPABASE_URL}/rest/v1/challenge_links",
+            params={"payment_link_id": f"eq.{pl_id}"},
+            json={"last_webhook_at": now_iso},
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal"
+            },
+            timeout=10
+        )
+    except Exception:
+        pass
+    return "OK", 200
 
 
 @app.route("/api/club-fitness/sync", methods=["POST"])
@@ -14345,6 +14442,10 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         .btn-cash{background:#2ecc71;color:white;}
         .cash-badge{display:inline-block;background:#2ecc71;color:white;font-size:10px;font-weight:bold;padding:2px 6px;border-radius:3px;margin-right:4px;}
         tr.cash-row td{background:#f0faf0 !important;}
+        .stripe-status{font-size:11px;color:#888;display:flex;gap:16px;align-items:center;}
+        .stripe-status .ss-item{display:flex;align-items:center;gap:4px;}
+        .stripe-status .ss-dot{width:8px;height:8px;border-radius:50%;display:inline-block;}
+        .ss-dot.green{background:#27ae60;} .ss-dot.orange{background:#e67e22;} .ss-dot.red{background:#e74c3c;} .ss-dot.grey{background:#ccc;}
         /* Modal */
         .modal-bg{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;}
         .modal-bg.active{display:flex;}
@@ -14383,30 +14484,32 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
 
 <div class="content">
 
-    <!-- Controls Row 1: Link selection -->
+    <!-- Controls Row 1: Payment link + actions -->
     <div class="ctrl-row">
         <label>Payment Link:</label>
         <select id="link-select" onchange="onLinkChange()">
             <option value="">— Select a link —</option>
         </select>
-        <button class="btn btn-add" onclick="showAddModal()"><i class="fa-solid fa-plus"></i> Add Link</button>
-        <button class="btn btn-stripe" onclick="fetchStripeLinks()"><i class="fa-brands fa-stripe-s"></i> Import from Stripe</button>
-        <button class="btn btn-cash" onclick="showCashModal()"><i class="fa-solid fa-money-bill-wave"></i> Add Cash Entry</button>
-        <button class="btn btn-edit" id="btn-edit-link" onclick="showEditModal()" style="display:none"><i class="fa-solid fa-pen"></i> Edit</button>
-        <button class="btn btn-del" id="btn-del-link" onclick="deleteLink()" style="display:none">Delete</button>
+        <button class="btn btn-add" onclick="showAddModal()" title="Manually add a payment link by ID"><i class="fa-solid fa-plus"></i> Add Link</button>
+        <button class="btn btn-stripe" onclick="fetchStripeLinks()" title="Browse your Stripe payment links"><i class="fa-brands fa-stripe-s"></i> Browse Stripe Links</button>
+        <button class="btn btn-edit" id="btn-edit-link" onclick="showEditModal()" style="display:none"><i class="fa-solid fa-pen"></i></button>
+        <button class="btn btn-del" id="btn-del-link" onclick="deleteLink()" style="display:none"><i class="fa-solid fa-trash"></i></button>
         <div style="flex:1"></div>
-        <button class="btn btn-fetch" id="btn-fetch" onclick="fetchSignups()"><i class="fa-solid fa-rotate"></i> Sync from Stripe</button>
+        <button class="btn btn-cash" onclick="showCashModal()" title="Add a walk-in cash payment"><i class="fa-solid fa-money-bill-wave"></i> Add Cash Entry</button>
+        <button class="btn btn-fetch" id="btn-fetch" onclick="fetchSignups()" title="Fetch latest entries from Stripe"><i class="fa-solid fa-rotate"></i> Refresh Entries</button>
         <button class="btn btn-export" onclick="exportCSV()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
         <span class="count-badge" id="count-badge" style="display:none">0</span>
         <span class="status-msg" id="status-msg"></span>
     </div>
 
-    <!-- Controls Row 2: Search + Filters -->
+    <!-- Controls Row 2: Search + Filters + Status -->
     <div class="ctrl-row">
         <label><i class="fa-solid fa-search"></i></label>
         <input type="text" id="search-input" class="search-input" placeholder="Search all columns..." oninput="onFilterChange()">
         <label class="filter-check"><input type="checkbox" id="date-filter" checked onchange="onFilterChange()"> Only show last 6 weeks</label>
         <span id="filter-count" style="font-size:12px;color:#888;"></span>
+        <div style="flex:1"></div>
+        <span id="stripe-status" class="stripe-status"></span>
     </div>
 
     <!-- Results Table -->
@@ -14552,8 +14655,32 @@ function onLinkChange() {
         document.getElementById('th-cf1').innerHTML = esc(_currentLink.col_1_name || 'Custom Field 1') + ' <span class="sort-arrow" id="sort-custom_field_1"></span>';
         document.getElementById('th-cf2').innerHTML = esc(_currentLink.col_2_name || 'Custom Field 2') + ' <span class="sort-arrow" id="sort-custom_field_2"></span>';
         document.getElementById('th-cf3').innerHTML = esc(_currentLink.col_3_name || 'Custom Field 3') + ' <span class="sort-arrow" id="sort-custom_field_3"></span>';
+        updateStripeStatus();
         loadStored(pl);
+    } else {
+        document.getElementById('stripe-status').innerHTML = '';
     }
+}
+
+function updateStripeStatus() {
+    if (!_currentLink) return;
+    var ss = document.getElementById('stripe-status');
+    var webhookHtml = '', syncHtml = '';
+    if (_currentLink.last_webhook_at) {
+        var wAge = (Date.now() - new Date(_currentLink.last_webhook_at).getTime()) / 3600000;
+        var wColor = wAge < 24 ? 'green' : wAge < 168 ? 'orange' : 'red';
+        var wDate = new Date(_currentLink.last_webhook_at).toLocaleString('en-NZ', {dateStyle:'medium',timeStyle:'short'});
+        webhookHtml = '<span class="ss-item"><span class="ss-dot ' + wColor + '"></span> Last webhook: ' + wDate + '</span>';
+    } else {
+        webhookHtml = '<span class="ss-item"><span class="ss-dot grey"></span> No webhooks received yet</span>';
+    }
+    if (_currentLink.last_sync_at) {
+        var sDate = new Date(_currentLink.last_sync_at).toLocaleString('en-NZ', {dateStyle:'medium',timeStyle:'short'});
+        syncHtml = '<span class="ss-item"><span class="ss-dot green"></span> Last sync: ' + sDate + '</span>';
+    } else {
+        syncHtml = '<span class="ss-item"><span class="ss-dot grey"></span> Never synced</span>';
+    }
+    ss.innerHTML = webhookHtml + syncHtml;
 }
 
 function loadStored(pl) {
@@ -14592,6 +14719,8 @@ function fetchSignups() {
             }
             applyFiltersAndRender();
             msg('Fetched ' + d.count + ' signups.');
+            // Refresh link data to update status timestamps
+            loadLinks();
         }).catch(e=>{ document.getElementById('btn-fetch').disabled = false; msg('Error: ' + e); });
 }
 
