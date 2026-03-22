@@ -14929,7 +14929,55 @@ function saveCashEntry() {
 function exportCSV() {
     var pl = getSelectedPL();
     if (!pl) { alert('Select a payment link first.'); return; }
-    window.location.href = '/api/club-fitness/export?payment_link=' + encodeURIComponent(pl) + '&source=stored';
+    // Export currently displayed (filtered) rows as CSV client-side
+    var rows = getFilteredRows();
+    if (!rows.length) { alert('No entries to export.'); return; }
+    var cf1h = _currentLink && _currentLink.col_1_name ? _currentLink.col_1_name : (rows[0].custom_field_1_label || 'Custom Field 1');
+    var cf2h = _currentLink && _currentLink.col_2_name ? _currentLink.col_2_name : (rows[0].custom_field_2_label || 'Custom Field 2');
+    var cf3h = _currentLink && _currentLink.col_3_name ? _currentLink.col_3_name : (rows[0].custom_field_3_label || 'Custom Field 3');
+    var headers = ['Created (UTC)', 'Card Name', 'Customer Email', 'Customer Phone', cf1h, cf2h, cf3h, 'Gym Scales Weight', 'Final Weight'];
+    var csvRows = [headers.map(csvCell).join(',')];
+    rows.forEach(function(r){
+        csvRows.push([
+            r.created_at || '', (r.card_name || '').replace('[CASH] ', ''), r.customer_email || '', r.customer_phone || '',
+            r.custom_field_1 || '', r.custom_field_2 || '', r.custom_field_3 || '',
+            r.gym_scales_weight || '', r.final_weight || ''
+        ].map(csvCell).join(','));
+    });
+    var blob = new Blob([csvRows.join('\n')], {type: 'text/csv;charset=utf-8;'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'challenge_signups.csv';
+    a.click();
+}
+function csvCell(v) { v = String(v); return v.indexOf(',') >= 0 || v.indexOf('"') >= 0 || v.indexOf('\n') >= 0 ? '"' + v.replace(/"/g, '""') + '"' : v; }
+function getFilteredRows() {
+    var rows = _allRows.slice();
+    if (document.getElementById('date-filter').checked) {
+        var cutoff = new Date(Date.now() - 6*7*24*60*60*1000).toISOString();
+        rows = rows.filter(function(r){ return r.created_at >= cutoff; });
+    }
+    var q = (document.getElementById('search-input').value || '').toLowerCase().trim();
+    if (q) {
+        rows = rows.filter(function(r){
+            return (r.card_name||'').toLowerCase().indexOf(q) >= 0 ||
+                   (r.customer_email||'').toLowerCase().indexOf(q) >= 0 ||
+                   (r.customer_phone||'').toLowerCase().indexOf(q) >= 0 ||
+                   (r.custom_field_1||'').toLowerCase().indexOf(q) >= 0 ||
+                   (r.custom_field_2||'').toLowerCase().indexOf(q) >= 0 ||
+                   (r.custom_field_3||'').toLowerCase().indexOf(q) >= 0 ||
+                   (r.created_at||'').toLowerCase().indexOf(q) >= 0;
+        });
+    }
+    rows.sort(function(a,b){
+        var va = a[_sortCol] || '', vb = b[_sortCol] || '';
+        if (typeof va === 'string') va = va.toLowerCase();
+        if (typeof vb === 'string') vb = vb.toLowerCase();
+        if (va < vb) return _sortDir === 'asc' ? -1 : 1;
+        if (va > vb) return _sortDir === 'asc' ? 1 : -1;
+        return 0;
+    });
+    return rows;
 }
 
 /* ── Stripe Import ── */
