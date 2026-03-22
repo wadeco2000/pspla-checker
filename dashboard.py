@@ -14838,7 +14838,8 @@ def club_fitness_campaign_recipients():
         # Get ALL signups
         r = requests.get(
             f"{SUPABASE_URL}/rest/v1/challenge_signups",
-            params={"select": "stripe_session_id,card_name,customer_email,customer_phone,created_at,campaign_email_sent_at,campaign_id", "limit": "5000"},
+            params={"select": "stripe_session_id,card_name,custom_field_1,customer_email,customer_phone,created_at,campaign_email_sent_at,campaign_id",
+                    "order": "created_at.desc", "limit": "5000"},
             headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
             timeout=30
         )
@@ -14852,9 +14853,16 @@ def club_fitness_campaign_recipients():
                 email = (s.get("customer_email") or "").lower().strip()
                 if email:
                     recent_emails.add(email)
+        # Track the most recent entry per email (for last_challenge date)
+        latest_by_email = {}  # email → most recent created_at (already sorted desc)
+        for s in all_signups:
+            email = (s.get("customer_email") or "").lower().strip()
+            if email and email not in latest_by_email:
+                latest_by_email[email] = s
         # Build eligible list: older entries whose email is NOT in recent
         seen_emails = set()
         eligible = []
+        _months = ["January","February","March","April","May","June","July","August","September","October","November","December"]
         for s in all_signups:
             if s.get("created_at") and s["created_at"] >= cutoff:
                 continue  # Skip recent entries
@@ -14862,12 +14870,28 @@ def club_fitness_campaign_recipients():
             if not email or email in recent_emails or email in seen_emails:
                 continue  # Skip: already in new challenge, or duplicate
             seen_emails.add(email)
-            name = (s.get("card_name") or "").replace("[CASH] ", "").strip()
+            # Use custom_field_1 (Full Name) for first_name, fall back to card_name
+            full_name = (s.get("custom_field_1") or "").strip()
+            if not full_name:
+                full_name = (s.get("card_name") or "").replace("[CASH] ", "").strip()
+            first_name = full_name.split()[0].title() if full_name else ""
+            display_name = full_name or (s.get("card_name") or "").replace("[CASH] ", "").strip()
+            # Get last challenge date formatted as "July 26"
+            latest = latest_by_email.get(email)
+            last_challenge = ""
+            if latest and latest.get("created_at"):
+                try:
+                    from datetime import datetime as _dt2
+                    _lcd = _dt2.fromisoformat(latest["created_at"].replace("Z", "+00:00"))
+                    last_challenge = f"{_months[_lcd.month - 1]} {str(_lcd.year)[2:]}"
+                except Exception:
+                    pass
             eligible.append({
                 "stripe_session_id": s["stripe_session_id"],
-                "name": name,
-                "first_name": name.split()[0] if name else "",
+                "name": display_name,
+                "first_name": first_name,
                 "email": email,
+                "last_challenge": last_challenge,
                 "last_sent": s.get("campaign_email_sent_at"),
                 "campaign_id": s.get("campaign_id"),
             })
@@ -14891,7 +14915,7 @@ def club_fitness_campaign_send_test():
     # Generate one variation using Haiku
     import anthropic, json
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    variation = template.replace("{first_name}", "Wade")
+    variation = template.replace("{first_name}", "Wade").replace("{last_challenge}", "July 25")
     if api_key:
         try:
             client = anthropic.Anthropic(api_key=api_key)
@@ -14904,8 +14928,9 @@ def club_fitness_campaign_send_test():
                     f"vary transitional phrases slightly (I was hoping/I was wondering/I wanted to reach out), "
                     f"and swap the sign-off (thanks/cheers/have a great day/take care/kind regards). "
                     f"Keep the core message identical. Use the name 'Wade' as the recipient. "
+                    f"Do NOT change any dates, month names, or specific details — only vary greetings, transitions, and sign-offs. "
                     f"Return ONLY the email body text, no subject line, no explanation.\n\n"
-                    f"TEMPLATE:\n{template.replace('{first_name}', 'Wade')}"
+                    f"TEMPLATE:\n{template.replace('{first_name}', 'Wade').replace('{last_challenge}', 'July 25')}"
                 }]
             )
             variation = resp.content[0].text.strip()
@@ -14968,6 +14993,8 @@ def club_fitness_campaign_send():
                     f"vary transitional phrases slightly, "
                     f"and swap the sign-off (thanks/cheers/have a great day/take care/kind regards/all the best). "
                     f"Keep the core message and meaning identical each time. "
+                    f"Do NOT change any dates, month names, or specific details — only vary greetings, transitions, and sign-offs. "
+                    f"Keep {{first_name}} and {{last_challenge}} as literal placeholders — do NOT replace them. "
                     f"The recipient names in order are: {json.dumps(names_list)}. "
                     f"Use {{first_name}} placeholder where the name goes.\n\n"
                     f"TEMPLATE:\n{template}\n\n"
@@ -14999,7 +15026,9 @@ def club_fitness_campaign_send():
     for r in recipients:
         email = r["email"]
         first_name = r.get("first_name", "there")
+        last_challenge = r.get("last_challenge", "")
         body = variations.get(email, template.replace("{first_name}", first_name))
+        body = body.replace("{first_name}", first_name).replace("{last_challenge}", last_challenge)
         try:
             msg = MIMEMultipart("alternative")
             msg["Subject"] = subject
@@ -15303,8 +15332,8 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
             <div style="flex:1;min-width:300px;">
                 <label style="font-size:12px;font-weight:bold;color:#555;">Subject Line</label>
                 <input type="text" class="campaign-subject" id="campaign-subject" placeholder="e.g. Ready for the next challenge?">
-                <label style="font-size:12px;font-weight:bold;color:#555;">Email Template <span style="color:#888;font-weight:normal;">(use {first_name} for their name)</span></label>
-                <textarea class="campaign-template" id="campaign-template" placeholder="Hi {first_name},&#10;&#10;We've got a new challenge starting soon and thought you might be interested...&#10;&#10;Cheers,&#10;Club Fitness Whanganui"></textarea>
+                <label style="font-size:12px;font-weight:bold;color:#555;">Email Template <span style="color:#888;font-weight:normal;">({first_name} = their name, {last_challenge} = e.g. July 25)</span></label>
+                <textarea class="campaign-template" id="campaign-template" placeholder="Hi {first_name},&#10;&#10;How are you going since your last challenge back in {last_challenge}? We've got a new one starting soon and thought you might be interested...&#10;&#10;Cheers,&#10;Club Fitness Whanganui"></textarea>
                 <div style="display:flex;gap:8px;margin-top:8px;">
                     <button class="btn btn-sm" style="background:#3498db;color:white;" onclick="testCampaignEmail()"><i class="fa-solid fa-flask"></i> Send Test to Me</button>
                     <button class="btn btn-sm" style="background:#c0392b;color:white;" onclick="sendCampaign()"><i class="fa-solid fa-paper-plane"></i> Send to Selected</button>
@@ -15682,8 +15711,9 @@ function renderRecipients() {
         if (r._selected !== false) selectedCount++;
         html += '<div class="recipient-row">';
         html += '<input type="checkbox" id="rcpt-' + i + '" ' + checked + ' onchange="_campaignRecipients[' + i + ']._selected=this.checked;updateSelectedCount()">';
-        html += '<span class="rr-name">' + esc(r.name) + '</span>';
+        html += '<span class="rr-name">' + esc(r.first_name) + ' <span style="color:#aaa;font-weight:normal;font-size:11px">(' + esc(r.name) + ')</span></span>';
         html += '<span class="rr-email">' + esc(r.email) + '</span>';
+        html += r.last_challenge ? '<span style="font-size:10px;color:#888;min-width:50px;">' + esc(r.last_challenge) + '</span>' : '';
         html += sent;
         html += '</div>';
     });
