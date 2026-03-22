@@ -14955,7 +14955,11 @@ def club_fitness_campaign_recipients():
                 try:
                     from datetime import datetime as _dt2
                     _lcd = _dt2.fromisoformat(latest["created_at"].replace("Z", "+00:00"))
-                    last_challenge = f"{_months[_lcd.month - 1]} {str(_lcd.year)[2:]}"
+                    from datetime import datetime as _dt_now
+                    if _lcd.year == _dt_now.now().year:
+                        last_challenge = _months[_lcd.month - 1]
+                    else:
+                        last_challenge = f"{_months[_lcd.month - 1]} {str(_lcd.year)[2:]}"
                 except Exception:
                     pass
             eligible.append({
@@ -15884,22 +15888,44 @@ function loadCampaignRecipients() {
     });
 }
 
+var _rcptSortCol = 'name';
+var _rcptSortDir = 'asc';
+
+function sortRecipients(col) {
+    if (_rcptSortCol === col) { _rcptSortDir = _rcptSortDir === 'asc' ? 'desc' : 'asc'; }
+    else { _rcptSortCol = col; _rcptSortDir = 'asc'; }
+    _campaignRecipients.sort(function(a,b){
+        var va = (a[col]||'').toLowerCase(), vb = (b[col]||'').toLowerCase();
+        if (va < vb) return _rcptSortDir === 'asc' ? -1 : 1;
+        if (va > vb) return _rcptSortDir === 'asc' ? 1 : -1;
+        return 0;
+    });
+    renderRecipients();
+}
+
 function renderRecipients() {
-    var html = '';
+    var arrow = function(col){ return _rcptSortCol === col ? (_rcptSortDir === 'asc' ? ' ▲' : ' ▼') : ''; };
+    var html = '<div class="recipient-row" style="background:#f8f9fa;font-weight:bold;font-size:11px;color:#555;cursor:pointer;border-bottom:2px solid #e2e8f0;">';
+    html += '<span style="width:20px;"></span>';
+    html += '<span class="rr-name" onclick="sortRecipients(\'name\')">Name' + arrow('name') + '</span>';
+    html += '<span class="rr-email" onclick="sortRecipients(\'email\')">Email' + arrow('email') + '</span>';
+    html += '<span style="min-width:50px;cursor:pointer;" onclick="sortRecipients(\'last_challenge\')">Last' + arrow('last_challenge') + '</span>';
+    html += '<span style="min-width:60px;cursor:pointer;" onclick="sortRecipients(\'last_sent\')">Sent' + arrow('last_sent') + '</span>';
+    html += '</div>';
     var selectedCount = 0;
     _campaignRecipients.forEach(function(r, i){
-        var sent = r.last_sent ? '<span class="rr-sent"><i class="fa-solid fa-check"></i> Sent ' + new Date(r.last_sent).toLocaleDateString('en-NZ') + '</span>' : '';
+        var sent = r.last_sent ? '<span class="rr-sent"><i class="fa-solid fa-check"></i> ' + new Date(r.last_sent).toLocaleDateString('en-NZ') + '</span>' : '';
         var checked = r._selected !== false ? 'checked' : '';
         if (r._selected !== false) selectedCount++;
         html += '<div class="recipient-row">';
         html += '<input type="checkbox" id="rcpt-' + i + '" ' + checked + ' onchange="_campaignRecipients[' + i + ']._selected=this.checked;updateSelectedCount()">';
         html += '<span class="rr-name">' + esc(r.first_name) + ' <span style="color:#aaa;font-weight:normal;font-size:11px">(' + esc(r.name) + ')</span></span>';
         html += '<span class="rr-email">' + esc(r.email) + '</span>';
-        html += r.last_challenge ? '<span style="font-size:10px;color:#888;min-width:50px;">' + esc(r.last_challenge) + '</span>' : '';
+        html += '<span style="font-size:10px;color:#888;min-width:50px;">' + esc(r.last_challenge||'') + '</span>';
         html += sent;
         html += '</div>';
     });
-    if (!html) html = '<div class="empty-state">No eligible recipients found.</div>';
+    if (_campaignRecipients.length === 0) html = '<div class="empty-state">No eligible recipients found.</div>';
     document.getElementById('recipient-list').innerHTML = html;
     updateSelectedCount();
 }
