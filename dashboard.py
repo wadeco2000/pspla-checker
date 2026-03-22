@@ -14982,25 +14982,24 @@ def club_fitness_campaign_send_test():
     test_email = (data.get("test_email") or "").strip()
     template = (data.get("template") or "").strip()
     subject = (data.get("subject") or "").strip()
+    ai_instructions = (data.get("ai_instructions") or "").strip()
     if not test_email or not template or not subject:
         return jsonify({"ok": False, "error": "test_email, template, and subject are required."}), 400
     # Generate one variation using Haiku
     import anthropic, json
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
     variation = template.replace("{first_name}", "Wade").replace("{last_challenge}", "July 25")
-    if api_key:
+    if api_key and ai_instructions:
         try:
             client = anthropic.Anthropic(api_key=api_key)
             resp = client.messages.create(
                 model="claude-haiku-4-20250414",
                 max_tokens=1000,
                 messages=[{"role": "user", "content":
-                    f"Rewrite this email template with slight natural variations. "
-                    f"Swap the greeting (hi/hey/hello/good morning/kia ora), "
-                    f"vary transitional phrases slightly (I was hoping/I was wondering/I wanted to reach out), "
-                    f"and swap the sign-off (thanks/cheers/have a great day/take care/kind regards). "
+                    f"Rewrite this email template with slight natural variations.\n"
+                    f"{ai_instructions}\n"
                     f"Keep the core message identical. Use the name 'Wade' as the recipient. "
-                    f"Do NOT change any dates, month names, or specific details — only vary greetings, transitions, and sign-offs. "
+                    f"Do NOT change any dates, month names, or specific details. "
                     f"Return ONLY the email body text, no subject line, no explanation.\n\n"
                     f"TEMPLATE:\n{template.replace('{first_name}', 'Wade').replace('{last_challenge}', 'July 25')}"
                 }]
@@ -15041,6 +15040,7 @@ def club_fitness_campaign_send():
     template = (data.get("template") or "").strip()
     subject = (data.get("subject") or "").strip()
     campaign_id = (data.get("campaign_id") or "").strip()
+    ai_instructions = (data.get("ai_instructions") or "").strip()
     if not recipients or not template or not subject:
         return jsonify({"ok": False, "error": "recipients, template, and subject required."}), 400
     if len(recipients) > 450:
@@ -15052,7 +15052,7 @@ def club_fitness_campaign_send():
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
     # Generate all variations in one batch
     variations = {}
-    if api_key and len(recipients) > 0:
+    if api_key and ai_instructions and len(recipients) > 0:
         names_list = [r.get("first_name", "there") for r in recipients]
         try:
             client = anthropic.Anthropic(api_key=api_key)
@@ -15060,12 +15060,10 @@ def club_fitness_campaign_send():
                 model="claude-haiku-4-20250414",
                 max_tokens=4000,
                 messages=[{"role": "user", "content":
-                    f"I need {len(recipients)} slightly different versions of this email template. "
-                    f"For each version: swap the greeting (hi/hey/hello/good morning/kia ora/g'day), "
-                    f"vary transitional phrases slightly, "
-                    f"and swap the sign-off (thanks/cheers/have a great day/take care/kind regards/all the best). "
+                    f"I need {len(recipients)} slightly different versions of this email template.\n"
+                    f"{ai_instructions}\n"
                     f"Keep the core message and meaning identical each time. "
-                    f"Do NOT change any dates, month names, or specific details — only vary greetings, transitions, and sign-offs. "
+                    f"Do NOT change any dates, month names, or specific details. "
                     f"Keep {{first_name}} and {{last_challenge}} as literal placeholders — do NOT replace them. "
                     f"The recipient names in order are: {json.dumps(names_list)}. "
                     f"Use {{first_name}} placeholder where the name goes.\n\n"
@@ -15253,6 +15251,8 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         .recipient-row .rr-name{flex:1;font-weight:600;} .recipient-row .rr-email{flex:1;color:#666;}
         .rr-sent{color:#27ae60;font-size:11px;}
         .campaign-stats{font-size:12px;color:#666;margin:8px 0;}
+        .btn-token{background:#eef;border:1px solid #99b;color:#336;padding:2px 8px;border-radius:3px;font-size:11px;font-family:monospace;cursor:pointer;}
+        .btn-token:hover{background:#ddf;}
         .mapping-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:13px;}
         .mapping-row .mr-raw{flex:1;color:#666;} .mapping-row .mr-arrow{color:#aaa;} .mapping-row .mr-clean{flex:1;}
         .mapping-row .mr-count{font-size:11px;color:#aaa;min-width:35px;text-align:right;}
@@ -15408,8 +15408,15 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
             <div style="flex:1;min-width:300px;">
                 <label style="font-size:12px;font-weight:bold;color:#555;">Subject Line</label>
                 <input type="text" class="campaign-subject" id="campaign-subject" placeholder="e.g. Ready for the next challenge?">
-                <label style="font-size:12px;font-weight:bold;color:#555;">Email Template <span style="color:#888;font-weight:normal;">({first_name} = their name, {last_challenge} = e.g. July 25)</span></label>
+                <label style="font-size:12px;font-weight:bold;color:#555;">Email Template</label>
+                <div style="display:flex;gap:4px;margin-bottom:4px;">
+                    <span style="font-size:11px;color:#888;line-height:24px;">Insert:</span>
+                    <button class="btn-token" onclick="insertToken('first_name')">{first_name}</button>
+                    <button class="btn-token" onclick="insertToken('last_challenge')">{last_challenge}</button>
+                </div>
                 <textarea class="campaign-template" id="campaign-template" placeholder="Hi {first_name},&#10;&#10;How are you going since your last challenge back in {last_challenge}? We've got a new one starting soon and thought you might be interested...&#10;&#10;Cheers,&#10;Club Fitness Whanganui"></textarea>
+                <label style="font-size:12px;font-weight:bold;color:#555;margin-top:10px;">AI Variation Instructions <span style="color:#888;font-weight:normal;">(how Haiku should vary the emails)</span></label>
+                <textarea class="campaign-template" id="campaign-ai-prompt" style="min-height:60px;font-size:12px;">Swap the greeting (hi/hey/hello/good morning/kia ora/g'day), vary transitional phrases slightly, and swap the sign-off (thanks/cheers/have a great day/take care/kind regards/all the best). Keep the core message and meaning identical each time.</textarea>
                 <div style="display:flex;gap:8px;margin-top:8px;">
                     <button class="btn btn-sm" style="background:#3498db;color:white;" onclick="testCampaignEmail()"><i class="fa-solid fa-flask"></i> Send Test to Me</button>
                     <button class="btn btn-sm" style="background:#c0392b;color:white;" onclick="sendCampaign()"><i class="fa-solid fa-paper-plane"></i> Send to Selected</button>
@@ -15842,6 +15849,17 @@ function deleteEntry(sid, name) {
     });
 }
 
+function insertToken(token) {
+    var ta = document.getElementById('campaign-template');
+    var start = ta.selectionStart;
+    var end = ta.selectionEnd;
+    var text = ta.value;
+    var insert = '{' + token + '}';
+    ta.value = text.substring(0, start) + insert + text.substring(end);
+    ta.selectionStart = ta.selectionEnd = start + insert.length;
+    ta.focus();
+}
+
 /* ── Email Campaign ── */
 var _campaignRecipients = [];
 
@@ -15903,8 +15921,9 @@ function testCampaignEmail() {
     var testEmail = prompt('Send test email to:', '{{ user_email }}');
     if (!testEmail) return;
     msg('Sending test email...');
+    var aiInstructions = document.getElementById('campaign-ai-prompt').value.trim();
     fetch('/api/club-fitness/campaign-send-test', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({test_email: testEmail, subject: subject, template: template})
+        body: JSON.stringify({test_email: testEmail, subject: subject, template: template, ai_instructions: aiInstructions})
     }).then(r=>r.json()).then(d=>{
         if (!d.ok) { msg('Error: ' + (d.error||'Unknown')); alert('Error: ' + (d.error||'Unknown')); return; }
         msg('Test email sent to ' + d.sent_to + ' from ' + d.sent_from);
@@ -15924,7 +15943,7 @@ function sendCampaign() {
     msg('Sending ' + selected.length + ' emails... please wait.');
     var campaignId = 'campaign_' + Date.now();
     fetch('/api/club-fitness/campaign-send', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({recipients: selected, subject: subject, template: template, campaign_id: campaignId})
+        body: JSON.stringify({recipients: selected, subject: subject, template: template, campaign_id: campaignId, ai_instructions: document.getElementById('campaign-ai-prompt').value.trim()})
     }).then(r=>r.json()).then(d=>{
         if (!d.ok) { msg('Error: ' + (d.error||'Unknown')); return; }
         msg('Campaign complete: ' + d.sent + ' sent, ' + d.errors + ' errors. From: ' + d.sent_from);
