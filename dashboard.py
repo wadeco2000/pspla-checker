@@ -14391,11 +14391,11 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         </select>
         <button class="btn btn-add" onclick="showAddModal()"><i class="fa-solid fa-plus"></i> Add Link</button>
         <button class="btn btn-stripe" onclick="fetchStripeLinks()"><i class="fa-brands fa-stripe-s"></i> Import from Stripe</button>
+        <button class="btn btn-cash" onclick="showCashModal()"><i class="fa-solid fa-money-bill-wave"></i> Add Cash Entry</button>
         <button class="btn btn-edit" id="btn-edit-link" onclick="showEditModal()" style="display:none"><i class="fa-solid fa-pen"></i> Edit</button>
         <button class="btn btn-del" id="btn-del-link" onclick="deleteLink()" style="display:none">Delete</button>
         <div style="flex:1"></div>
         <button class="btn btn-fetch" id="btn-fetch" onclick="fetchSignups()"><i class="fa-solid fa-rotate"></i> Sync from Stripe</button>
-        <button class="btn btn-cash" onclick="showCashModal()"><i class="fa-solid fa-money-bill-wave"></i> Add Cash Entry</button>
         <button class="btn btn-export" onclick="exportCSV()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
         <span class="count-badge" id="count-badge" style="display:none">0</span>
         <span class="status-msg" id="status-msg"></span>
