@@ -14703,7 +14703,7 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         <button class="btn btn-del" id="btn-del-link" onclick="deleteLink()" style="display:none"><i class="fa-solid fa-trash"></i></button>
         <div style="flex:1"></div>
         <button class="btn btn-cash" onclick="showCashModal()" title="Add a walk-in cash payment"><i class="fa-solid fa-money-bill-wave"></i> Add Cash Entry</button>
-        <button class="btn btn-fetch" id="btn-fetch" onclick="fetchSignups()" title="Fetch latest entries from Stripe"><i class="fa-solid fa-rotate"></i> Refresh Entries</button>
+        <button class="btn btn-fetch" id="btn-fetch" onclick="fetchSignups()" title="Download latest entries from Stripe"><i class="fa-brands fa-stripe-s"></i> Stripe Download</button>
         <button class="btn btn-export" onclick="exportCSV()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
         <button class="btn btn-clean" onclick="showCleanModal()"><i class="fa-solid fa-broom"></i> Clean Data</button>
         <span class="count-badge" id="count-badge" style="display:none">0</span>
@@ -14715,9 +14715,24 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         <label><i class="fa-solid fa-search"></i></label>
         <input type="text" id="search-input" class="search-input" placeholder="Search all columns..." oninput="onFilterChange()">
         <label class="filter-check"><input type="checkbox" id="date-filter" checked onchange="onFilterChange()"> Only show last 6 weeks</label>
+        <label>Gym:</label>
+        <select id="gym-filter" onchange="onFilterChange()" style="min-width:120px;font-size:12px;">
+            <option value="">All</option>
+        </select>
+        <label>Goal:</label>
+        <select id="goal-filter" onchange="onFilterChange()" style="min-width:120px;font-size:12px;">
+            <option value="">All</option>
+        </select>
+        <label class="filter-check"><input type="checkbox" id="show-charts" onchange="toggleCharts()"> Show Charts</label>
         <span id="filter-count" style="font-size:12px;color:#888;"></span>
         <div style="flex:1"></div>
         <span id="stripe-status" class="stripe-status"></span>
+    </div>
+
+    <!-- Refresh bar above table -->
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+        <button class="btn btn-sm" style="background:#f0f0f0;color:#555;padding:4px 12px;font-size:11px;border-radius:4px;" onclick="var pl=getSelectedPL();if(pl)loadStored(pl);"><i class="fa-solid fa-arrows-rotate"></i> Refresh</button>
+        <span style="font-size:11px;color:#aaa;">Reload entries from database</span>
     </div>
 
     <!-- Results Table -->
@@ -14748,7 +14763,7 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
     <!-- Analytics Charts -->
     <div class="charts-row" id="charts-section" style="display:none">
         <div class="chart-card">
-            <h3><i class="fa-solid fa-location-dot" style="color:#3498db"></i> Where do challengers come from?</h3>
+            <h3><i class="fa-solid fa-location-dot" style="color:#3498db"></i> Where do challengers come from? <span id="gym-chart-total" style="font-weight:normal;font-size:12px;color:#888;"></span></h3>
             <div class="chart-controls">
                 <label>From:</label> <input type="date" id="chart-from" onchange="updateCharts()">
                 <label>To:</label> <input type="date" id="chart-to" onchange="updateCharts()">
@@ -14756,7 +14771,7 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
             <canvas id="gym-chart" height="280"></canvas>
         </div>
         <div class="chart-card">
-            <h3><i class="fa-solid fa-weight-scale" style="color:#e67e22"></i> How much do they want to lose?</h3>
+            <h3><i class="fa-solid fa-weight-scale" style="color:#e67e22"></i> How much do they want to lose? <span id="goal-chart-total" style="font-weight:normal;font-size:12px;color:#888;"></span></h3>
             <div class="chart-controls">
                 <label>From:</label> <input type="date" id="chart-from2" onchange="updateCharts()">
                 <label>To:</label> <input type="date" id="chart-to2" onchange="updateCharts()">
@@ -14932,6 +14947,7 @@ function loadStored(pl) {
             if (!d.ok || !d.signups.length) { msg('No stored entries yet. Click Fetch Signups to import from Stripe.'); _allRows = []; applyFiltersAndRender(); return; }
             _allRows = d.signups;
             applyFiltersAndRender();
+            populateFilterDropdowns();
             msg('Loaded ' + d.count + ' stored entries.');
         }).catch(function(){ msg(''); });
 }
@@ -14959,6 +14975,7 @@ function fetchSignups() {
                     document.getElementById('th-cf3').innerHTML = esc(_allRows[0].custom_field_3_label) + ' <span class="sort-arrow" id="sort-custom_field_3"></span>';
             }
             applyFiltersAndRender();
+            populateFilterDropdowns();
             msg('Fetched ' + d.count + ' signups.');
             // Refresh link data to update status timestamps
             loadLinks();
@@ -14966,6 +14983,29 @@ function fetchSignups() {
 }
 
 /* ── Filter + Sort Pipeline ── */
+function populateFilterDropdowns() {
+    var gyms = {}, goals = {};
+    _allRows.forEach(function(r){
+        var g = (r.custom_field_3||'').trim(); if (g) gyms[g] = (gyms[g]||0) + 1;
+        var k = (r.custom_field_2||'').trim(); if (k) goals[k] = (goals[k]||0) + 1;
+    });
+    var gymSel = document.getElementById('gym-filter');
+    var goalSel = document.getElementById('goal-filter');
+    var curGym = gymSel.value, curGoal = goalSel.value;
+    gymSel.innerHTML = '<option value="">All Gyms</option>';
+    goalSel.innerHTML = '<option value="">All Goals</option>';
+    Object.keys(gyms).sort().forEach(function(g){
+        gymSel.innerHTML += '<option value="' + esc(g).replace(/"/g,'&quot;') + '">' + esc(g) + ' (' + gyms[g] + ')</option>';
+    });
+    Object.keys(goals).sort().forEach(function(g){
+        goalSel.innerHTML += '<option value="' + esc(g).replace(/"/g,'&quot;') + '">' + esc(g) + ' (' + goals[g] + ')</option>';
+    });
+    if (curGym) gymSel.value = curGym;
+    if (curGoal) goalSel.value = curGoal;
+}
+
+function toggleCharts() { updateCharts(); }
+
 function applyFiltersAndRender() {
     var rows = _allRows.slice();
     // Date filter
@@ -14973,6 +15013,12 @@ function applyFiltersAndRender() {
         var cutoff = new Date(Date.now() - 6*7*24*60*60*1000).toISOString();
         rows = rows.filter(function(r){ return r.created_at >= cutoff; });
     }
+    // Gym filter
+    var gymVal = document.getElementById('gym-filter').value;
+    if (gymVal) rows = rows.filter(function(r){ return (r.custom_field_3||'').trim() === gymVal; });
+    // Goal filter
+    var goalVal = document.getElementById('goal-filter').value;
+    if (goalVal) rows = rows.filter(function(r){ return (r.custom_field_2||'').trim() === goalVal; });
     // Search filter
     var q = (document.getElementById('search-input').value || '').toLowerCase().trim();
     if (q) {
@@ -15199,6 +15245,10 @@ function getFilteredRows() {
         var cutoff = new Date(Date.now() - 6*7*24*60*60*1000).toISOString();
         rows = rows.filter(function(r){ return r.created_at >= cutoff; });
     }
+    var gymVal = document.getElementById('gym-filter').value;
+    if (gymVal) rows = rows.filter(function(r){ return (r.custom_field_3||'').trim() === gymVal; });
+    var goalVal = document.getElementById('goal-filter').value;
+    if (goalVal) rows = rows.filter(function(r){ return (r.custom_field_2||'').trim() === goalVal; });
     var q = (document.getElementById('search-input').value || '').toLowerCase().trim();
     if (q) {
         rows = rows.filter(function(r){
@@ -15458,7 +15508,8 @@ var _gymChart = null, _goalChart = null;
 var _chartColors = ['#3498db','#e67e22','#27ae60','#e74c3c','#9b59b6','#1abc9c','#f39c12','#2c3e50','#d35400','#8e44ad','#16a085','#c0392b','#2980b9','#7f8c8d'];
 
 function updateCharts() {
-    if (!_allRows.length) { document.getElementById('charts-section').style.display = 'none'; return; }
+    var showCharts = document.getElementById('show-charts').checked;
+    if (!_allRows.length || !showCharts) { document.getElementById('charts-section').style.display = 'none'; return; }
     document.getElementById('charts-section').style.display = '';
     var from1 = document.getElementById('chart-from').value;
     var to1 = document.getElementById('chart-to').value;
@@ -15487,6 +15538,10 @@ function updateCharts() {
         var g = (r.custom_field_2||'').trim();
         if (g) goalCounts[g] = (goalCounts[g]||0) + 1;
     });
+    var gymTotal = Object.values(gymCounts).reduce(function(a,b){return a+b;},0);
+    var goalTotal = Object.values(goalCounts).reduce(function(a,b){return a+b;},0);
+    document.getElementById('gym-chart-total').textContent = '(' + gymTotal + ' total)';
+    document.getElementById('goal-chart-total').textContent = '(' + goalTotal + ' total)';
     renderPie('gym-chart', gymCounts, '_gymChart');
     renderPie('goal-chart', goalCounts, '_goalChart');
 }
