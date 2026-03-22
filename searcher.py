@@ -3991,6 +3991,7 @@ def check_nzsa(company_name, website=None):
 
 PAUSE_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pause.flag")
 RUNNING_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "running.flag")
+QUEUE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "search_queue.json")
 PROGRESS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "search_progress.json")
 FB_PROGRESS_FILE = os.path.join(BASE_DIR, "facebook_progress.json")
 DIR_PROGRESS_FILE = os.path.join(BASE_DIR, "directory_progress.json")
@@ -4322,6 +4323,58 @@ def clear_status():
         "is_running": False, "search_type": "", "progress": "", "log_lines": "",
         "status_json": {}, "last_heartbeat": None, "paused": False, "stop_requested": False,
     })
+
+
+def check_and_launch_queue():
+    """Check if there are queued searches and launch the next one."""
+    if not os.path.exists(QUEUE_FILE):
+        return
+    try:
+        with open(QUEUE_FILE) as f:
+            queue = json.load(f)
+        if not queue or not isinstance(queue, list):
+            return
+        # Pop the first item
+        item = queue.pop(0)
+        # Write updated queue back
+        if queue:
+            with open(QUEUE_FILE, "w") as f:
+                json.dump(queue, f)
+        else:
+            os.remove(QUEUE_FILE)
+        script = item.get("script", "")
+        args = item.get("args", [])
+        triggered_by_user = item.get("triggered_by_user", "")
+        print(f"\n  [Queue] Launching queued search: {item.get('type_label', script)}")
+        # Build command
+        cmd = [sys.executable, "-u", os.path.join(BASE_DIR, script)] + args
+        if triggered_by_user:
+            cmd += ["--triggered-by-user", triggered_by_user]
+        # Write search_start.json
+        started_iso = datetime.now(timezone.utc).isoformat()
+        start_file = os.path.join(BASE_DIR, "search_start.json")
+        try:
+            with open(start_file, "w") as f:
+                json.dump({"started": started_iso, "type": item.get("type", script),
+                           "triggered_by": "queued", "triggered_by_user": triggered_by_user}, f)
+        except Exception:
+            pass
+        # Launch
+        log_file = os.path.join(BASE_DIR, "search_log.txt")
+        log_fh = open(log_file, "w", encoding="utf-8", buffering=1)
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
+        import subprocess as _sp
+        _sp.Popen(cmd, cwd=BASE_DIR, stdout=log_fh, stderr=log_fh, env=env)
+        # Update search state
+        _upsert_search_state({
+            "is_running": True, "search_type": item.get("type", script),
+            "triggered_by": "queued", "started_at": started_iso,
+            "paused": False, "stop_requested": False,
+        })
+    except Exception as e:
+        print(f"  [Queue] Error launching queued search: {e}")
 
 
 def record_search_start(run_type, started_iso, triggered_by, config=None, triggered_by_user=None):
@@ -6171,6 +6224,7 @@ def run_search(triggered_by="manual", triggered_by_user=None):
             if os.path.exists(flag):
                 os.remove(flag)
         _upsert_search_state({"is_running": False, "paused": False, "stop_requested": False})
+        check_and_launch_queue()
 
     print("\n" + "=" * 60)
     print(f"  Search complete!")

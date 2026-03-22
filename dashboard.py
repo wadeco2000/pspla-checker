@@ -67,6 +67,7 @@ PID_FILE = os.path.join(BASE_DIR, "search_pid.txt")
 LOG_FILE = os.path.join(BASE_DIR, "search_log.txt")
 START_FILE = os.path.join(BASE_DIR, "search_start.json")
 BACKUP_LOG_FILE = os.path.join(BASE_DIR, "backup_log.txt")
+QUEUE_FILE = os.path.join(BASE_DIR, "search_queue.json")
 RECHECK_LOG_FILE = os.path.join(BASE_DIR, "recheck_log.txt")
 
 def _get_schedule_enabled():
@@ -1902,6 +1903,13 @@ HTML_TEMPLATE = """
           </form>
         </div>
 
+        <form method="POST" action="/start-facebook-fix" onsubmit="return searchFormCheck(this, 'Facebook-Only Fix')">
+          <button type="submit" class="dd-item">
+            <i class="fa-solid fa-wrench dd-icon" style="color:#e67e22;"></i>
+            <span>Fix Facebook-Only<span class="dd-sub">Enrich entries that only have a Facebook link</span></span>
+          </button>
+        </form>
+
         <div class="dd-divider"></div>
 
         <button type="button" class="dd-item" onclick="togglePanel('panel-partial'); closeMenus();">
@@ -2157,10 +2165,12 @@ HTML_TEMPLATE = """
         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
             <span style="font-size:11px; color:#aaa;"><i class="fa-solid fa-terminal"></i> Search log</span>
             <div style="display:flex; gap:8px; align-items:center;">
+                {% if is_windows %}
                 <button onclick="openTerminal()"
                     style="background:none; border:1px solid #555; color:#ccc; font-size:11px; cursor:pointer; padding:2px 8px; border-radius:4px;">
                     Open Terminal
                 </button>
+                {% endif %}
                 <button onclick="toggleLog()" id="log-toggle-btn"
                     style="background:none; border:none; color:#2980b9; font-size:11px; cursor:pointer; padding:0;">
                     Hide log
@@ -2602,11 +2612,11 @@ HTML_TEMPLATE = """
             <div style="display:flex; align-items:center; gap:12px; margin-top:10px; flex-wrap:wrap;">
                 <label style="font-size:12px; color:#555; cursor:pointer;">
                     <input type="checkbox" id="partial-facebook" style="margin-right:4px;">
-                    <i class="fa-brands fa-facebook-f" style="color:#1877f2;"></i> Facebook (regional)
+                    <i class="fa-brands fa-facebook-f" style="color:#1877f2;"></i> Also search Facebook (with region names)
                 </label>
                 <label style="font-size:12px; color:#555; cursor:pointer;">
                     <input type="checkbox" id="partial-facebook-nz" style="margin-right:4px;">
-                    <i class="fa-brands fa-facebook-f" style="color:#1877f2;"></i> Facebook (NZ-wide, no town)
+                    <i class="fa-brands fa-facebook-f" style="color:#1877f2;"></i> Also search Facebook (nationwide, no region)
                 </label>
                 <label style="font-size:12px; color:#555;">
                     <i class="fa-solid fa-clock" style="color:#888;"></i> FB date range:
@@ -4730,6 +4740,8 @@ HTML_TEMPLATE = """
         var _srConflictCallback = null;
         var _srCancelCallback = null;
 
+        var _srQueueAction = null;  // {label, form} or {label, callback} for queue
+
         function checkRunning(actionLabel, callback, onCancel) {
             fetch('/search-running-info')
                 .then(function(r) { return r.json(); })
@@ -4737,11 +4749,18 @@ HTML_TEMPLATE = """
                     if (!d.running) { callback(); return; }
                     _srConflictCallback = callback;
                     _srCancelCallback = onCancel || null;
+                    _srQueueAction = {label: actionLabel};
                     var mins = d.minutes;
                     var timeStr = mins < 1 ? 'less than a minute' : (mins === 1 ? '1 minute' : mins + ' minutes');
-                    var msg = 'A <strong>' + d.type_label + '</strong> has been running for <strong>' + timeStr + '</strong>.<br>'
-                            + 'Stop it and start <strong>' + actionLabel + '</strong> instead, or cancel?';
+                    var msg = 'A <strong>' + d.type_label + '</strong> has been running for <strong>' + timeStr + '</strong>.';
+                    var qLen = d.queue_length || 0;
+                    if (qLen > 0) msg += '<br><small style="color:#e67e22;">(' + qLen + ' search' + (qLen>1?'es':'') + ' already queued)</small>';
                     document.getElementById('sc-message').innerHTML = msg;
+                    var qBtn = document.getElementById('sc-queue-btn');
+                    if (qBtn) {
+                        qBtn.style.display = qLen < 3 ? '' : 'none';
+                        qBtn.innerHTML = '<i class="fa-solid fa-clock"></i> Queue' + (qLen > 0 ? ' (' + qLen + ' ahead)' : ' (run next)');
+                    }
                     document.getElementById('search-conflict-modal').style.display = 'flex';
                 })
                 .catch(function() { callback(); });
@@ -4778,8 +4797,51 @@ HTML_TEMPLATE = """
         }
 
         function searchFormCheck(form, actionLabel) {
+            _srQueueFormAction = form.action;
+            _srQueueFormData = new FormData(form);
             checkRunning(actionLabel, function() { form.submit(); });
             return false;
+        }
+        var _srQueueFormAction = null;
+        var _srQueueFormData = null;
+
+        function _srQueueSearch() {
+            var btn = document.getElementById('sc-queue-btn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Queueing...';
+            // Determine the route to queue
+            var route = _srQueueFormAction || '';
+            var label = _srQueueAction ? _srQueueAction.label : 'Search';
+            fetch('/queue-search', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({route: route, label: label})
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                document.getElementById('search-conflict-modal').style.display = 'none';
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-clock"></i> Queue (run next)';
+                _srConflictCallback = null;
+                _srCancelCallback = null;
+                if (d.ok) {
+                    _showToast('Queued: ' + label + ' (position ' + d.position + ')', 'success');
+                } else {
+                    _showToast('Queue failed: ' + (d.error || 'unknown'), 'error');
+                }
+            })
+            .catch(function() {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-clock"></i> Queue (run next)';
+            });
+        }
+
+        function _showToast(msg, type) {
+            var t = document.createElement('div');
+            t.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;z-index:99999;color:white;background:' + (type==='error'?'#e74c3c':'#27ae60') + ';box-shadow:0 4px 12px rgba(0,0,0,0.3);';
+            t.textContent = msg;
+            document.body.appendChild(t);
+            setTimeout(function() { t.remove(); }, 4000);
         }
         // ── End Running Search Conflict System ───────────────────────────────────────
     </script>
@@ -4918,6 +4980,11 @@ HTML_TEMPLATE = """
                 style="flex:1; padding:11px; background:#e74c3c; color:white; border:none;
                        border-radius:6px; font-size:14px; font-weight:bold; cursor:pointer;">
                 <i class="fa-solid fa-stop"></i> Stop &amp; Start New
+            </button>
+            <button id="sc-queue-btn" onclick="_srQueueSearch()"
+                style="flex:1; padding:11px; background:#e67e22; color:white; border:none;
+                       border-radius:6px; font-size:14px; font-weight:bold; cursor:pointer;">
+                <i class="fa-solid fa-clock"></i> Queue (run next)
             </button>
             <button onclick="_srDismiss()"
                 style="flex:1; padding:11px; background:#95a5a6; color:white; border:none;
@@ -5113,6 +5180,7 @@ def index():
         is_admin=_is_admin(),
         avatar_url=(_get_user_profile(session.get('email', '')) or {}).get('avatar_url', ''),
         user_perms=_user_perms_dict(),
+        is_windows=os.name == "nt",
     )
 
 
@@ -5516,6 +5584,20 @@ def start_directory_import():
     except Exception as e:
         _safe_error(e, "Failed to start directory import")
         return redirect(url_for("index", message="Failed to start directory import. Check server logs.", type="error"))
+
+
+@app.route("/start-facebook-fix", methods=["POST"])
+def start_facebook_fix():
+    if not _is_admin():
+        return redirect(url_for("index", message="Admin access required.", type="error"))
+    rl = _check_rate_limit('search_launch', 3, 60)
+    if rl: return rl
+    try:
+        _launch("run_facebook_fix.py", triggered_by_user=session.get("email", "localhost"))
+        return redirect(url_for("index", message="Facebook-only fix search started.", type="success"))
+    except Exception as e:
+        _safe_error(e, "Failed to start Facebook-only fix")
+        return redirect(url_for("index", message="Failed to start. Check server logs.", type="error"))
 
 
 @app.route("/dedupe-db", methods=["POST"])
@@ -5996,6 +6078,7 @@ def search_running_info():
         "full": "Full Search", "google-weekly": "Weekly Scan",
         "facebook": "Facebook Search", "directories": "Directory Import",
         "google-partial": "Partial Search", "bulk-recheck": "Bulk Recheck",
+        "facebook-fix": "Facebook-Only Fix",
     }
     search_type = "search"
     started_iso = None
@@ -6025,12 +6108,21 @@ def search_running_info():
                     minutes = int(elapsed.total_seconds() / 60)
             except Exception:
                 pass
+    # Queue length
+    _q_len = 0
+    if os.path.exists(QUEUE_FILE):
+        try:
+            with open(QUEUE_FILE) as _qf:
+                _q_len = len(json.load(_qf))
+        except Exception:
+            pass
     return jsonify({
         "running": True,
         "type": search_type,
         "type_label": _type_labels.get(search_type, search_type.replace("-", " ").title()),
         "minutes": minutes,
         "started": started_iso,
+        "queue_length": _q_len,
     })
 
 
@@ -6386,7 +6478,7 @@ SEARCH_HISTORY_TEMPLATE = """<!DOCTYPE html>
     </table>
 </div>
 <script>
-var TYPE_LABELS   = {full:'Full','google-weekly':'Weekly',facebook:'Facebook','google-partial':'Partial',directories:'Directories','bulk-recheck':'Bulk Recheck'};
+var TYPE_LABELS   = {full:'Full','google-weekly':'Weekly',facebook:'Facebook','google-partial':'Partial',directories:'Directories','bulk-recheck':'Bulk Recheck','facebook-fix':'FB Fix'};
 var STATUS_COLORS = {completed:'#27ae60',stopped:'#e67e22',error:'#e74c3c',running:'#e67e22',crashed:'#c0392b'};
 var _allRows = [];
 
@@ -9042,6 +9134,87 @@ def stop_search():
     return redirect(url_for("index", message="Search stopped.", type="success"))
 
 
+# ── Search Queue System ─────────────────────────────────────────────────────
+
+# Route-to-script mapping for queue system
+_QUEUE_ROUTE_MAP = {
+    "/start-search": ("searcher.py", "full", "Full Search"),
+    "/start-weekly-search": ("run_weekly.py", "google-weekly", "Weekly Scan"),
+    "/start-facebook-search": ("run_facebook.py", "facebook", "Facebook Search"),
+    "/start-directory-import": ("run_directories.py", "directories", "Directory Import"),
+    "/start-facebook-fix": ("run_facebook_fix.py", "facebook-fix", "Facebook-Only Fix"),
+}
+
+
+@app.route("/queue-search", methods=["POST"])
+def queue_search():
+    """Add a search to the queue. Max 3 items."""
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
+    rl = _rate_limit("queue_search", 5, 60)
+    if rl:
+        return rl
+    data = request.get_json(silent=True) or {}
+    route = data.get("route", "")
+    label = data.get("label", "Search")
+    # Extract just the path from the full URL
+    from urllib.parse import urlparse
+    parsed = urlparse(route)
+    path = parsed.path if parsed.path else route
+    if path not in _QUEUE_ROUTE_MAP:
+        return jsonify({"ok": False, "error": f"Unknown search type: {path}"}), 400
+    script, stype, slabel = _QUEUE_ROUTE_MAP[path]
+    # Read current queue
+    queue = []
+    if os.path.exists(QUEUE_FILE):
+        try:
+            with open(QUEUE_FILE) as f:
+                queue = json.load(f)
+        except Exception:
+            queue = []
+    if len(queue) >= 3:
+        return jsonify({"ok": False, "error": "Queue is full (max 3)"}), 400
+    queue.append({
+        "script": script,
+        "args": [],
+        "type": stype,
+        "type_label": slabel,
+        "triggered_by_user": session.get("email", "localhost"),
+        "queued_at": datetime.now(timezone.utc).isoformat(),
+    })
+    with open(QUEUE_FILE, "w") as f:
+        json.dump(queue, f)
+    return jsonify({"ok": True, "position": len(queue)})
+
+
+@app.route("/search-queue")
+def get_search_queue():
+    """Return current queue contents."""
+    queue = []
+    if os.path.exists(QUEUE_FILE):
+        try:
+            with open(QUEUE_FILE) as f:
+                queue = json.load(f)
+        except Exception:
+            pass
+    return jsonify({"ok": True, "queue": queue})
+
+
+@app.route("/clear-queue", methods=["POST"])
+def clear_search_queue():
+    """Empty the search queue."""
+    if not _is_admin():
+        return _jsonify_auth({"ok": False, "error": "admin only"}), 403
+    try:
+        if os.path.exists(QUEUE_FILE):
+            os.remove(QUEUE_FILE)
+    except Exception:
+        pass
+    return jsonify({"ok": True})
+
+# ── End Search Queue System ──────────────────────────────────────────────────
+
+
 def _fetch_company_snapshot(company_id):
     """Fetch the current full company row from Supabase for use as a pre-change snapshot."""
     try:
@@ -10849,6 +11022,7 @@ def _launch(script, args=None, triggered_by="manual", triggered_by_user=None):
         "searcher.py": "full", "run_weekly.py": "google-weekly",
         "run_facebook.py": "facebook", "run_partial.py": "google-partial",
         "run_directories.py": "directories", "run_recheck.py": "bulk-recheck",
+        "run_facebook_fix.py": "facebook-fix",
     }
     started_iso = datetime.now(timezone.utc).isoformat()
     try:

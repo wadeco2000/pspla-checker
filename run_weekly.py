@@ -17,7 +17,7 @@ from searcher import (
     find_email_via_google, find_facebook_url, find_linkedin_url,
     get_root_domain, get_domain_record,
     company_exists, process_and_save_company, check_schema,
-    write_status, clear_status, append_history, record_search_start, check_pause,
+    write_status, clear_status, append_history, record_search_start, check_pause, check_and_launch_queue,
     RUNNING_FLAG, PAUSE_FLAG, SKIP_DOMAINS, NZ_REGIONS, SERPAPI_EXHAUSTED,
     is_directory_listing_url,
     reset_session_log, reset_token_usage, get_session_log, send_search_email,
@@ -147,6 +147,7 @@ def run_weekly(triggered_by="manual", triggered_by_user=None):
         for flag in [RUNNING_FLAG, PAUSE_FLAG]:
             if os.path.exists(flag):
                 os.remove(flag)
+        check_and_launch_queue()
 
     print("\n" + "=" * 60)
     print(f"  Weekly scan complete!")

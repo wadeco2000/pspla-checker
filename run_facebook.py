@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 import traceback as _tb
 
 from searcher import (
-    run_facebook_search, check_schema, clear_status,
+    run_facebook_search, check_schema, clear_status, check_and_launch_queue,
     append_history, record_search_start, RUNNING_FLAG, PAUSE_FLAG,
     reset_session_log, reset_token_usage, get_session_log, send_search_email,
     clear_fb_progress, is_schedule_enabled,
@@ -76,6 +76,7 @@ if __name__ == "__main__":
         for flag in [RUNNING_FLAG, PAUSE_FLAG]:
             if os.path.exists(flag):
                 os.remove(flag)
+        check_and_launch_queue()
 
     print("\n" + "=" * 60)
     print(f"  Facebook search complete!")

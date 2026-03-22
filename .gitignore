@@ -12,6 +12,7 @@ running.flag
 pause.flag
 search_status.json
 search_start.json
+search_queue.json
 
 # Runtime config (written by dashboard)
 partial_config.json

@@ -21,7 +21,7 @@ from searcher import (
     check_pspla, check_pspla_individual, check_companies_office, check_nzsa,
     find_facebook_url, scrape_facebook_page, find_linkedin_url, scrape_linkedin_page,
     get_google_business_profile, detect_services,
-    write_audit, write_status, clear_status, append_history, record_search_start, check_pause,
+    write_audit, write_status, clear_status, append_history, record_search_start, check_pause, check_and_launch_queue,
     reset_session_log, get_session_log, send_search_email, _push_search_status,
     patch_company, enrich_existing_record,
     reset_token_usage, reset_serp_query_count,
@@ -588,6 +588,7 @@ def run_recheck(triggered_by="manual", triggered_by_user=None):
         for flag in [RUNNING_FLAG, PAUSE_FLAG]:
             if os.path.exists(flag):
                 os.remove(flag)
+        check_and_launch_queue()
 
     print("\n" + "=" * 60)
     print(f"  Bulk recheck complete!")

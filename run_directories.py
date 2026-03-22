@@ -17,7 +17,7 @@ import traceback as _tb
 
 from searcher import (
     run_nzsa_import, run_linkedin_import, check_schema,
-    clear_status, append_history, record_search_start,
+    clear_status, append_history, record_search_start, check_and_launch_queue,
     reset_session_log, get_session_log, send_search_email,
     clear_dir_progress, reset_token_usage, is_schedule_enabled,
     reset_serp_query_count,
@@ -106,6 +106,7 @@ if __name__ == "__main__":
         for flag in [RUNNING_FLAG, PAUSE_FLAG]:
             if os.path.exists(flag):
                 os.remove(flag)
+        check_and_launch_queue()
 
     print("\n" + "=" * 60)
     print(f"  Directory import complete!")
