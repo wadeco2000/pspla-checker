@@ -464,6 +464,8 @@ _RATE_LIMITS = {
     'club_fitness_export':     (5, 60),      # 5 exports per minute
     'club_fitness_stored':     (10, 60),     # 10 reads per minute
     'club_fitness_links':      (10, 60),     # 10 link ops per minute
+    'club_fitness_stripe_links': (5, 60),   # 5 Stripe link list calls per minute
+    'club_fitness_session_detail': (20, 60), # 20 session detail calls per minute
 }
 
 @app.before_request
@@ -671,6 +673,8 @@ _ROUTE_PERMISSIONS = {
     'club_fitness_sync': 'club_fitness', 'club_fitness_export': 'club_fitness',
     'club_fitness_stored': 'club_fitness', 'club_fitness_links': 'club_fitness',
     'club_fitness_delete_link': 'club_fitness',
+    'club_fitness_stripe_links': 'club_fitness',
+    'club_fitness_session_detail': 'club_fitness',
 }
 
 # ── TOTP 2FA helpers ──────────────────────────────────────────────────────────
@@ -1990,21 +1994,18 @@ HTML_TEMPLATE = """
     </div>
     {% endif %}
 
-    <!-- Actuate AI -->
-    {% if user_perms.actuate %}
-    <div class="nav-item" id="menu-actuate">
-      <a href="/actuate" class="nav-btn" style="text-decoration:none;">
-        <i class="fa-solid fa-tower-broadcast"></i> Actuate
-      </a>
-    </div>
-    {% endif %}
-
-    <!-- Shelly Tower Control -->
-    {% if user_perms.shelly %}
-    <div class="nav-item" id="menu-shelly">
-      <a href="/shelly" class="nav-btn" style="text-decoration:none;">
-        <i class="fa-solid fa-tower-cell"></i> Shelly
-      </a>
+    <!-- Partners -->
+    {% if user_perms.actuate or user_perms.shelly or user_perms.club_fitness %}
+    <div class="nav-item" id="menu-partners">
+      <button class="nav-btn" onclick="toggleMenu('menu-partners')">
+        <i class="fa-solid fa-handshake"></i> Partners
+        <i class="fa-solid fa-chevron-down nav-chevron"></i>
+      </button>
+      <div class="dropdown">
+        {% if user_perms.actuate %}<a href="/actuate" class="dd-item"><i class="fa-solid fa-tower-broadcast"></i> Actuate</a>{% endif %}
+        {% if user_perms.shelly %}<a href="/shelly" class="dd-item"><i class="fa-solid fa-tower-cell"></i> Shelly</a>{% endif %}
+        {% if user_perms.club_fitness %}<a href="/club-fitness" class="dd-item"><i class="fa-solid fa-dumbbell"></i> Club Fitness</a>{% endif %}
+      </div>
     </div>
     {% endif %}
 
@@ -14070,10 +14071,98 @@ def club_fitness_delete_link(uid):
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
+@app.route("/api/club-fitness/stripe-links")
+def club_fitness_stripe_links():
+    """List all payment links from the Stripe account."""
+    if not STRIPE_SECRET_KEY:
+        return jsonify({"ok": False, "error": "STRIPE_SECRET_KEY not configured."}), 500
+    try:
+        import stripe
+        stripe.api_key = STRIPE_SECRET_KEY
+        links = []
+        for pl in stripe.PaymentLink.list(active=True, limit=100).auto_paging_iter():
+            # Get product name from line items
+            label = pl["id"]
+            try:
+                li = stripe.PaymentLink.list_line_items(pl["id"], limit=1)
+                if li and li.get("data"):
+                    desc = li["data"][0].get("description", "")
+                    if desc:
+                        label = desc
+            except Exception:
+                pass
+            links.append({
+                "id": pl["id"],
+                "url": pl.get("url", ""),
+                "active": pl.get("active", True),
+                "label": label,
+            })
+        return jsonify({"ok": True, "links": links, "count": len(links)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+_CS_RE = _re_mod.compile(r'^cs_[a-zA-Z0-9_]+$')
+
+@app.route("/api/club-fitness/session-detail")
+def club_fitness_session_detail():
+    """Get full details for a single Stripe checkout session."""
+    if not STRIPE_SECRET_KEY:
+        return jsonify({"ok": False, "error": "STRIPE_SECRET_KEY not configured."}), 500
+    sid = request.args.get("session_id", "").strip()
+    if not sid or not _CS_RE.match(sid):
+        return jsonify({"ok": False, "error": "Invalid session_id format."}), 400
+    try:
+        import stripe
+        stripe.api_key = STRIPE_SECRET_KEY
+        s = stripe.checkout.Session.retrieve(sid, expand=["line_items", "payment_intent"])
+        # Extract useful fields
+        detail = {
+            "id": s["id"],
+            "amount_total": s.get("amount_total"),
+            "currency": (s.get("currency") or "").upper(),
+            "payment_status": s.get("payment_status", ""),
+            "status": s.get("status", ""),
+            "customer_email": (s.get("customer_details") or {}).get("email", ""),
+            "customer_name": (s.get("customer_details") or {}).get("name", ""),
+            "customer_phone": (s.get("customer_details") or {}).get("phone", ""),
+        }
+        # Billing address
+        addr = (s.get("customer_details") or {}).get("address")
+        if addr and isinstance(addr, dict):
+            parts = [addr.get("line1", ""), addr.get("line2", ""), addr.get("city", ""),
+                     addr.get("state", ""), addr.get("postal_code", ""), addr.get("country", "")]
+            detail["billing_address"] = ", ".join(p for p in parts if p)
+        else:
+            detail["billing_address"] = ""
+        # Line items / products
+        products = []
+        li = s.get("line_items")
+        if li and li.get("data"):
+            for item in li["data"]:
+                products.append({
+                    "description": item.get("description", ""),
+                    "quantity": item.get("quantity", 1),
+                    "amount_total": item.get("amount_total", 0),
+                })
+        detail["products"] = products
+        # Payment method
+        pi = s.get("payment_intent")
+        if pi and isinstance(pi, dict):
+            pm_types = pi.get("payment_method_types", [])
+            detail["payment_method"] = ", ".join(pm_types) if pm_types else ""
+        else:
+            detail["payment_method"] = ""
+        # Metadata
+        detail["metadata"] = dict(s.get("metadata") or {})
+        return jsonify({"ok": True, "detail": detail})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 # ── Club Fitness Template ─────────────────────────────────────────────────────
 
-CLUB_FITNESS_TEMPLATE = r"""
-<!DOCTYPE html>
+CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -14107,6 +14196,7 @@ CLUB_FITNESS_TEMPLATE = r"""
         .btn-sync{background:#3498db;color:white;}
         .btn-export{background:#8e44ad;color:white;}
         .btn-add{background:#e67e22;color:white;}
+        .btn-stripe{background:#635bff;color:white;}
         .btn-del{background:none;border:1px solid #e74c3c;color:#e74c3c;padding:4px 10px;font-size:11px;border-radius:4px;cursor:pointer;}
         .btn-edit{background:none;border:1px solid #3498db;color:#3498db;padding:4px 10px;font-size:11px;border-radius:4px;cursor:pointer;}
         .btn:disabled{opacity:0.5;cursor:not-allowed;}
@@ -14115,23 +14205,40 @@ CLUB_FITNESS_TEMPLATE = r"""
         .card-header{background:#f8f9fa;padding:12px 18px;border-bottom:1px solid #e2e8f0;font-weight:bold;font-size:14px;display:flex;align-items:center;gap:8px;}
         .card-body{padding:18px;}
         table{width:100%;border-collapse:collapse;font-size:13px;}
-        th{background:#f8f9fa;padding:10px 12px;text-align:left;font-size:12px;color:#555;border-bottom:2px solid #e2e8f0;white-space:nowrap;}
+        th{background:#f8f9fa;padding:10px 12px;text-align:left;font-size:12px;color:#555;border-bottom:2px solid #e2e8f0;white-space:nowrap;cursor:pointer;user-select:none;}
+        th:hover{background:#eef1f5;}
+        th .sort-arrow{font-size:10px;margin-left:4px;color:#aaa;}
+        th .sort-arrow.active{color:#27ae60;}
         td{padding:8px 12px;border-bottom:1px solid #f0f0f0;}
-        tr:hover td{background:#f5fdf5;}
+        tr.data-row{cursor:pointer;}
+        tr.data-row:hover td{background:#f5fdf5;}
+        tr.detail-row td{background:#f8fdf8;padding:12px 20px;}
+        .detail-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;font-size:12px;}
+        .detail-grid .dg-label{font-weight:bold;color:#555;font-size:11px;}
+        .detail-grid .dg-value{color:#333;}
         .empty-state{text-align:center;padding:40px;color:#999;font-size:14px;}
         .spinner{display:inline-block;width:16px;height:16px;border:2px solid #ccc;border-top-color:#27ae60;border-radius:50%;animation:spin 0.6s linear infinite;}
         @keyframes spin{to{transform:rotate(360deg);}}
         .status-msg{font-size:12px;color:#666;margin-left:8px;}
+        .search-input{min-width:180px;}
+        .filter-check{display:flex;align-items:center;gap:5px;font-size:12px;color:#555;cursor:pointer;white-space:nowrap;}
+        .filter-check input{margin:0;}
         /* Modal */
         .modal-bg{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;}
         .modal-bg.active{display:flex;}
-        .modal{background:white;border-radius:10px;padding:24px;width:450px;max-width:90vw;box-shadow:0 8px 32px rgba(0,0,0,0.2);}
+        .modal{background:white;border-radius:10px;padding:24px;width:500px;max-width:90vw;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.2);}
         .modal h3{margin:0 0 16px;font-size:16px;}
         .modal label{display:block;font-size:12px;font-weight:bold;color:#555;margin:8px 0 4px;}
         .modal input[type=text]{width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:4px;font-size:13px;}
         .modal-btns{display:flex;gap:10px;margin-top:16px;justify-content:flex-end;}
         .modal-btns .btn{padding:8px 20px;}
         .btn-cancel{background:#e2e8f0;color:#555;}
+        .stripe-link-item{padding:10px 14px;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:8px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;}
+        .stripe-link-item:hover{background:#f0f4ff;border-color:#635bff;}
+        .stripe-link-item.already-added{opacity:0.5;cursor:default;}
+        .stripe-link-item .sl-label{font-weight:600;font-size:13px;}
+        .stripe-link-item .sl-id{font-size:11px;color:#888;font-family:monospace;}
+        .stripe-link-item .sl-badge{font-size:10px;color:#27ae60;font-weight:bold;}
         @media(max-width:768px){
             .ctrl-row{flex-direction:column;align-items:stretch;}
             .ctrl-row select{width:100%;}
@@ -14154,13 +14261,14 @@ CLUB_FITNESS_TEMPLATE = r"""
 
 <div class="content">
 
-    <!-- Controls -->
+    <!-- Controls Row 1: Link selection -->
     <div class="ctrl-row">
         <label>Payment Link:</label>
         <select id="link-select" onchange="onLinkChange()">
             <option value="">— Select a link —</option>
         </select>
         <button class="btn btn-add" onclick="showAddModal()"><i class="fa-solid fa-plus"></i> Add Link</button>
+        <button class="btn btn-stripe" onclick="fetchStripeLinks()"><i class="fa-brands fa-stripe-s"></i> Import from Stripe</button>
         <button class="btn btn-edit" id="btn-edit-link" onclick="showEditModal()" style="display:none"><i class="fa-solid fa-pen"></i> Edit</button>
         <button class="btn btn-del" id="btn-del-link" onclick="deleteLink()" style="display:none">Delete</button>
         <div style="flex:1"></div>
@@ -14171,6 +14279,14 @@ CLUB_FITNESS_TEMPLATE = r"""
         <span class="status-msg" id="status-msg"></span>
     </div>
 
+    <!-- Controls Row 2: Search + Filters -->
+    <div class="ctrl-row">
+        <label><i class="fa-solid fa-search"></i></label>
+        <input type="text" id="search-input" class="search-input" placeholder="Search all columns..." oninput="onFilterChange()">
+        <label class="filter-check"><input type="checkbox" id="date-filter" checked onchange="onFilterChange()"> Only show last 6 weeks</label>
+        <span id="filter-count" style="font-size:12px;color:#888;"></span>
+    </div>
+
     <!-- Results Table -->
     <div class="card">
         <div class="card-header"><i class="fa-solid fa-users"></i> Challenge Signups</div>
@@ -14179,14 +14295,14 @@ CLUB_FITNESS_TEMPLATE = r"""
             <div style="overflow-x:auto">
             <table id="signups-table" style="display:none">
                 <thead><tr>
-                    <th>#</th>
-                    <th>Created (UTC)</th>
-                    <th>Card Name</th>
-                    <th>Email</th>
-                    <th>Phone</th>
-                    <th id="th-cf1">Custom Field 1</th>
-                    <th id="th-cf2">Custom Field 2</th>
-                    <th id="th-cf3">Custom Field 3</th>
+                    <th data-col="idx" onclick="sortBy('idx')"># <span class="sort-arrow" id="sort-idx"></span></th>
+                    <th data-col="created_at" onclick="sortBy('created_at')">Created (UTC) <span class="sort-arrow active" id="sort-created_at">&#9660;</span></th>
+                    <th data-col="card_name" onclick="sortBy('card_name')">Card Name <span class="sort-arrow" id="sort-card_name"></span></th>
+                    <th data-col="customer_email" onclick="sortBy('customer_email')">Email <span class="sort-arrow" id="sort-customer_email"></span></th>
+                    <th data-col="customer_phone" onclick="sortBy('customer_phone')">Phone <span class="sort-arrow" id="sort-customer_phone"></span></th>
+                    <th data-col="custom_field_1" onclick="sortBy('custom_field_1')" id="th-cf1">Custom Field 1 <span class="sort-arrow" id="sort-custom_field_1"></span></th>
+                    <th data-col="custom_field_2" onclick="sortBy('custom_field_2')" id="th-cf2">Custom Field 2 <span class="sort-arrow" id="sort-custom_field_2"></span></th>
+                    <th data-col="custom_field_3" onclick="sortBy('custom_field_3')" id="th-cf3">Custom Field 3 <span class="sort-arrow" id="sort-custom_field_3"></span></th>
                 </tr></thead>
                 <tbody id="signups-body"></tbody>
             </table>
@@ -14237,13 +14353,30 @@ CLUB_FITNESS_TEMPLATE = r"""
     </div>
 </div>
 
+<!-- Stripe Import Modal -->
+<div class="modal-bg" id="stripe-modal">
+    <div class="modal">
+        <h3><i class="fa-brands fa-stripe-s" style="color:#635bff"></i> Import Payment Link from Stripe</h3>
+        <div id="stripe-links-list"><div class="empty-state"><span class="spinner"></span> Loading payment links from Stripe...</div></div>
+        <div class="modal-btns">
+            <button class="btn btn-cancel" onclick="closeModal('stripe-modal')">Close</button>
+        </div>
+    </div>
+</div>
+
 <script>
 var _links = [];
 var _currentLink = null;
 var _defaultPL = '{{ default_payment_link }}';
+var _allRows = [];
+var _sortCol = 'created_at';
+var _sortDir = 'desc';
+var _expandedSid = null;
+var _searchTimer = null;
 
 function msg(t) { document.getElementById('status-msg').textContent = t; }
 function showSpinner() { document.getElementById('status-msg').innerHTML = '<span class="spinner"></span> Loading...'; }
+function esc(s) { var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
 function loadLinks() {
     fetch('/api/club-fitness/links').then(r=>r.json()).then(d=>{
@@ -14268,18 +14401,16 @@ function onLinkChange() {
     _currentLink = _links.find(function(l){ return l.payment_link_id === pl; }) || null;
     document.getElementById('btn-edit-link').style.display = _currentLink ? '' : 'none';
     document.getElementById('btn-del-link').style.display = _currentLink ? '' : 'none';
-    // Update custom field headers
     if (_currentLink) {
-        document.getElementById('th-cf1').textContent = _currentLink.col_1_name || 'Custom Field 1';
-        document.getElementById('th-cf2').textContent = _currentLink.col_2_name || 'Custom Field 2';
-        document.getElementById('th-cf3').textContent = _currentLink.col_3_name || 'Custom Field 3';
+        document.getElementById('th-cf1').innerHTML = esc(_currentLink.col_1_name || 'Custom Field 1') + ' <span class="sort-arrow" id="sort-custom_field_1"></span>';
+        document.getElementById('th-cf2').innerHTML = esc(_currentLink.col_2_name || 'Custom Field 2') + ' <span class="sort-arrow" id="sort-custom_field_2"></span>';
+        document.getElementById('th-cf3').innerHTML = esc(_currentLink.col_3_name || 'Custom Field 3') + ' <span class="sort-arrow" id="sort-custom_field_3"></span>';
     }
 }
 
-function getSelectedPL() {
-    return document.getElementById('link-select').value || _defaultPL;
-}
+function getSelectedPL() { return document.getElementById('link-select').value || _defaultPL; }
 
+/* ── Fetch signups ── */
 function fetchSignups() {
     var pl = getSelectedPL();
     if (!pl) { alert('Select or add a payment link first.'); return; }
@@ -14289,9 +14420,78 @@ function fetchSignups() {
         .then(r=>r.json()).then(d=>{
             document.getElementById('btn-fetch').disabled = false;
             if (!d.ok) { msg('Error: ' + d.error); return; }
-            renderTable(d.signups);
+            _allRows = d.signups || [];
+            // Update headers from Stripe labels if no overrides
+            if (_allRows.length) {
+                if (_allRows[0].custom_field_1_label && (!_currentLink || !_currentLink.col_1_name))
+                    document.getElementById('th-cf1').innerHTML = esc(_allRows[0].custom_field_1_label) + ' <span class="sort-arrow" id="sort-custom_field_1"></span>';
+                if (_allRows[0].custom_field_2_label && (!_currentLink || !_currentLink.col_2_name))
+                    document.getElementById('th-cf2').innerHTML = esc(_allRows[0].custom_field_2_label) + ' <span class="sort-arrow" id="sort-custom_field_2"></span>';
+                if (_allRows[0].custom_field_3_label && (!_currentLink || !_currentLink.col_3_name))
+                    document.getElementById('th-cf3').innerHTML = esc(_allRows[0].custom_field_3_label) + ' <span class="sort-arrow" id="sort-custom_field_3"></span>';
+            }
+            applyFiltersAndRender();
             msg('Fetched ' + d.count + ' signups.');
         }).catch(e=>{ document.getElementById('btn-fetch').disabled = false; msg('Error: ' + e); });
+}
+
+/* ── Filter + Sort Pipeline ── */
+function applyFiltersAndRender() {
+    var rows = _allRows.slice();
+    // Date filter
+    if (document.getElementById('date-filter').checked) {
+        var cutoff = new Date(Date.now() - 6*7*24*60*60*1000).toISOString();
+        rows = rows.filter(function(r){ return r.created_at >= cutoff; });
+    }
+    // Search filter
+    var q = (document.getElementById('search-input').value || '').toLowerCase().trim();
+    if (q) {
+        rows = rows.filter(function(r){
+            return (r.card_name||'').toLowerCase().indexOf(q) >= 0 ||
+                   (r.customer_email||'').toLowerCase().indexOf(q) >= 0 ||
+                   (r.customer_phone||'').toLowerCase().indexOf(q) >= 0 ||
+                   (r.custom_field_1||'').toLowerCase().indexOf(q) >= 0 ||
+                   (r.custom_field_2||'').toLowerCase().indexOf(q) >= 0 ||
+                   (r.custom_field_3||'').toLowerCase().indexOf(q) >= 0 ||
+                   (r.created_at||'').toLowerCase().indexOf(q) >= 0;
+        });
+    }
+    // Sort
+    rows.sort(function(a,b){
+        var va = a[_sortCol] || '', vb = b[_sortCol] || '';
+        if (typeof va === 'string') va = va.toLowerCase();
+        if (typeof vb === 'string') vb = vb.toLowerCase();
+        if (va < vb) return _sortDir === 'asc' ? -1 : 1;
+        if (va > vb) return _sortDir === 'asc' ? 1 : -1;
+        return 0;
+    });
+    renderTable(rows);
+    // Update filter count
+    var fc = document.getElementById('filter-count');
+    if (rows.length !== _allRows.length) {
+        fc.textContent = 'Showing ' + rows.length + ' of ' + _allRows.length;
+    } else {
+        fc.textContent = '';
+    }
+}
+
+function onFilterChange() {
+    clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(applyFiltersAndRender, 200);
+}
+
+function sortBy(col) {
+    if (_sortCol === col) {
+        _sortDir = _sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        _sortCol = col;
+        _sortDir = 'asc';
+    }
+    // Update sort arrows
+    document.querySelectorAll('.sort-arrow').forEach(function(el){ el.classList.remove('active'); el.innerHTML = ''; });
+    var arrow = document.getElementById('sort-' + col);
+    if (arrow) { arrow.classList.add('active'); arrow.innerHTML = _sortDir === 'asc' ? '&#9650;' : '&#9660;'; }
+    applyFiltersAndRender();
 }
 
 function renderTable(rows) {
@@ -14300,39 +14500,77 @@ function renderTable(rows) {
     var badge = document.getElementById('count-badge');
     var empty = document.getElementById('empty-msg');
     tb.innerHTML = '';
+    _expandedSid = null;
     if (!rows || !rows.length) {
         tbl.style.display = 'none';
         empty.style.display = '';
-        empty.textContent = 'No signups found for this payment link.';
+        empty.textContent = _allRows.length ? 'No signups match your filters.' : 'No signups found for this payment link.';
         badge.style.display = 'none';
         return;
     }
-    // Update column headers from first row labels if no overrides
-    if (rows[0].custom_field_1_label && (!_currentLink || !_currentLink.col_1_name))
-        document.getElementById('th-cf1').textContent = rows[0].custom_field_1_label;
-    if (rows[0].custom_field_2_label && (!_currentLink || !_currentLink.col_2_name))
-        document.getElementById('th-cf2').textContent = rows[0].custom_field_2_label;
-    if (rows[0].custom_field_3_label && (!_currentLink || !_currentLink.col_3_name))
-        document.getElementById('th-cf3').textContent = rows[0].custom_field_3_label;
     empty.style.display = 'none';
     tbl.style.display = '';
     badge.style.display = '';
     badge.textContent = rows.length;
     rows.forEach(function(r, i){
         var tr = document.createElement('tr');
+        tr.className = 'data-row';
+        tr.setAttribute('data-sid', r.stripe_session_id || '');
         var dt = r.created_at ? new Date(r.created_at).toLocaleString('en-NZ', {dateStyle:'medium',timeStyle:'short'}) : '';
         tr.innerHTML = '<td>' + (i+1) + '</td>' +
-            '<td>' + dt + '</td>' +
-            '<td>' + (r.card_name||'') + '</td>' +
-            '<td>' + (r.customer_email||'') + '</td>' +
-            '<td>' + (r.customer_phone||'') + '</td>' +
-            '<td>' + (r.custom_field_1||'') + '</td>' +
-            '<td>' + (r.custom_field_2||'') + '</td>' +
-            '<td>' + (r.custom_field_3||'') + '</td>';
+            '<td>' + esc(dt) + '</td>' +
+            '<td>' + esc(r.card_name||'') + '</td>' +
+            '<td>' + esc(r.customer_email||'') + '</td>' +
+            '<td>' + esc(r.customer_phone||'') + '</td>' +
+            '<td>' + esc(r.custom_field_1||'') + '</td>' +
+            '<td>' + esc(r.custom_field_2||'') + '</td>' +
+            '<td>' + esc(r.custom_field_3||'') + '</td>';
+        tr.onclick = function(){ toggleDetail(r.stripe_session_id, this); };
         tb.appendChild(tr);
     });
 }
 
+/* ── Row click → expand detail ── */
+function toggleDetail(sid, rowEl) {
+    // Close existing
+    var existing = document.querySelector('tr.detail-row');
+    if (existing) {
+        var wasOpen = existing.getAttribute('data-for') === sid;
+        existing.remove();
+        _expandedSid = null;
+        if (wasOpen) return; // clicked same row = just close
+    }
+    if (!sid) return;
+    _expandedSid = sid;
+    var detailTr = document.createElement('tr');
+    detailTr.className = 'detail-row';
+    detailTr.setAttribute('data-for', sid);
+    detailTr.innerHTML = '<td colspan="8"><span class="spinner"></span> Loading details...</td>';
+    rowEl.parentNode.insertBefore(detailTr, rowEl.nextSibling);
+    fetch('/api/club-fitness/session-detail?session_id=' + encodeURIComponent(sid))
+        .then(r=>r.json()).then(d=>{
+            if (!d.ok) { detailTr.innerHTML = '<td colspan="8" style="color:#e74c3c">Error: ' + esc(d.error) + '</td>'; return; }
+            var det = d.detail;
+            var amt = det.amount_total ? (det.currency + ' $' + (det.amount_total/100).toFixed(2)) : '';
+            var prods = (det.products||[]).map(function(p){ return esc(p.description) + ' x' + p.quantity; }).join(', ');
+            var meta = '';
+            if (det.metadata && Object.keys(det.metadata).length) {
+                meta = Object.keys(det.metadata).map(function(k){ return '<strong>' + esc(k) + ':</strong> ' + esc(det.metadata[k]); }).join(', ');
+            }
+            var html = '<td colspan="8"><div class="detail-grid">';
+            html += '<div><div class="dg-label">Amount</div><div class="dg-value">' + esc(amt) + '</div></div>';
+            html += '<div><div class="dg-label">Payment Status</div><div class="dg-value">' + esc(det.payment_status) + '</div></div>';
+            html += '<div><div class="dg-label">Payment Method</div><div class="dg-value">' + esc(det.payment_method) + '</div></div>';
+            html += '<div><div class="dg-label">Product(s)</div><div class="dg-value">' + (prods||'—') + '</div></div>';
+            if (det.billing_address) html += '<div><div class="dg-label">Billing Address</div><div class="dg-value">' + esc(det.billing_address) + '</div></div>';
+            if (meta) html += '<div><div class="dg-label">Metadata</div><div class="dg-value">' + meta + '</div></div>';
+            html += '<div><div class="dg-label">Session ID</div><div class="dg-value" style="font-family:monospace;font-size:11px">' + esc(det.id) + '</div></div>';
+            html += '</div></td>';
+            detailTr.innerHTML = html;
+        }).catch(function(e){ detailTr.innerHTML = '<td colspan="8" style="color:#e74c3c">Error loading details.</td>'; });
+}
+
+/* ── Sync / Export ── */
 function syncToDb() {
     var pl = getSelectedPL();
     if (!pl) { alert('Select a payment link first.'); return; }
@@ -14352,6 +14590,34 @@ function exportCSV() {
     window.location.href = '/api/club-fitness/export?payment_link=' + encodeURIComponent(pl) + '&source=live';
 }
 
+/* ── Stripe Import ── */
+function fetchStripeLinks() {
+    document.getElementById('stripe-links-list').innerHTML = '<div class="empty-state"><span class="spinner"></span> Loading payment links from Stripe...</div>';
+    document.getElementById('stripe-modal').classList.add('active');
+    var savedIds = _links.map(function(l){ return l.payment_link_id; });
+    fetch('/api/club-fitness/stripe-links').then(r=>r.json()).then(d=>{
+        if (!d.ok) { document.getElementById('stripe-links-list').innerHTML = '<div class="empty-state" style="color:#e74c3c">Error: ' + esc(d.error) + '</div>'; return; }
+        var html = '';
+        if (!d.links.length) { html = '<div class="empty-state">No active payment links found in your Stripe account.</div>'; }
+        d.links.forEach(function(sl){
+            var added = savedIds.indexOf(sl.id) >= 0;
+            html += '<div class="stripe-link-item' + (added ? ' already-added' : '') + '" onclick="' + (added ? '' : 'selectStripeLink(\'' + sl.id + '\',\'' + esc(sl.label).replace(/'/g,"\\'") + '\')') + '">';
+            html += '<div><div class="sl-label">' + esc(sl.label) + '</div><div class="sl-id">' + esc(sl.id) + '</div></div>';
+            if (added) html += '<span class="sl-badge">Already added</span>';
+            html += '</div>';
+        });
+        document.getElementById('stripe-links-list').innerHTML = html;
+    }).catch(function(e){ document.getElementById('stripe-links-list').innerHTML = '<div class="empty-state" style="color:#e74c3c">Error loading links.</div>'; });
+}
+
+function selectStripeLink(id, label) {
+    closeModal('stripe-modal');
+    document.getElementById('add-pl-id').value = id;
+    document.getElementById('add-pl-label').value = label;
+    document.getElementById('add-modal').classList.add('active');
+}
+
+/* ── Link CRUD ── */
 function showAddModal() {
     document.getElementById('add-pl-id').value = '';
     document.getElementById('add-pl-label').value = '';
@@ -14388,7 +14654,6 @@ function saveLink() {
         if (!d.ok) { alert('Error: ' + (d.error||'Unknown')); return; }
         closeModal('add-modal');
         loadLinks();
-        // Auto-select the new link
         setTimeout(function(){ document.getElementById('link-select').value = pl; onLinkChange(); fetchSignups(); }, 300);
         msg('Link saved.');
     });
@@ -14427,12 +14692,10 @@ function deleteLink() {
 
 // Init
 loadLinks();
-// Auto-fetch if a default payment link is configured
 {% if default_payment_link %}
 setTimeout(function(){
     var sel = document.getElementById('link-select');
-    if (!sel.value && '{{ default_payment_link }}') {
-        // Check if default is in the list
+    if (!sel.value) {
         for (var i = 0; i < sel.options.length; i++) {
             if (sel.options[i].value === '{{ default_payment_link }}') {
                 sel.value = '{{ default_payment_link }}';
@@ -14441,7 +14704,6 @@ setTimeout(function(){
                 return;
             }
         }
-        // Not in list yet — fetch anyway
         fetchSignups();
     }
 }, 500);
