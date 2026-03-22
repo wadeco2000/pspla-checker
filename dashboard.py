@@ -47,6 +47,8 @@ RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY", "")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_DEFAULT_PAYMENT_LINK = os.getenv("STRIPE_DEFAULT_PAYMENT_LINK", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+BOOKAFY_API_KEY = os.getenv("BOOKAFY_API_KEY", "")
+BOOKAFY_STAFF_EMAIL = os.getenv("BOOKAFY_STAFF_EMAIL", "mat@clubfitness.co.nz")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PAUSE_FLAG = os.path.join(BASE_DIR, "pause.flag")
@@ -512,6 +514,8 @@ _RATE_LIMITS = {
     'club_fitness_mappings_batch': (5, 60), # 5 batch applies per minute
     'club_fitness_unique_values': (10, 60), # 10 unique value queries per minute
     'club_fitness_ai_suggest':   (3, 60),  # 3 AI suggest calls per minute
+    'club_fitness_check_bookings': (3, 60), # 3 booking checks per minute
+    'club_fitness_save_booking_match': (20, 60), # 20 manual matches per minute
 }
 
 @app.before_request
@@ -728,6 +732,8 @@ _ROUTE_PERMISSIONS = {
     'club_fitness_mappings_batch': 'club_fitness',
     'club_fitness_unique_values': 'club_fitness',
     'club_fitness_ai_suggest': 'club_fitness',
+    'club_fitness_check_bookings': 'club_fitness',
+    'club_fitness_save_booking_match': 'club_fitness',
 }
 
 # ── TOTP 2FA helpers ──────────────────────────────────────────────────────────
@@ -6361,7 +6367,7 @@ SEARCH_HISTORY_TEMPLATE = """<!DOCTYPE html>
                 <th>Notes</th>
             </tr>
         </thead>
-        <tbody id="tableBody"><tr><td colspan="10" style="text-align:center;color:#aaa;padding:30px;">Loading...</td></tr></tbody>
+        <tbody id="tableBody"><tr><td colspan="11" style="text-align:center;color:#aaa;padding:30px;">Loading...</td></tr></tbody>
     </table>
 </div>
 <script>
@@ -6447,7 +6453,7 @@ function renderTable() {
     });
     if (!rows.length) {
         document.getElementById('tableBody').innerHTML =
-            '<tr><td colspan="10" style="text-align:center;color:#aaa;padding:30px;">No records match.</td></tr>';
+            '<tr><td colspan="11" style="text-align:center;color:#aaa;padding:30px;">No records match.</td></tr>';
         return;
     }
     var html = '';
@@ -6486,12 +6492,12 @@ function renderTable() {
         var extraRows = '';
         if (cfgDet) {
             extraRows += '<tr id="detail-' + idx + '" style="display:none;">'
-                + '<td colspan="10" style="background:#f0f6ff;padding:10px 14px;font-size:12px;color:#333;">'
+                + '<td colspan="11" style="background:#f0f6ff;padding:10px 14px;font-size:12px;color:#333;">'
                 + cfgDet + '</td></tr>';
         }
         if (notes && notes.length > 60) {
             extraRows += '<tr id="notes-' + idx + '" style="display:none;">'
-                + '<td colspan="10" style="background:#fff8f8;padding:10px 14px;font-size:11px;color:#555;white-space:pre-wrap;font-family:monospace;">'
+                + '<td colspan="11" style="background:#fff8f8;padding:10px 14px;font-size:11px;color:#555;white-space:pre-wrap;font-family:monospace;">'
                 + notes.replace(/</g,'&lt;') + '</td></tr>';
         }
 
@@ -14571,6 +14577,250 @@ def club_fitness_ai_suggest():
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
+@app.route("/api/club-fitness/check-bookings", methods=["POST"])
+def club_fitness_check_bookings():
+    """Fetch Bookafy appointments and match against signups using email then AI."""
+    if not BOOKAFY_API_KEY:
+        return jsonify({"ok": False, "error": "BOOKAFY_API_KEY not configured."}), 500
+    data = request.json or {}
+    pl = _validate_payment_link(data.get("payment_link", "").strip())
+    if not pl:
+        return jsonify({"ok": False, "error": "No valid payment_link."}), 400
+    # Fetch signups from Supabase
+    try:
+        sr = requests.get(
+            f"{SUPABASE_URL}/rest/v1/challenge_signups",
+            params={"payment_link": f"eq.{pl}", "select": "*"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+            timeout=30
+        )
+        signups = sr.json() if sr.ok else []
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Supabase error: {e}"}), 502
+    # Fetch Bookafy appointments (today → 6 weeks ahead)
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    end = now + timedelta(weeks=6)
+    try:
+        br = requests.get(
+            "https://app.bookafy.com/api/v3/appointments",
+            params={
+                "api_key": BOOKAFY_API_KEY,
+                "email": BOOKAFY_STAFF_EMAIL,
+                "from_date": now.strftime("%Y-%m-%dT00:00:00"),
+                "end_date": end.strftime("%Y-%m-%dT23:59:59"),
+                "per_page": "200",
+            },
+            timeout=30
+        )
+        if not br.ok:
+            return jsonify({"ok": False, "error": f"Bookafy API error: {br.status_code}"}), 502
+        bk_data = br.json()
+        # Handle response format — could be list or nested
+        if isinstance(bk_data, dict) and "response" in bk_data:
+            appointments = bk_data["response"] if isinstance(bk_data["response"], list) else [bk_data["response"].get("appointment", bk_data["response"])]
+        elif isinstance(bk_data, list):
+            appointments = bk_data
+        else:
+            appointments = []
+        # Flatten if wrapped
+        flat_appts = []
+        for a in appointments:
+            if isinstance(a, dict) and "appointment" in a:
+                flat_appts.append(a["appointment"])
+            elif isinstance(a, dict) and "id" in a:
+                flat_appts.append(a)
+        appointments = [a for a in flat_appts if a.get("is_active", True)]
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Bookafy error: {e}"}), 502
+
+    # Step 1: Email matching
+    appt_by_email = {}
+    for a in appointments:
+        cust = a.get("customer") or {}
+        cust_detail = cust.get("customer_detail_hstore") or {}
+        # Try multiple email sources
+        emails = set()
+        for field in ["email", "email_deleted"]:
+            e = (cust.get(field) or "").lower().strip()
+            if e and "@" in e:
+                emails.add(e)
+        if cust_detail.get("email"):
+            emails.add(cust_detail["email"].lower().strip())
+        for em in emails:
+            if em not in appt_by_email:
+                appt_by_email[em] = a
+
+    matched = {}   # signup stripe_session_id → {appointment_id, date, match_type}
+    matched_appt_ids = set()
+    for s in signups:
+        if s.get("bookafy_match_type") == "manual":
+            # Don't override manual matches
+            matched[s["stripe_session_id"]] = {
+                "appointment_id": s.get("bookafy_appointment_id", ""),
+                "appointment_date": s.get("bookafy_appointment_date", ""),
+                "match_type": "manual"
+            }
+            if s.get("bookafy_appointment_id"):
+                matched_appt_ids.add(str(s["bookafy_appointment_id"]))
+            continue
+        email = (s.get("customer_email") or "").lower().strip()
+        if email and email in appt_by_email:
+            a = appt_by_email[email]
+            matched[s["stripe_session_id"]] = {
+                "appointment_id": str(a["id"]),
+                "appointment_date": a.get("appointment_start_time", a.get("appointment_date", "")),
+                "match_type": "email"
+            }
+            matched_appt_ids.add(str(a["id"]))
+
+    # Step 2: AI name matching for unmatched signups
+    unmatched_signups = [s for s in signups if s["stripe_session_id"] not in matched]
+    unmatched_appts = [a for a in appointments if str(a["id"]) not in matched_appt_ids]
+
+    if unmatched_signups and unmatched_appts:
+        import anthropic, json
+        api_key = os.getenv("ANTHROPIC_API_KEY", "")
+        if api_key:
+            # Build name lists
+            signup_names = []
+            for s in unmatched_signups:
+                name = (s.get("card_name") or "").replace("[CASH] ", "").strip()
+                signup_names.append({"id": s["stripe_session_id"], "name": name, "email": s.get("customer_email", "")})
+            appt_names = []
+            for a in unmatched_appts:
+                cust = a.get("customer") or {}
+                cust_detail = cust.get("customer_detail_hstore") or {}
+                appt_info = a.get("appointment_customer_info") or {}
+                name = cust_detail.get("name") or appt_info.get("name") or cust.get("name_deleted") or ""
+                appt_names.append({"id": str(a["id"]), "name": name, "date": a.get("appointment_start_time", "")})
+
+            if signup_names and appt_names:
+                prompt = (
+                    f"Match challenge signups to Bookafy appointments by name similarity.\n\n"
+                    f"SIGNUPS (people who paid):\n{json.dumps(signup_names)}\n\n"
+                    f"APPOINTMENTS (people who booked):\n{json.dumps(appt_names)}\n\n"
+                    f"For each signup, find the best matching appointment by name. People may use different name formats "
+                    f"(e.g. 'Ben Thorpe' vs 'Benjamin Thorpe', 'Jo B' vs 'Joanne Bourne').\n"
+                    f"Only match if you are 80% or more confident.\n\n"
+                    f"Respond ONLY with valid JSON: {{\"matches\": [{{\"signup_id\": \"...\", \"appointment_id\": \"...\", \"confidence\": 0.95}}]}}\n"
+                    f"Return empty matches array if no confident matches found."
+                )
+                try:
+                    client = anthropic.Anthropic(api_key=api_key)
+                    resp = client.messages.create(
+                        model="claude-haiku-4-20250414",
+                        max_tokens=2000,
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                    text = resp.content[0].text.strip()
+                    if text.startswith("```"):
+                        text = text.split("```")[1]
+                        if text.startswith("json"):
+                            text = text[4:]
+                    ai_result = json.loads(text)
+                    for m in ai_result.get("matches", []):
+                        if float(m.get("confidence", 0)) >= 0.8:
+                            sid = m["signup_id"]
+                            aid = m["appointment_id"]
+                            if sid not in matched and aid not in matched_appt_ids:
+                                # Find the appointment date
+                                appt_date = ""
+                                for a in unmatched_appts:
+                                    if str(a["id"]) == aid:
+                                        appt_date = a.get("appointment_start_time", a.get("appointment_date", ""))
+                                        break
+                                matched[sid] = {
+                                    "appointment_id": aid,
+                                    "appointment_date": appt_date,
+                                    "match_type": "ai"
+                                }
+                                matched_appt_ids.add(aid)
+                except Exception as e:
+                    print(f"[club-fitness] AI booking match error: {e}")
+
+    # Save matches to Supabase
+    for sid, m in matched.items():
+        if m["match_type"] == "manual":
+            continue  # Don't re-save manual matches
+        try:
+            requests.patch(
+                f"{SUPABASE_URL}/rest/v1/challenge_signups",
+                params={"stripe_session_id": f"eq.{sid}"},
+                json={
+                    "bookafy_appointment_id": m["appointment_id"],
+                    "bookafy_appointment_date": m["appointment_date"],
+                    "bookafy_match_type": m["match_type"],
+                },
+                headers={
+                    "apikey": SUPABASE_SERVICE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                    "Content-Type": "application/json",
+                    "Prefer": "return=minimal"
+                },
+                timeout=10
+            )
+        except Exception:
+            pass
+
+    # Build unmatched appointments list for manual matching
+    final_unmatched_appts = []
+    for a in appointments:
+        if str(a["id"]) not in matched_appt_ids:
+            cust = a.get("customer") or {}
+            cust_detail = cust.get("customer_detail_hstore") or {}
+            appt_info = a.get("appointment_customer_info") or {}
+            name = cust_detail.get("name") or appt_info.get("name") or ""
+            final_unmatched_appts.append({
+                "id": str(a["id"]),
+                "name": name,
+                "date": a.get("appointment_start_time", a.get("appointment_date", "")),
+                "title": a.get("title", ""),
+            })
+
+    return jsonify({
+        "ok": True,
+        "matched": matched,
+        "email_matches": sum(1 for m in matched.values() if m["match_type"] == "email"),
+        "ai_matches": sum(1 for m in matched.values() if m["match_type"] == "ai"),
+        "manual_matches": sum(1 for m in matched.values() if m["match_type"] == "manual"),
+        "unmatched_signups": len([s for s in signups if s["stripe_session_id"] not in matched]),
+        "unmatched_appointments": final_unmatched_appts,
+    })
+
+
+@app.route("/api/club-fitness/save-booking-match", methods=["POST"])
+def club_fitness_save_booking_match():
+    """Manually match a signup to a Bookafy appointment."""
+    data = request.json or {}
+    sid = (data.get("stripe_session_id") or "").strip()
+    aid = (data.get("appointment_id") or "").strip()
+    appt_date = (data.get("appointment_date") or "").strip()
+    if not sid:
+        return jsonify({"ok": False, "error": "Missing stripe_session_id."}), 400
+    match_type = "manual" if aid else ""
+    try:
+        r = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/challenge_signups",
+            params={"stripe_session_id": f"eq.{sid}"},
+            json={
+                "bookafy_appointment_id": aid or None,
+                "bookafy_appointment_date": appt_date or None,
+                "bookafy_match_type": match_type or None,
+            },
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal"
+            },
+            timeout=10
+        )
+        return jsonify({"ok": r.ok})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 # ── Club Fitness Template ─────────────────────────────────────────────────────
 
 CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
@@ -14644,6 +14894,11 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         .stripe-status .ss-dot{width:8px;height:8px;border-radius:50%;display:inline-block;}
         .ss-dot.green{background:#27ae60;} .ss-dot.orange{background:#e67e22;} .ss-dot.red{background:#e74c3c;} .ss-dot.grey{background:#ccc;}
         .btn-clean{background:#9b59b6;color:white;}
+        .btn-booking{background:#e67e22;color:white;}
+        .appt-match{font-size:12px;white-space:nowrap;}
+        .appt-email{color:#27ae60;} .appt-ai{color:#9b59b6;} .appt-manual{color:#3498db;} .appt-none{color:#ccc;}
+        .appt-change{cursor:pointer;font-size:10px;color:#888;margin-left:4px;text-decoration:underline;}
+        .appt-match-btn{font-size:11px;cursor:pointer;color:#e67e22;border:1px solid #e67e22;background:none;border-radius:3px;padding:2px 8px;}
         .mapping-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:13px;}
         .mapping-row .mr-raw{flex:1;color:#666;} .mapping-row .mr-arrow{color:#aaa;} .mapping-row .mr-clean{flex:1;}
         .mapping-row .mr-count{font-size:11px;color:#aaa;min-width:35px;text-align:right;}
@@ -14712,6 +14967,7 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         <button class="btn btn-fetch" id="btn-fetch" onclick="fetchSignups()" title="Download latest entries from Stripe"><i class="fa-brands fa-stripe-s"></i> Stripe Download</button>
         <button class="btn btn-export" onclick="exportCSV()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
         <button class="btn btn-clean" onclick="showCleanModal()"><i class="fa-solid fa-broom"></i> Clean Data</button>
+        <button class="btn btn-booking" onclick="checkBookings()"><i class="fa-solid fa-calendar-check"></i> Check Bookings</button>
         <span class="count-badge" id="count-badge" style="display:none">0</span>
         <span class="status-msg" id="status-msg"></span>
     </div>
@@ -14759,6 +15015,7 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
                     <th data-col="custom_field_3" onclick="sortBy('custom_field_3')" id="th-cf3">Custom Field 3 <span class="sort-arrow" id="sort-custom_field_3"></span></th>
                     <th data-col="gym_scales_weight" onclick="sortBy('gym_scales_weight')">Gym Scales Weight <span class="sort-arrow" id="sort-gym_scales_weight"></span></th>
                     <th data-col="final_weight" onclick="sortBy('final_weight')">Final Weight <span class="sort-arrow" id="sort-final_weight"></span></th>
+                    <th data-col="bookafy_appointment_date" onclick="sortBy('bookafy_appointment_date')">Appointment <span class="sort-arrow" id="sort-bookafy_appointment_date"></span></th>
                 </tr></thead>
                 <tbody id="signups-body"></tbody>
             </table>
@@ -14785,6 +15042,11 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
             <canvas id="goal-chart" height="280"></canvas>
         </div>
     </div>
+</div>
+
+<!-- Manual Match Modal -->
+<div class="modal-bg" id="match-modal">
+    <div class="modal" style="width:500px;" id="match-modal-content"></div>
 </div>
 
 <!-- Clean Data Modal -->
@@ -15012,6 +15274,97 @@ function populateFilterDropdowns() {
 
 function toggleCharts() { updateCharts(); }
 
+/* ── Bookafy Bookings ── */
+var _unmatchedAppts = [];
+
+function renderApptCell(r) {
+    if (!r.bookafy_match_type) return '<button class="appt-match-btn" onclick="event.stopPropagation();showManualMatch(\'' + esc(r.stripe_session_id) + '\',\'' + esc(r.card_name||'').replace(/'/g,"\\'") + '\')"><i class="fa-solid fa-calendar-plus"></i> Match</button>';
+    var dt = r.bookafy_appointment_date ? new Date(r.bookafy_appointment_date).toLocaleString('en-NZ', {dateStyle:'medium',timeStyle:'short'}) : '';
+    if (r.bookafy_match_type === 'email') {
+        return '<span class="appt-match appt-email" title="Email match"><i class="fa-solid fa-circle-check"></i> ' + esc(dt) + '</span>';
+    } else if (r.bookafy_match_type === 'ai') {
+        return '<span class="appt-match appt-ai" title="AI match"><i class="fa-solid fa-robot"></i> ' + esc(dt) +
+               '</span><span class="appt-change" onclick="event.stopPropagation();showManualMatch(\'' + esc(r.stripe_session_id) + '\',\'' + esc(r.card_name||'') + '\')">change</span>';
+    } else if (r.bookafy_match_type === 'manual') {
+        return '<span class="appt-match appt-manual" title="Manual match"><i class="fa-solid fa-user-check"></i> ' + esc(dt) +
+               '</span><span class="appt-change" onclick="event.stopPropagation();showManualMatch(\'' + esc(r.stripe_session_id) + '\',\'' + esc(r.card_name||'') + '\')">change</span>';
+    }
+    return '';
+}
+
+function checkBookings() {
+    var pl = getSelectedPL();
+    if (!pl) { alert('Select a payment link first.'); return; }
+    msg('Checking Bookafy bookings...');
+    showSpinner();
+    fetch('/api/club-fitness/check-bookings', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({payment_link: pl})
+    }).then(r=>r.json()).then(d=>{
+        if (!d.ok) { msg('Error: ' + (d.error||'Unknown')); return; }
+        _unmatchedAppts = d.unmatched_appointments || [];
+        // Update local data with matches
+        for (var sid in d.matched) {
+            var row = _allRows.find(function(r){ return r.stripe_session_id === sid; });
+            if (row) {
+                row.bookafy_appointment_id = d.matched[sid].appointment_id;
+                row.bookafy_appointment_date = d.matched[sid].appointment_date;
+                row.bookafy_match_type = d.matched[sid].match_type;
+            }
+        }
+        applyFiltersAndRender();
+        msg('Bookings checked: ' + d.email_matches + ' email, ' + d.ai_matches + ' AI, ' + d.manual_matches + ' manual, ' + d.unmatched_signups + ' unmatched.');
+    }).catch(function(e){ msg('Error: ' + e); });
+}
+
+function showManualMatch(sid, name) {
+    var html = '<h3><i class="fa-solid fa-calendar-check" style="color:#e67e22"></i> Match Appointment</h3>';
+    html += '<p style="font-size:13px;color:#555;">Matching: <strong>' + esc(name.replace('[CASH] ','')) + '</strong></p>';
+    html += '<button class="btn btn-sm" style="background:#e74c3c;color:white;margin-bottom:12px;font-size:11px;" onclick="clearBookingMatch(\'' + esc(sid) + '\')"><i class="fa-solid fa-times"></i> Remove Match</button>';
+    if (!_unmatchedAppts.length) {
+        html += '<p style="color:#888;font-size:12px;">No unmatched appointments available. Run Check Bookings first.</p>';
+    } else {
+        html += '<div style="max-height:300px;overflow-y:auto;">';
+        _unmatchedAppts.forEach(function(a){
+            var dt = a.date ? new Date(a.date).toLocaleString('en-NZ', {dateStyle:'medium',timeStyle:'short'}) : '';
+            html += '<div class="stripe-link-item" onclick="saveManualMatch(\'' + esc(sid) + '\',\'' + esc(a.id) + '\',\'' + esc(a.date) + '\')">';
+            html += '<div><div class="sl-label">' + esc(a.name) + '</div><div class="sl-id">' + esc(dt) + ' — ' + esc(a.title) + '</div></div>';
+            html += '</div>';
+        });
+        html += '</div>';
+    }
+    html += '<div class="modal-btns"><button class="btn btn-cancel" onclick="closeModal(\'match-modal\')">Cancel</button></div>';
+    document.getElementById('match-modal-content').innerHTML = html;
+    document.getElementById('match-modal').classList.add('active');
+}
+
+function saveManualMatch(sid, aid, apptDate) {
+    fetch('/api/club-fitness/save-booking-match', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({stripe_session_id: sid, appointment_id: aid, appointment_date: apptDate})
+    }).then(r=>r.json()).then(d=>{
+        if (!d.ok) { alert('Error saving match.'); return; }
+        closeModal('match-modal');
+        // Update local data
+        var row = _allRows.find(function(r){ return r.stripe_session_id === sid; });
+        if (row) { row.bookafy_appointment_id = aid; row.bookafy_appointment_date = apptDate; row.bookafy_match_type = 'manual'; }
+        _unmatchedAppts = _unmatchedAppts.filter(function(a){ return a.id !== aid; });
+        applyFiltersAndRender();
+        msg('Match saved.');
+    });
+}
+
+function clearBookingMatch(sid) {
+    fetch('/api/club-fitness/save-booking-match', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({stripe_session_id: sid, appointment_id: '', appointment_date: ''})
+    }).then(r=>r.json()).then(d=>{
+        if (!d.ok) { alert('Error.'); return; }
+        closeModal('match-modal');
+        var row = _allRows.find(function(r){ return r.stripe_session_id === sid; });
+        if (row) { row.bookafy_appointment_id = ''; row.bookafy_appointment_date = ''; row.bookafy_match_type = ''; }
+        applyFiltersAndRender();
+        msg('Match removed.');
+    });
+}
+
 function applyFiltersAndRender() {
     var rows = _allRows.slice();
     // Date filter
@@ -15112,7 +15465,8 @@ function renderTable(rows) {
             '<td>' + esc(r.custom_field_2||'') + '</td>' +
             '<td>' + esc(r.custom_field_3||'') + '</td>' +
             '<td><input type="text" class="wt-input" value="' + esc(r.gym_scales_weight||'') + '" data-sid="' + esc(sid) + '" data-field="gym_scales_weight" onchange="saveWeight(this)" onclick="event.stopPropagation()"></td>' +
-            '<td><input type="text" class="wt-input" value="' + esc(r.final_weight||'') + '" data-sid="' + esc(sid) + '" data-field="final_weight" onchange="saveWeight(this)" onclick="event.stopPropagation()"></td>';
+            '<td><input type="text" class="wt-input" value="' + esc(r.final_weight||'') + '" data-sid="' + esc(sid) + '" data-field="final_weight" onchange="saveWeight(this)" onclick="event.stopPropagation()"></td>' +
+            '<td>' + renderApptCell(r) + '</td>';
         tr.onclick = function(){ toggleDetail(sid, this); };
         tb.appendChild(tr);
     });
@@ -15133,11 +15487,11 @@ function toggleDetail(sid, rowEl) {
     var detailTr = document.createElement('tr');
     detailTr.className = 'detail-row';
     detailTr.setAttribute('data-for', sid);
-    detailTr.innerHTML = '<td colspan="10"><span class="spinner"></span> Loading details...</td>';
+    detailTr.innerHTML = '<td colspan="11"><span class="spinner"></span> Loading details...</td>';
     rowEl.parentNode.insertBefore(detailTr, rowEl.nextSibling);
     fetch('/api/club-fitness/session-detail?session_id=' + encodeURIComponent(sid))
         .then(r=>r.json()).then(d=>{
-            if (!d.ok) { detailTr.innerHTML = '<td colspan="10" style="color:#e74c3c">Error: ' + esc(d.error) + '</td>'; return; }
+            if (!d.ok) { detailTr.innerHTML = '<td colspan="11" style="color:#e74c3c">Error: ' + esc(d.error) + '</td>'; return; }
             var det = d.detail;
             var amt = det.amount_total ? (det.currency + ' $' + (det.amount_total/100).toFixed(2)) : '';
             var prods = (det.products||[]).map(function(p){ return esc(p.description) + ' x' + p.quantity; }).join(', ');
@@ -15145,7 +15499,7 @@ function toggleDetail(sid, rowEl) {
             if (det.metadata && Object.keys(det.metadata).length) {
                 meta = Object.keys(det.metadata).map(function(k){ return '<strong>' + esc(k) + ':</strong> ' + esc(det.metadata[k]); }).join(', ');
             }
-            var html = '<td colspan="10"><div class="detail-grid">';
+            var html = '<td colspan="11"><div class="detail-grid">';
             html += '<div><div class="dg-label">Amount</div><div class="dg-value">' + esc(amt) + '</div></div>';
             html += '<div><div class="dg-label">Payment Status</div><div class="dg-value">' + esc(det.payment_status) + '</div></div>';
             html += '<div><div class="dg-label">Payment Method</div><div class="dg-value">' + esc(det.payment_method) + '</div></div>';
@@ -15155,7 +15509,7 @@ function toggleDetail(sid, rowEl) {
             html += '<div><div class="dg-label">Session ID</div><div class="dg-value" style="font-family:monospace;font-size:11px">' + esc(det.id) + '</div></div>';
             html += '</div></td>';
             detailTr.innerHTML = html;
-        }).catch(function(e){ detailTr.innerHTML = '<td colspan="10" style="color:#e74c3c">Error loading details.</td>'; });
+        }).catch(function(e){ detailTr.innerHTML = '<td colspan="11" style="color:#e74c3c">Error loading details.</td>'; });
 }
 
 /* ── Sync / Export ── */
