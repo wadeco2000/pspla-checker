@@ -75,6 +75,12 @@ FACEBOOK_APP_ID=...
 FACEBOOK_APP_SECRET=...
 STRIPE_SECRET_KEY=...                    # Stripe secret API key (server-side only, never expose to frontend)
 STRIPE_DEFAULT_PAYMENT_LINK=...          # optional default payment link ID (plink_xxx)
+STRIPE_WEBHOOK_SECRET=...               # Stripe webhook signing secret (whsec_xxx)
+BOOKAFY_API_KEY=...                      # Bookafy Pro+ API key (auth via api-key header)
+BOOKAFY_STAFF_EMAIL=mat@clubfitness.co.nz  # staff email for appointment lookups
+CF_SMTP_USER=clubfitnesswhanganui@gmail.com  # Club Fitness email for campaigns
+CF_SMTP_PASS=...                         # Gmail App Password for CF_SMTP_USER
+CF_SMTP_FROM_NAME=Club Fitness Whanganui # display name for campaign emails
 ```
 
 **Key separation:** `dashboard.py` and `searcher.py` use `SUPABASE_SERVICE_KEY` (bypasses RLS). The public site JS uses the anon `SUPABASE_KEY` which is subject to RLS. Never swap these.
@@ -581,48 +587,125 @@ Search history now tracks which user triggered each search via `triggered_by_use
 
 ## Club Fitness Challenges Page (added 22 Mar 2026)
 
-Standalone page at `/club-fitness` for managing Club Fitness gym challenge signups via Stripe payment links. Permission-gated with `club_fitness` group (default OFF).
+Standalone page at `/club-fitness` for managing Club Fitness gym challenge signups. Owned by Wade's gym business (Club Fitness Whanganui). Permission-gated with `club_fitness` group (default OFF).
 
-**How it works:**
-1. Wade creates a Stripe payment link for each challenge (8 week, 12 week, etc.)
-2. Customers pay via the link — Stripe creates a checkout session
-3. The Club Fitness page fetches all completed sessions for that link via Stripe API
-4. Data displayed in a table, exportable as CSV for import into challenge software
-5. Signups can be synced to Supabase for marketing later
+**What it does:**
+Automates the entire challenge signup workflow — from Stripe payment to Bookafy appointment booking to email marketing for the next challenge. Replaces manual Stripe exports and spreadsheet formatting.
 
 **Environment variables:**
 - `STRIPE_SECRET_KEY` — Stripe secret API key (server-side only, never exposed to frontend)
 - `STRIPE_DEFAULT_PAYMENT_LINK` — optional default plink_xxx ID
+- `STRIPE_WEBHOOK_SECRET` — Stripe webhook signing secret (whsec_xxx) for real-time payment notifications
+- `BOOKAFY_API_KEY` — Bookafy API key (Pro+ plan required). Auth via `api-key` header (NOT query param)
+- `BOOKAFY_STAFF_EMAIL` — Staff member email for appointment lookups (default: mat@clubfitness.co.nz)
+- `CF_SMTP_USER` — Club Fitness Gmail for campaign emails (clubfitnesswhanganui@gmail.com)
+- `CF_SMTP_PASS` — Gmail App Password for CF_SMTP_USER
+- `CF_SMTP_FROM_NAME` — Display name for campaign emails (default: "Club Fitness Whanganui")
 
 **Supabase tables:**
-- `challenge_signups` — stores synced signup data (stripe_session_id as unique dedup key). RLS enabled, no anon policies.
-- `challenge_links` — saved payment links with labels and custom CSV column name overrides. RLS enabled, no anon policies.
+- `challenge_signups` — signup data. Columns: stripe_session_id (unique), payment_link, created_at, card_name, customer_email, customer_phone, custom_field_1 (full name), custom_field_2 (goal), custom_field_3 (gym), custom_field_1/2/3_label, synced_at, gym_scales_weight, final_weight, bookafy_appointment_id, bookafy_appointment_date, bookafy_match_type (email/ai/manual), campaign_email_sent_at, campaign_id. RLS enabled, no anon policies.
+- `challenge_links` — saved payment links. Columns: payment_link_id (unique), label, col_1/2/3_name (CSV column overrides), last_webhook_at, last_sync_at, created_at. RLS enabled, no anon policies.
+- `challenge_mappings` — data cleaning maps. Columns: field (gym/goal), raw_value, clean_value. Unique on (field, raw_value). RLS enabled, no anon policies.
 
-**Endpoints:**
+**Endpoints (24 total):**
 
 | Route | Method | Purpose |
 |-------|--------|---------|
 | `/club-fitness` | GET | Page route |
-| `/api/club-fitness/signups` | GET | Fetch from Stripe API |
-| `/api/club-fitness/sync` | POST | Fetch from Stripe, upsert to Supabase |
-| `/api/club-fitness/export` | GET | CSV download (live or stored) |
-| `/api/club-fitness/stored` | GET | Fetch from Supabase |
+| `/api/club-fitness/signups` | GET | Fetch from Stripe + auto-sync to Supabase |
+| `/api/club-fitness/sync` | POST | Manual Stripe sync |
+| `/api/club-fitness/export` | GET | CSV download (client-side, respects all filters) |
+| `/api/club-fitness/stored` | GET | Fetch from Supabase only |
 | `/api/club-fitness/links` | GET/POST | List/save payment links |
 | `/api/club-fitness/links/<id>` | DELETE | Delete a saved link |
+| `/api/club-fitness/stripe-links` | GET | List all active payment links from Stripe account |
+| `/api/club-fitness/session-detail` | GET | Full Stripe session details (click-to-expand) |
+| `/api/club-fitness/webhook` | POST | Stripe webhook — real-time checkout.session.completed |
+| `/api/club-fitness/save-weight` | POST | Save gym_scales_weight or final_weight |
+| `/api/club-fitness/add-cash` | POST | Add manual cash payment entry |
+| `/api/club-fitness/edit-entry` | POST | Edit signup entry fields |
+| `/api/club-fitness/delete-entry` | POST | Delete a signup entry |
+| `/api/club-fitness/mappings` | GET/POST | CRUD for data cleaning mappings |
+| `/api/club-fitness/mappings/batch` | POST | Batch apply mappings + update stored data |
+| `/api/club-fitness/unique-values` | GET | Unique gym/goal values with counts |
+| `/api/club-fitness/ai-suggest` | POST | Haiku AI suggestions for unmapped values |
+| `/api/club-fitness/check-bookings` | POST | Match signups to Bookafy appointments |
+| `/api/club-fitness/save-booking-match` | POST | Manual appointment match |
+| `/api/club-fitness/campaign-recipients` | GET | Eligible recipients (past challengers not in current) |
+| `/api/club-fitness/campaign-send-test` | POST | Send test campaign email |
+| `/api/club-fitness/campaign-send` | POST | Send campaign to selected recipients |
+| `/api/club-fitness/campaign-clear` | POST | Clear sent status for next campaign |
 
-**Payment link management:**
-- Dropdown of saved links with labels (e.g. "8 Week Jan 2026")
-- Add/edit/delete links with custom column name overrides for CSV export
-- Column name overrides stored in `challenge_links` table — used in CSV headers
-- Priority: override name > Stripe label > "Custom Field N"
+**Key features:**
+
+*Stripe Integration:*
+- Payment link dropdown with labels, custom CSV column name overrides
+- "Browse Stripe Links" imports payment links directly from Stripe account
+- "Stripe Download" fetches new payments, auto-syncs to Supabase (preserves custom columns)
+- Stripe webhook for real-time entry creation on payment
+- Click any row to expand full Stripe session details (amount, products, billing address)
+- Cash entry button for walk-in payments (stored with `cash_` prefix, green CASH badge)
+
+*Data Management:*
+- Edit and delete buttons on every row
+- Gym Scales Weight and Final Weight — inline editable columns, persist across refreshes
+- CSV export respects all active filters (date, gym, goal, search)
+- Filters: 6-week date filter, gym dropdown, goal dropdown, text search, column sorting
+
+*Data Cleaning (Clean Data button):*
+- Maps messy values to clean ones (e.g. "Club fitness" → "Club Fitness", "510kg" → "5-10kg")
+- Regex handles common patterns instantly (free)
+- Haiku AI handles edge cases ("Cuty fitness and The Zone" → "City Fitness")
+- Mappings saved to `challenge_mappings` table, applied to all existing records
+- Known gym list: Club Fitness, City Fitness, City Gym, Jetts, Iron Alley, Wanganui Bootcamp, Rivercity Boxing, F45, The Zone, Her Fitness, Home Gym, No Gym
+
+*Analytics:*
+- Pie charts (toggle on/off): gym distribution + weight loss goal distribution
+- Each chart has independent date range pickers
+- Chart totals shown in title
+
+*Bookafy Appointment Matching (Check Bookings button):*
+- Fetches appointments from Bookafy API (today → 6 weeks ahead, staff: mat@clubfitness.co.nz)
+- Bookafy auth: `api-key` header (NOT query param — this was a debugging lesson)
+- Step 1: exact email match → green ✅ tick
+- Step 2: Haiku AI name matching at 80%+ confidence → purple 🤖 robot icon
+- Step 3: manual match from unmatched appointments → blue 👤 user icon
+- Unmatched rows show orange "Match" button to pick from available appointments
+- Manual matches never overwritten by re-check
+- Only checks signups from last 6 weeks
+
+*Email Campaign (Email Campaign button):*
+- Sends individual emails (not BCC/CC) to past challengers not in current challenge
+- Template editor with `{first_name}` and `{last_challenge}` token insert buttons
+- `{last_challenge}` shows month only if current year, month + year if older
+- Editable AI variation instructions — controls how Haiku varies each email
+- Haiku generates unique variations per email (different greetings, transitions, sign-offs)
+- Sends from Club Fitness Gmail (clubfitnesswhanganui@gmail.com) — big red sender banner
+- "Send Test to Me" button for preview
+- Recipient list with sortable columns (Name, Email, Last Challenge, Sent status)
+- Select All / Deselect All, 450/batch Gmail limit, 2-second delay between sends
+- Sent status tracked in Supabase, clearable for next campaign
+- Duplicate prevention — one email per unique address
+
+**Navbar:**
+- Partners dropdown menu groups Actuate, Shelly, and Club Fitness (permission-gated per item)
+- Replaced individual nav links for standalone pages
 
 **Security:**
-- Stripe secret key server-side only, loaded from `.env`
-- Payment link IDs validated with `^plink_[a-zA-Z0-9_]+$` regex
-- All Stripe calls via server proxy (no direct frontend access)
-- Rate limited: signups 10/min, sync 5/min, export 5/min
-- CSRF automatic via existing hook
-- RLS on both tables (no anon access)
+- Stripe secret key + webhook secret server-side only
+- Webhook signature verification (no auth/CSRF needed — signature replaces both)
+- Webhook endpoint in `_AUTH_SKIP` and CSRF skip
+- Bookafy API key server-side only, via header auth
+- Payment link IDs validated with `^plink_[a-zA-Z0-9_]+$`
+- Session IDs validated with `^cs_[a-zA-Z0-9_]+$`
+- All endpoints rate limited and CSRF protected
+- RLS on all three tables (no anon access)
+- Campaign emails use separate SMTP credentials from PSPLA notifications
+- Edit endpoint whitelist: only allowed fields can be modified
+
+**Known issue (22 Mar 2026):**
+- Rapid successive deploys can cause Azure container restart failures (409 Conflict). If this happens, wait 1-2 minutes then trigger a manual deploy via `gh workflow run deploy-dashboard.yml`.
+- Local file truncation was observed during heavy editing — always verify `wc -l dashboard.py` matches expected line count before committing. If truncated, restore with `git checkout HEAD -- dashboard.py`.
 
 ---
 
