@@ -466,6 +466,7 @@ _RATE_LIMITS = {
     'club_fitness_links':      (10, 60),     # 10 link ops per minute
     'club_fitness_stripe_links': (5, 60),   # 5 Stripe link list calls per minute
     'club_fitness_session_detail': (20, 60), # 20 session detail calls per minute
+    'club_fitness_save_weight':  (30, 60),  # 30 weight saves per minute
 }
 
 @app.before_request
@@ -675,6 +676,7 @@ _ROUTE_PERMISSIONS = {
     'club_fitness_delete_link': 'club_fitness',
     'club_fitness_stripe_links': 'club_fitness',
     'club_fitness_session_detail': 'club_fitness',
+    'club_fitness_save_weight': 'club_fitness',
 }
 
 # ── TOTP 2FA helpers ──────────────────────────────────────────────────────────
@@ -13840,7 +13842,7 @@ def _validate_payment_link(pl):
 
 @app.route("/api/club-fitness/signups")
 def club_fitness_signups():
-    """Fetch signups from Stripe for a given payment link."""
+    """Fetch signups from Stripe, auto-sync to Supabase, return merged data with custom columns preserved."""
     if not STRIPE_SECRET_KEY:
         return jsonify({"ok": False, "error": "STRIPE_SECRET_KEY not configured."}), 500
     pl = _validate_payment_link(request.args.get("payment_link", "").strip())
@@ -13852,8 +13854,75 @@ def club_fitness_signups():
         import stripe
         stripe.api_key = STRIPE_SECRET_KEY
         it = stripe.checkout.Session.list(payment_link=pl, status="complete", limit=100).auto_paging_iter()
-        rows = _stripe_sessions_to_rows(it)
-        return jsonify({"ok": True, "signups": rows, "count": len(rows), "payment_link": pl})
+        stripe_rows = _stripe_sessions_to_rows(it)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+    # Auto-sync: upsert new entries to Supabase (does NOT overwrite gym_scales_weight / final_weight)
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    _upsert_fields = ["stripe_session_id", "payment_link", "created_at", "card_name",
+                       "customer_email", "customer_phone", "custom_field_1", "custom_field_2",
+                       "custom_field_3", "custom_field_1_label", "custom_field_2_label",
+                       "custom_field_3_label", "synced_at"]
+    for row in stripe_rows:
+        upsert = {k: row.get(k, "") for k in _upsert_fields if k != "payment_link" and k != "synced_at"}
+        upsert["payment_link"] = pl
+        upsert["synced_at"] = now_iso
+        try:
+            requests.post(
+                f"{SUPABASE_URL}/rest/v1/challenge_signups",
+                headers={
+                    "apikey": SUPABASE_SERVICE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                    "Content-Type": "application/json",
+                    "Prefer": "resolution=merge-duplicates,return=minimal"
+                },
+                json=upsert, timeout=15
+            )
+        except Exception:
+            pass
+    # Return stored data (includes custom columns like gym_scales_weight, final_weight)
+    try:
+        sr = requests.get(
+            f"{SUPABASE_URL}/rest/v1/challenge_signups",
+            params={"payment_link": f"eq.{pl}", "select": "*", "order": "created_at.desc"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+            timeout=30
+        )
+        if sr.ok:
+            stored = sr.json()
+            return jsonify({"ok": True, "signups": stored, "count": len(stored), "payment_link": pl})
+    except Exception:
+        pass
+    # Fallback: return Stripe data without custom columns
+    return jsonify({"ok": True, "signups": stripe_rows, "count": len(stripe_rows), "payment_link": pl})
+
+
+@app.route("/api/club-fitness/save-weight", methods=["POST"])
+def club_fitness_save_weight():
+    """Save gym_scales_weight or final_weight for a signup entry."""
+    data = request.json or {}
+    sid = (data.get("stripe_session_id") or "").strip()
+    if not sid:
+        return jsonify({"ok": False, "error": "Missing stripe_session_id."}), 400
+    field = data.get("field", "").strip()
+    if field not in ("gym_scales_weight", "final_weight"):
+        return jsonify({"ok": False, "error": "Invalid field."}), 400
+    value = (data.get("value") or "").strip()
+    try:
+        r = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/challenge_signups",
+            params={"stripe_session_id": f"eq.{sid}"},
+            json={field: value},
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal"
+            },
+            timeout=10
+        )
+        return jsonify({"ok": r.ok})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
@@ -13963,7 +14032,8 @@ def club_fitness_export():
     import csv, io
     output = io.StringIO()
     fieldnames = ["Created (UTC)", "Card Name", "Customer Email", "Customer Phone",
-                  col_names[0], col_names[1], col_names[2]]
+                  col_names[0], col_names[1], col_names[2],
+                  "Gym Scales Weight", "Final Weight"]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
     for r in rows:
@@ -13975,6 +14045,8 @@ def club_fitness_export():
             col_names[0]: r.get("custom_field_1", ""),
             col_names[1]: r.get("custom_field_2", ""),
             col_names[2]: r.get("custom_field_3", ""),
+            "Gym Scales Weight": r.get("gym_scales_weight", ""),
+            "Final Weight": r.get("final_weight", ""),
         })
     resp = app.make_response(output.getvalue())
     resp.headers["Content-Type"] = "text/csv; charset=utf-8"
@@ -14223,6 +14295,7 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         .search-input{min-width:180px;}
         .filter-check{display:flex;align-items:center;gap:5px;font-size:12px;color:#555;cursor:pointer;white-space:nowrap;}
         .filter-check input{margin:0;}
+        .wt-input{width:80px;padding:4px 6px;border:1px solid #ddd;border-radius:3px;font-size:12px;text-align:center;transition:border-color .3s;}
         /* Modal */
         .modal-bg{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;}
         .modal-bg.active{display:flex;}
@@ -14303,6 +14376,8 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
                     <th data-col="custom_field_1" onclick="sortBy('custom_field_1')" id="th-cf1">Custom Field 1 <span class="sort-arrow" id="sort-custom_field_1"></span></th>
                     <th data-col="custom_field_2" onclick="sortBy('custom_field_2')" id="th-cf2">Custom Field 2 <span class="sort-arrow" id="sort-custom_field_2"></span></th>
                     <th data-col="custom_field_3" onclick="sortBy('custom_field_3')" id="th-cf3">Custom Field 3 <span class="sort-arrow" id="sort-custom_field_3"></span></th>
+                    <th data-col="gym_scales_weight" onclick="sortBy('gym_scales_weight')">Gym Scales Weight <span class="sort-arrow" id="sort-gym_scales_weight"></span></th>
+                    <th data-col="final_weight" onclick="sortBy('final_weight')">Final Weight <span class="sort-arrow" id="sort-final_weight"></span></th>
                 </tr></thead>
                 <tbody id="signups-body"></tbody>
             </table>
@@ -14517,6 +14592,7 @@ function renderTable(rows) {
         tr.className = 'data-row';
         tr.setAttribute('data-sid', r.stripe_session_id || '');
         var dt = r.created_at ? new Date(r.created_at).toLocaleString('en-NZ', {dateStyle:'medium',timeStyle:'short'}) : '';
+        var sid = r.stripe_session_id || '';
         tr.innerHTML = '<td>' + (i+1) + '</td>' +
             '<td>' + esc(dt) + '</td>' +
             '<td>' + esc(r.card_name||'') + '</td>' +
@@ -14524,8 +14600,10 @@ function renderTable(rows) {
             '<td>' + esc(r.customer_phone||'') + '</td>' +
             '<td>' + esc(r.custom_field_1||'') + '</td>' +
             '<td>' + esc(r.custom_field_2||'') + '</td>' +
-            '<td>' + esc(r.custom_field_3||'') + '</td>';
-        tr.onclick = function(){ toggleDetail(r.stripe_session_id, this); };
+            '<td>' + esc(r.custom_field_3||'') + '</td>' +
+            '<td><input type="text" class="wt-input" value="' + esc(r.gym_scales_weight||'') + '" data-sid="' + esc(sid) + '" data-field="gym_scales_weight" onchange="saveWeight(this)" onclick="event.stopPropagation()"></td>' +
+            '<td><input type="text" class="wt-input" value="' + esc(r.final_weight||'') + '" data-sid="' + esc(sid) + '" data-field="final_weight" onchange="saveWeight(this)" onclick="event.stopPropagation()"></td>';
+        tr.onclick = function(){ toggleDetail(sid, this); };
         tb.appendChild(tr);
     });
 }
@@ -14545,11 +14623,11 @@ function toggleDetail(sid, rowEl) {
     var detailTr = document.createElement('tr');
     detailTr.className = 'detail-row';
     detailTr.setAttribute('data-for', sid);
-    detailTr.innerHTML = '<td colspan="8"><span class="spinner"></span> Loading details...</td>';
+    detailTr.innerHTML = '<td colspan="10"><span class="spinner"></span> Loading details...</td>';
     rowEl.parentNode.insertBefore(detailTr, rowEl.nextSibling);
     fetch('/api/club-fitness/session-detail?session_id=' + encodeURIComponent(sid))
         .then(r=>r.json()).then(d=>{
-            if (!d.ok) { detailTr.innerHTML = '<td colspan="8" style="color:#e74c3c">Error: ' + esc(d.error) + '</td>'; return; }
+            if (!d.ok) { detailTr.innerHTML = '<td colspan="10" style="color:#e74c3c">Error: ' + esc(d.error) + '</td>'; return; }
             var det = d.detail;
             var amt = det.amount_total ? (det.currency + ' $' + (det.amount_total/100).toFixed(2)) : '';
             var prods = (det.products||[]).map(function(p){ return esc(p.description) + ' x' + p.quantity; }).join(', ');
@@ -14557,7 +14635,7 @@ function toggleDetail(sid, rowEl) {
             if (det.metadata && Object.keys(det.metadata).length) {
                 meta = Object.keys(det.metadata).map(function(k){ return '<strong>' + esc(k) + ':</strong> ' + esc(det.metadata[k]); }).join(', ');
             }
-            var html = '<td colspan="8"><div class="detail-grid">';
+            var html = '<td colspan="10"><div class="detail-grid">';
             html += '<div><div class="dg-label">Amount</div><div class="dg-value">' + esc(amt) + '</div></div>';
             html += '<div><div class="dg-label">Payment Status</div><div class="dg-value">' + esc(det.payment_status) + '</div></div>';
             html += '<div><div class="dg-label">Payment Method</div><div class="dg-value">' + esc(det.payment_method) + '</div></div>';
@@ -14567,10 +14645,28 @@ function toggleDetail(sid, rowEl) {
             html += '<div><div class="dg-label">Session ID</div><div class="dg-value" style="font-family:monospace;font-size:11px">' + esc(det.id) + '</div></div>';
             html += '</div></td>';
             detailTr.innerHTML = html;
-        }).catch(function(e){ detailTr.innerHTML = '<td colspan="8" style="color:#e74c3c">Error loading details.</td>'; });
+        }).catch(function(e){ detailTr.innerHTML = '<td colspan="10" style="color:#e74c3c">Error loading details.</td>'; });
 }
 
 /* ── Sync / Export ── */
+function saveWeight(el) {
+    var sid = el.getAttribute('data-sid');
+    var field = el.getAttribute('data-field');
+    var value = el.value.trim();
+    el.style.borderColor = '#f0ad4e';
+    fetch('/api/club-fitness/save-weight', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({stripe_session_id: sid, field: field, value: value})
+    }).then(r=>r.json()).then(d=>{
+        el.style.borderColor = d.ok ? '#27ae60' : '#e74c3c';
+        setTimeout(function(){ el.style.borderColor = '#ddd'; }, 1500);
+        // Update local data too
+        if (d.ok) {
+            var row = _allRows.find(function(r){ return r.stripe_session_id === sid; });
+            if (row) row[field] = value;
+        }
+    }).catch(function(){ el.style.borderColor = '#e74c3c'; });
+}
+
 function syncToDb() {
     var pl = getSelectedPL();
     if (!pl) { alert('Select a payment link first.'); return; }
