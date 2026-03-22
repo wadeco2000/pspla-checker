@@ -14345,8 +14345,7 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         <button class="btn btn-edit" id="btn-edit-link" onclick="showEditModal()" style="display:none"><i class="fa-solid fa-pen"></i> Edit</button>
         <button class="btn btn-del" id="btn-del-link" onclick="deleteLink()" style="display:none">Delete</button>
         <div style="flex:1"></div>
-        <button class="btn btn-fetch" id="btn-fetch" onclick="fetchSignups()"><i class="fa-solid fa-rotate"></i> Fetch Signups</button>
-        <button class="btn btn-sync" onclick="syncToDb()"><i class="fa-solid fa-database"></i> Sync to DB</button>
+        <button class="btn btn-fetch" id="btn-fetch" onclick="fetchSignups()"><i class="fa-solid fa-rotate"></i> Sync from Stripe</button>
         <button class="btn btn-export" onclick="exportCSV()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
         <span class="count-badge" id="count-badge" style="display:none">0</span>
         <span class="status-msg" id="status-msg"></span>
@@ -14480,7 +14479,20 @@ function onLinkChange() {
         document.getElementById('th-cf1').innerHTML = esc(_currentLink.col_1_name || 'Custom Field 1') + ' <span class="sort-arrow" id="sort-custom_field_1"></span>';
         document.getElementById('th-cf2').innerHTML = esc(_currentLink.col_2_name || 'Custom Field 2') + ' <span class="sort-arrow" id="sort-custom_field_2"></span>';
         document.getElementById('th-cf3').innerHTML = esc(_currentLink.col_3_name || 'Custom Field 3') + ' <span class="sort-arrow" id="sort-custom_field_3"></span>';
+        loadStored(pl);
     }
+}
+
+function loadStored(pl) {
+    if (!pl) return;
+    showSpinner();
+    fetch('/api/club-fitness/stored?payment_link=' + encodeURIComponent(pl))
+        .then(r=>r.json()).then(d=>{
+            if (!d.ok || !d.signups.length) { msg('No stored entries yet. Click Fetch Signups to import from Stripe.'); _allRows = []; applyFiltersAndRender(); return; }
+            _allRows = d.signups;
+            applyFiltersAndRender();
+            msg('Loaded ' + d.count + ' stored entries.');
+        }).catch(function(){ msg(''); });
 }
 
 function getSelectedPL() { return document.getElementById('link-select').value || _defaultPL; }
@@ -14667,23 +14679,10 @@ function saveWeight(el) {
     }).catch(function(){ el.style.borderColor = '#e74c3c'; });
 }
 
-function syncToDb() {
-    var pl = getSelectedPL();
-    if (!pl) { alert('Select a payment link first.'); return; }
-    if (!confirm('Sync all signups for this link to the database?')) return;
-    showSpinner();
-    fetch('/api/club-fitness/sync', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({payment_link: pl})
-    }).then(r=>r.json()).then(d=>{
-        if (!d.ok) { msg('Error: ' + d.error); return; }
-        msg('Synced ' + d.synced + ' of ' + d.total + ' records to database.');
-    }).catch(e=>msg('Error: ' + e));
-}
-
 function exportCSV() {
     var pl = getSelectedPL();
     if (!pl) { alert('Select a payment link first.'); return; }
-    window.location.href = '/api/club-fitness/export?payment_link=' + encodeURIComponent(pl) + '&source=live';
+    window.location.href = '/api/club-fitness/export?payment_link=' + encodeURIComponent(pl) + '&source=stored';
 }
 
 /* ── Stripe Import ── */
