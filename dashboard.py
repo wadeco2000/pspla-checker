@@ -444,6 +444,45 @@ def _rate_limit(key, max_requests, window_seconds):
     _rate_buckets[key].append(now)
     return False
 
+def _get_git_version():
+    """Return cached git version string (hash + NZ date). Refreshes every 5 min."""
+    gv = getattr(app, '_cached_git_version', None)
+    _age = _time.time() - getattr(app, '_cached_git_version_at', 0)
+    if gv and _age <= 300:
+        return gv
+    gv = "unknown"
+    if GITHUB_PAT and GITHUB_REPO:
+        try:
+            _r = requests.get(
+                f"https://api.github.com/repos/{GITHUB_REPO}/commits/main",
+                headers={"Authorization": f"token {GITHUB_PAT}", "Accept": "application/vnd.github.v3+json"},
+                timeout=5,
+            )
+            if _r.ok:
+                _c = _r.json()
+                from datetime import datetime as _dt
+                try:
+                    _utc = _dt.fromisoformat(_c["commit"]["committer"]["date"].replace("Z", "+00:00"))
+                    from zoneinfo import ZoneInfo as _ZI
+                    _nz = _utc.astimezone(_ZI("Pacific/Auckland"))
+                    _gdate = _nz.strftime("%Y-%m-%d %H:%M")
+                except Exception:
+                    _gdate = _c["commit"]["committer"]["date"][:16].replace("T", " ")
+                gv = f"{_c['sha'][:7]} {_gdate}"
+        except Exception:
+            pass
+    if gv == "unknown":
+        try:
+            _env = {**os.environ, "TZ": "Pacific/Auckland"}
+            _gh = subprocess.run(["git", "log", "-1", "--format=%h %cd", "--date=format:%d %b %Y %H:%M"],
+                                 capture_output=True, text=True, cwd=BASE_DIR, env=_env)
+            gv = _gh.stdout.strip() if _gh.returncode == 0 else "unknown"
+        except Exception:
+            pass
+    app._cached_git_version = gv
+    app._cached_git_version_at = _time.time()
+    return gv
+
 def _get_client_ip():
     return request.headers.get('X-Forwarded-For', request.remote_addr or '').split(',')[0].strip()
 
@@ -4987,41 +5026,7 @@ def index():
         else:
             search_paused = os.path.exists(PAUSE_FLAG)
 
-    git_version = getattr(app, '_cached_git_version', None)
-    _cache_age = _time.time() - getattr(app, '_cached_git_version_at', 0)
-    if not git_version or _cache_age > 300:  # refresh every 5 minutes
-        git_version = "unknown"
-        # Try GitHub API first (works on Azure), fall back to local git
-        if GITHUB_PAT and GITHUB_REPO:
-            try:
-                _gv = requests.get(
-                    f"https://api.github.com/repos/{GITHUB_REPO}/commits/main",
-                    headers={"Authorization": f"token {GITHUB_PAT}", "Accept": "application/vnd.github.v3+json"},
-                    timeout=5,
-                )
-                if _gv.ok:
-                    _gc = _gv.json()
-                    from datetime import datetime as _dt, timezone as _tz
-                    try:
-                        _utc = _dt.fromisoformat(_gc["commit"]["committer"]["date"].replace("Z", "+00:00"))
-                        from zoneinfo import ZoneInfo as _ZI
-                        _nz = _utc.astimezone(_ZI("Pacific/Auckland"))
-                        _gdate = _nz.strftime("%Y-%m-%d %H:%M")
-                    except Exception:
-                        _gdate = _gc["commit"]["committer"]["date"][:16].replace("T", " ")
-                    git_version = f"{_gc['sha'][:7]} {_gdate}"
-            except Exception:
-                pass
-        if git_version == "unknown":
-            try:
-                _gh_env = {**os.environ, "TZ": "Pacific/Auckland"}
-                _gh = subprocess.run(["git", "log", "-1", "--format=%h %cd", "--date=format:%d %b %Y %H:%M"],
-                                     capture_output=True, text=True, cwd=BASE_DIR, env=_gh_env)
-                git_version = _gh.stdout.strip() if _gh.returncode == 0 else "unknown"
-            except Exception:
-                pass
-        app._cached_git_version = git_version
-        app._cached_git_version_at = _time.time()
+    git_version = _get_git_version()
 
     # Read live status for server-side progress bar pre-population
     init_status = {}
@@ -14686,6 +14691,7 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         {% if user_avatar %}<img src="{{ user_avatar }}" class="header-avatar" alt="">{% endif %}
         <span class="header-email">{{ user_email }}</span>
         <a href="/logout" class="header-signout"><i class="fa-solid fa-right-from-bracket"></i> Sign out</a>
+        <span style="font-size:10px;color:#556;margin-left:4px;"><i class="fa-solid fa-code-branch"></i> {{ git_version }}</span>
     </div>
 </div>
 
@@ -15605,6 +15611,7 @@ def club_fitness_page():
         user_email=session.get("email", ""),
         user_avatar=session.get("avatar_url", ""),
         default_payment_link=STRIPE_DEFAULT_PAYMENT_LINK,
+        git_version=_get_git_version(),
     )
 
 
