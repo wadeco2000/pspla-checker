@@ -472,6 +472,7 @@ _RATE_LIMITS = {
     'club_fitness_mappings':     (10, 60),  # 10 mapping ops per minute
     'club_fitness_mappings_batch': (5, 60), # 5 batch applies per minute
     'club_fitness_unique_values': (10, 60), # 10 unique value queries per minute
+    'club_fitness_ai_suggest':   (3, 60),  # 3 AI suggest calls per minute
 }
 
 @app.before_request
@@ -687,6 +688,7 @@ _ROUTE_PERMISSIONS = {
     'club_fitness_mappings': 'club_fitness',
     'club_fitness_mappings_batch': 'club_fitness',
     'club_fitness_unique_values': 'club_fitness',
+    'club_fitness_ai_suggest': 'club_fitness',
 }
 
 # ── TOTP 2FA helpers ──────────────────────────────────────────────────────────
@@ -14501,6 +14503,69 @@ def club_fitness_unique_values():
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
+@app.route("/api/club-fitness/ai-suggest", methods=["POST"])
+def club_fitness_ai_suggest():
+    """Use Haiku to suggest clean values for unmapped gym names and goals."""
+    import anthropic
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return jsonify({"ok": False, "error": "ANTHROPIC_API_KEY not configured."}), 500
+    data = request.json or {}
+    unmapped_gyms = data.get("gyms", [])
+    unmapped_goals = data.get("goals", [])
+    if not unmapped_gyms and not unmapped_goals:
+        return jsonify({"ok": True, "gym_suggestions": {}, "goal_suggestions": {}})
+    known_gyms = ["Club Fitness", "City Fitness", "City Gym", "Jetts", "Iron Alley",
+                  "Wanganui Bootcamp", "Rivercity Boxing", "F45", "The Zone",
+                  "Her Fitness", "Home Gym", "No Gym"]
+    prompt_parts = []
+    if unmapped_gyms:
+        prompt_parts.append(
+            f"GYM NAMES to clean up:\n"
+            f"Known gyms in Whanganui: {', '.join(known_gyms)}\n"
+            f"Raw values: {unmapped_gyms}\n"
+            f"For each raw value, return the best matching known gym name. "
+            f"If someone says 'no', 'nope', 'n/a', 'not yet' etc, map to 'No Gym'. "
+            f"If someone says 'yes' with a gym name, extract the gym name. "
+            f"If it's a gym not in the known list, clean up the capitalisation. "
+            f"If multiple gyms mentioned, use the first one. "
+            f"If it's nonsense or unrelated, map to 'Other'."
+        )
+    if unmapped_goals:
+        prompt_parts.append(
+            f"WEIGHT LOSS GOALS to clean up:\n"
+            f"Standard format: 'Under 5kg', '5-10kg', '10-15kg', '15kg+', or specific like '20kg', '25kg'.\n"
+            f"Raw values: {unmapped_goals}\n"
+            f"For each raw value, return a clean standardised version. "
+            f"'510kg' means '5-10kg', '1015kg' means '10-15kg'. "
+            f"If just a number, add 'kg'. If a range, use hyphen format. "
+            f"If it's text/nonsense, map to 'Other'."
+        )
+    prompt = "\n\n".join(prompt_parts)
+    prompt += ("\n\nRespond ONLY with valid JSON: {\"gym_suggestions\": {\"raw\": \"clean\", ...}, \"goal_suggestions\": {\"raw\": \"clean\", ...}}. "
+               "Include empty objects for fields not requested.")
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model="claude-haiku-4-20250414",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        import json
+        text = resp.content[0].text.strip()
+        # Extract JSON from response
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        result = json.loads(text)
+        return jsonify({"ok": True,
+                        "gym_suggestions": result.get("gym_suggestions", {}),
+                        "goal_suggestions": result.get("goal_suggestions", {})})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 # ── Club Fitness Template ─────────────────────────────────────────────────────
 
 CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
@@ -15294,6 +15359,30 @@ function showCleanModal() {
         });
         html += '</div>';
         document.getElementById('clean-content').innerHTML = html;
+        // Collect unmapped values and ask AI for suggestions
+        var unmappedGyms = [], unmappedGoals = [];
+        (valData.gyms||[]).forEach(function(g){ if (!gymMap[g.value] && !suggestGym(g.value)) unmappedGyms.push(g.value); });
+        (valData.goals||[]).forEach(function(g){ if (!goalMap[g.value] && !suggestGoal(g.value)) unmappedGoals.push(g.value); });
+        if (unmappedGyms.length || unmappedGoals.length) {
+            fetch('/api/club-fitness/ai-suggest', {method:'POST', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({gyms: unmappedGyms, goals: unmappedGoals})
+            }).then(r=>r.json()).then(function(ai){
+                if (!ai.ok) return;
+                // Fill in AI suggestions for empty inputs
+                document.querySelectorAll('[id^="gym-map-"]').forEach(function(el){
+                    if (!el.value && ai.gym_suggestions[el.getAttribute('data-raw')]) {
+                        el.value = ai.gym_suggestions[el.getAttribute('data-raw')];
+                        el.style.borderColor = '#9b59b6';
+                    }
+                });
+                document.querySelectorAll('[id^="goal-map-"]').forEach(function(el){
+                    if (!el.value && ai.goal_suggestions[el.getAttribute('data-raw')]) {
+                        el.value = ai.goal_suggestions[el.getAttribute('data-raw')];
+                        el.style.borderColor = '#9b59b6';
+                    }
+                });
+            }).catch(function(){});
+        }
     }).catch(function(e){ document.getElementById('clean-content').innerHTML = '<div class="empty-state" style="color:#e74c3c">Error loading data.</div>'; });
 }
 
