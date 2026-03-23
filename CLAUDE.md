@@ -682,10 +682,17 @@ Automates the entire challenge signup workflow — from Stripe payment to Bookaf
 - Haiku generates unique variations per email (different greetings, transitions, sign-offs)
 - Sends from Club Fitness Gmail (clubfitnesswhanganui@gmail.com) — big red sender banner
 - "Send Test to Me" button for preview
+- Preview Variations button — generates 5 sample variations to review before sending
 - Recipient list with sortable columns (Name, Email, Last Challenge, Sent status)
-- Select All / Deselect All, 450/batch Gmail limit, 2-second delay between sends
+- Select All / Deselect All / Unsent Only buttons for group selection
+- 450/batch Gmail limit, 2-second delay between sends, 30-second per-email timeout
+- Sends in background thread — no timeout, page can be closed while sending
+- Live progress bar polls every 3 seconds (sent/errors/total)
+- Pause button (pause/resume sending) and Stop button (cancel remaining)
+- Template, subject, and AI prompt auto-save to Supabase between sessions
 - Sent status tracked in Supabase, clearable for next campaign
 - Duplicate prevention — one email per unique address
+- Inline edit and delete buttons on each entry
 
 **Navbar:**
 - Partners dropdown menu groups Actuate, Shelly, and Club Fitness (permission-gated per item)
@@ -702,6 +709,46 @@ Automates the entire challenge signup workflow — from Stripe payment to Bookaf
 - RLS on all three tables (no anon access)
 - Campaign emails use separate SMTP credentials from PSPLA notifications
 - Edit endpoint whitelist: only allowed fields can be modified
+
+---
+
+## Search Queue System (added 23 Mar 2026)
+
+When a search is already running and you try to start another, the conflict modal now has a **Queue** option alongside Stop & Start New and Cancel.
+
+**How it works:**
+- Click Queue → search is added to `search_queue.json` (max 3 queued)
+- When the current search finishes, `check_and_launch_queue()` auto-launches the next queued search
+- All `run_*.py` scripts call `check_and_launch_queue()` on completion
+- Queue endpoints: `POST /queue-search`, `GET /search-queue`, `POST /clear-queue`
+
+---
+
+## Fix Facebook-Only Entries (added 23 Mar 2026)
+
+New search type under Searches → Fix Facebook-Only. Finds companies where `root_domain=facebook.com` (no real website discovered) and enriches them.
+
+**Pipeline per company:**
+1. Re-scrapes Facebook page for website URL, email, phone
+2. If no website found on FB → Google search for `"Company Name" Region New Zealand`
+3. Haiku AI verifies Google result is the same company (name + location check)
+4. Updates missing fields only — never overwrites existing data
+5. If website found → re-runs PSPLA, Companies Office, NZSA, services checks with new context
+
+**Key file:** `run_facebook_fix.py`
+
+---
+
+## Graceful Shutdown Handler (added 23 Mar 2026)
+
+All search scripts now install a `SIGTERM` handler via `install_graceful_shutdown()`. When Azure restarts the container (deploy or recycle), the handler:
+- Writes "interrupted" status to search history (blue colour in UI) instead of "crashed" (red)
+- Cleans up `running.flag` and `pause.flag`
+- Updates Supabase search state
+
+This means deploys during a running search show as "Interrupted by container restart" rather than a mysterious "crashed".
+
+---
 
 **Known issue (22 Mar 2026):**
 - Rapid successive deploys can cause Azure container restart failures (409 Conflict). If this happens, wait 1-2 minutes then trigger a manual deploy via `gh workflow run deploy-dashboard.yml`.
