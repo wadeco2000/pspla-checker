@@ -426,7 +426,7 @@ def _set_security_headers(response):
         "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
         "font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com; "
         "img-src 'self' data: https://*.supabase.co https://www.gstatic.com; "
-        "connect-src 'self' https://*.supabase.co; "
+        "connect-src 'self' https://*.supabase.co https://cdn.jsdelivr.net; "
         "frame-src https://www.google.com; "
         "object-src 'none'; "
         "base-uri 'self'"
@@ -16178,7 +16178,7 @@ function previewVariations() {
     contentDiv.innerHTML = '<div style="text-align:center;padding:20px;color:#888;"><i class="fa-solid fa-spinner fa-spin"></i> Generating 5 sample variations...</div>';
     fetch('/api/club-fitness/campaign-preview-variations', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json', 'X-CSRFToken': _csrf},
+        headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({template: template, ai_instructions: aiPrompt})
     }).then(r => r.json()).then(d => {
         if (!d.ok) { contentDiv.innerHTML = '<div style="color:red;">Error: ' + esc(d.error) + '</div>'; return; }
