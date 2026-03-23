@@ -752,6 +752,8 @@ _ROUTE_PERMISSIONS = {
     'club_fitness_campaign_clear': 'club_fitness',
     'club_fitness_campaign_status': 'club_fitness',
     'club_fitness_campaign_template': 'club_fitness',
+    'club_fitness_campaign_stop': 'club_fitness',
+    'club_fitness_campaign_pause': 'club_fitness',
 }
 
 # ── TOTP 2FA helpers ──────────────────────────────────────────────────────────
@@ -15248,13 +15250,31 @@ def club_fitness_campaign_send_test():
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
-_campaign_status = {"running": False, "sent": 0, "errors": 0, "total": 0, "finished": False, "error_log": []}
+_campaign_status = {"running": False, "sent": 0, "errors": 0, "total": 0, "finished": False, "error_log": [], "paused": False, "stop_requested": False}
 
 
 @app.route("/api/club-fitness/campaign-status", methods=["GET"])
 def club_fitness_campaign_status():
     """Poll campaign send progress."""
     return jsonify(_campaign_status)
+
+
+@app.route("/api/club-fitness/campaign-stop", methods=["POST"])
+def club_fitness_campaign_stop():
+    """Stop a running campaign."""
+    global _campaign_status
+    _campaign_status["stop_requested"] = True
+    _campaign_status["status_text"] = "Stopping..."
+    return jsonify({"ok": True})
+
+
+@app.route("/api/club-fitness/campaign-pause", methods=["POST"])
+def club_fitness_campaign_pause():
+    """Pause/resume a running campaign."""
+    global _campaign_status
+    _campaign_status["paused"] = not _campaign_status.get("paused", False)
+    _campaign_status["status_text"] = "Paused" if _campaign_status["paused"] else "Resuming..."
+    return jsonify({"ok": True, "paused": _campaign_status["paused"]})
 
 
 @app.route("/api/club-fitness/campaign-send", methods=["POST"])
@@ -15337,7 +15357,19 @@ def club_fitness_campaign_send():
             _campaign_status["finished"] = True
             _campaign_status["status_text"] = f"SMTP login failed: {e}"
             return
+        server.sock.settimeout(30)  # 30 second timeout per email
         for i, r in enumerate(recipients):
+            # Check stop/pause
+            if _campaign_status.get("stop_requested"):
+                _campaign_status["status_text"] = f"Stopped at {_campaign_status['sent']} sent"
+                break
+            while _campaign_status.get("paused"):
+                _campaign_status["status_text"] = f"Paused at {_campaign_status['sent']}/{len(recipients)}"
+                _t.sleep(1)
+                if _campaign_status.get("stop_requested"):
+                    break
+            if _campaign_status.get("stop_requested"):
+                break
             email = r["email"]
             first_name = r.get("first_name", "there")
             last_challenge = r.get("last_challenge", "")
@@ -15717,7 +15749,11 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
                 <div id="campaign-progress" style="display:none;margin-top:10px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#f8f9fa;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                         <strong style="font-size:12px;" id="campaign-progress-text">Starting...</strong>
-                        <span style="font-size:11px;color:#888;" id="campaign-progress-count"></span>
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <button class="btn btn-sm" id="campaign-pause-btn" style="background:#e67e22;color:white;font-size:10px;padding:2px 8px;" onclick="pauseCampaign()"><i class="fa-solid fa-pause"></i> Pause</button>
+                            <button class="btn btn-sm" id="campaign-stop-btn" style="background:#e74c3c;color:white;font-size:10px;padding:2px 8px;" onclick="stopCampaign()"><i class="fa-solid fa-stop"></i> Stop</button>
+                            <span style="font-size:11px;color:#888;" id="campaign-progress-count"></span>
+                        </div>
                     </div>
                     <div style="width:100%;background:#e2e8f0;border-radius:4px;height:8px;">
                         <div id="campaign-progress-bar" style="width:0%;background:#27ae60;height:8px;border-radius:4px;transition:width 0.3s;"></div>
@@ -16358,11 +16394,31 @@ function _pollCampaignProgress() {
                 clearInterval(_campaignPollTimer);
                 _campaignPollTimer = null;
                 document.getElementById('campaign-progress-bar').style.background = d.errors > 0 ? '#e67e22' : '#27ae60';
+                document.getElementById('campaign-pause-btn').style.display = 'none';
+                document.getElementById('campaign-stop-btn').style.display = 'none';
                 loadCampaignRecipients();
                 alert('Campaign complete!\n\n' + d.sent + ' emails sent\n' + d.errors + ' errors');
             }
         });
     }, 3000);
+}
+
+function pauseCampaign() {
+    fetch('/api/club-fitness/campaign-pause', {method:'POST'}).then(r=>r.json()).then(d=>{
+        var btn = document.getElementById('campaign-pause-btn');
+        if (d.paused) {
+            btn.innerHTML = '<i class="fa-solid fa-play"></i> Resume';
+            btn.style.background = '#27ae60';
+        } else {
+            btn.innerHTML = '<i class="fa-solid fa-pause"></i> Pause';
+            btn.style.background = '#e67e22';
+        }
+    });
+}
+
+function stopCampaign() {
+    if (!confirm('Stop sending? Emails already sent will not be affected.')) return;
+    fetch('/api/club-fitness/campaign-stop', {method:'POST'});
 }
 
 function selectUnsentOnly() {
