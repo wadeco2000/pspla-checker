@@ -750,6 +750,8 @@ _ROUTE_PERMISSIONS = {
     'club_fitness_campaign_send_test': 'club_fitness',
     'club_fitness_campaign_send': 'club_fitness',
     'club_fitness_campaign_clear': 'club_fitness',
+    'club_fitness_campaign_status': 'club_fitness',
+    'club_fitness_campaign_template': 'club_fitness',
 }
 
 # ── TOTP 2FA helpers ──────────────────────────────────────────────────────────
@@ -15246,11 +15248,25 @@ def club_fitness_campaign_send_test():
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
+_campaign_status = {"running": False, "sent": 0, "errors": 0, "total": 0, "finished": False, "error_log": []}
+
+
+@app.route("/api/club-fitness/campaign-status", methods=["GET"])
+def club_fitness_campaign_status():
+    """Poll campaign send progress."""
+    return jsonify(_campaign_status)
+
+
 @app.route("/api/club-fitness/campaign-send", methods=["POST"])
+
+
 def club_fitness_campaign_send():
     """Send campaign emails to selected recipients with Haiku-generated variations."""
+    global _campaign_status
     if not CF_SMTP_USER or not CF_SMTP_PASS:
         return jsonify({"ok": False, "error": "CF_SMTP_USER/CF_SMTP_PASS not configured."}), 500
+    if _campaign_status.get("running"):
+        return jsonify({"ok": False, "error": "A campaign is already sending. Check progress below."}), 409
     data = request.json or {}
     recipients = data.get("recipients", [])
     template = (data.get("template") or "").strip()
@@ -15261,97 +15277,116 @@ def club_fitness_campaign_send():
         return jsonify({"ok": False, "error": "recipients, template, and subject required."}), 400
     if len(recipients) > 450:
         return jsonify({"ok": False, "error": f"Max 450 emails per batch (Gmail limit). You selected {len(recipients)}."}), 400
-    import anthropic, json, smtplib, time as _t
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
-    from datetime import datetime, timezone
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    # Pre-generate variations in batches of 10
-    variations = {}
-    if api_key and ai_instructions and len(recipients) > 0:
-        _batch_size = 10
-        client = anthropic.Anthropic(api_key=api_key)
-        for _bi in range(0, len(recipients), _batch_size):
-            _batch = recipients[_bi:_bi + _batch_size]
-            try:
-                resp = client.messages.create(
-                    model="claude-haiku-4-5-20251001",
-                    max_tokens=4000,
-                    messages=[{"role": "user", "content":
-                        f"I need {len(_batch)} slightly different versions of this email template.\n"
-                        f"{ai_instructions}\n"
-                        f"Keep the core message and meaning identical each time. "
-                        f"Do NOT change any dates, month names, URLs, or specific details. "
-                        f"Keep {{first_name}} and {{last_challenge}} as literal placeholders — do NOT replace them.\n\n"
-                        f"TEMPLATE:\n{template}\n\n"
-                        f"Respond ONLY with a JSON array of {len(_batch)} strings. No explanation, no markdown."
-                    }]
-                )
-                text = resp.content[0].text.strip()
-                if text.startswith("```"):
-                    text = text.split("```")[1]
-                    if text.startswith("json"):
-                        text = text[4:]
-                var_list = json.loads(text)
-                for j, br in enumerate(_batch):
-                    if j < len(var_list):
-                        variations[br["email"]] = var_list[j]
-            except Exception as e:
-                print(f"[campaign] AI variation batch {_bi}-{_bi+len(_batch)} error: {e}")
-        print(f"[campaign] Generated {len(variations)} AI variations for {len(recipients)} recipients")
-    # Send emails
-    sent = 0
-    errors = 0
-    now_iso = datetime.now(timezone.utc).isoformat()
-    try:
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-        server.ehlo()
-        server.starttls()
-        server.login(CF_SMTP_USER, CF_SMTP_PASS)
-    except Exception as e:
-        return jsonify({"ok": False, "error": f"SMTP login failed: {e}"}), 502
-    for r in recipients:
-        email = r["email"]
-        first_name = r.get("first_name", "there")
-        last_challenge = r.get("last_challenge", "")
-        body = variations.get(email, template)
-        body = body.replace("{first_name}", first_name).replace("{last_challenge}", last_challenge)
+
+    _campaign_status = {"running": True, "sent": 0, "errors": 0, "total": len(recipients),
+                        "finished": False, "error_log": [], "status_text": "Generating AI variations..."}
+
+    import threading
+
+    def _send_in_background(recipients, template, subject, campaign_id, ai_instructions):
+        global _campaign_status
+        import anthropic, json as _json, smtplib, time as _t
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+        from datetime import datetime, timezone
+        api_key = os.getenv("ANTHROPIC_API_KEY", "")
+        # Pre-generate variations in batches of 10
+        variations = {}
+        if api_key and ai_instructions and len(recipients) > 0:
+            _batch_size = 10
+            client = anthropic.Anthropic(api_key=api_key)
+            for _bi in range(0, len(recipients), _batch_size):
+                _batch = recipients[_bi:_bi + _batch_size]
+                _campaign_status["status_text"] = f"Generating AI variations ({_bi + len(_batch)}/{len(recipients)})..."
+                try:
+                    resp = client.messages.create(
+                        model="claude-haiku-4-5-20251001",
+                        max_tokens=4000,
+                        messages=[{"role": "user", "content":
+                            f"I need {len(_batch)} slightly different versions of this email template.\n"
+                            f"{ai_instructions}\n"
+                            f"Keep the core message and meaning identical each time. "
+                            f"Do NOT change any dates, month names, URLs, or specific details. "
+                            f"Keep {{first_name}} and {{last_challenge}} as literal placeholders — do NOT replace them.\n\n"
+                            f"TEMPLATE:\n{template}\n\n"
+                            f"Respond ONLY with a JSON array of {len(_batch)} strings. No explanation, no markdown."
+                        }]
+                    )
+                    text = resp.content[0].text.strip()
+                    if text.startswith("```"):
+                        text = text.split("```")[1]
+                        if text.startswith("json"):
+                            text = text[4:]
+                    var_list = _json.loads(text)
+                    for j, br in enumerate(_batch):
+                        if j < len(var_list):
+                            variations[br["email"]] = var_list[j]
+                except Exception as e:
+                    print(f"[campaign] AI variation batch {_bi}-{_bi+len(_batch)} error: {e}")
+                    _campaign_status["error_log"].append(f"AI batch {_bi}: {e}")
+            print(f"[campaign] Generated {len(variations)} AI variations for {len(recipients)} recipients")
+        # Send emails
+        now_iso = datetime.now(timezone.utc).isoformat()
         try:
-            msg = MIMEMultipart("alternative")
-            msg["Subject"] = subject
-            msg["From"] = f"{CF_SMTP_FROM_NAME} <{CF_SMTP_USER}>"
-            msg["To"] = email
-            msg.attach(MIMEText(body, "plain"))
-            html_body = body.replace("\n", "<br>")
-            msg.attach(MIMEText(f"<html><body style='font-family:Arial,sans-serif;font-size:14px;color:#333;'>{html_body}</body></html>", "html"))
-            server.sendmail(CF_SMTP_USER, email, msg.as_string())
-            sent += 1
-            # Mark as sent in Supabase
-            try:
-                requests.patch(
-                    f"{SUPABASE_URL}/rest/v1/challenge_signups",
-                    params={"customer_email": f"ilike.{email}"},
-                    json={"campaign_email_sent_at": now_iso, "campaign_id": campaign_id},
-                    headers={
-                        "apikey": SUPABASE_SERVICE_KEY,
-                        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                        "Content-Type": "application/json",
-                        "Prefer": "return=minimal"
-                    },
-                    timeout=10
-                )
-            except Exception:
-                pass
-            _t.sleep(2)  # 2 second delay between emails
+            server = smtplib.SMTP("smtp.gmail.com", 587)
+            server.ehlo()
+            server.starttls()
+            server.login(CF_SMTP_USER, CF_SMTP_PASS)
         except Exception as e:
-            print(f"[campaign] Failed to send to {email}: {e}")
-            errors += 1
-    try:
-        server.quit()
-    except Exception:
-        pass
-    return jsonify({"ok": True, "sent": sent, "errors": errors, "total": len(recipients),
-                    "sent_from": CF_SMTP_USER})
+            _campaign_status["running"] = False
+            _campaign_status["finished"] = True
+            _campaign_status["status_text"] = f"SMTP login failed: {e}"
+            return
+        for i, r in enumerate(recipients):
+            email = r["email"]
+            first_name = r.get("first_name", "there")
+            last_challenge = r.get("last_challenge", "")
+            body = variations.get(email, template)
+            body = body.replace("{first_name}", first_name).replace("{last_challenge}", last_challenge)
+            _campaign_status["status_text"] = f"Sending {i+1}/{len(recipients)}: {email}"
+            try:
+                msg = MIMEMultipart("alternative")
+                msg["Subject"] = subject
+                msg["From"] = f"{CF_SMTP_FROM_NAME} <{CF_SMTP_USER}>"
+                msg["To"] = email
+                msg.attach(MIMEText(body, "plain"))
+                html_body = body.replace("\n", "<br>")
+                msg.attach(MIMEText(f"<html><body style='font-family:Arial,sans-serif;font-size:14px;color:#333;'>{html_body}</body></html>", "html"))
+                server.sendmail(CF_SMTP_USER, email, msg.as_string())
+                _campaign_status["sent"] += 1
+                # Mark as sent in Supabase
+                try:
+                    requests.patch(
+                        f"{SUPABASE_URL}/rest/v1/challenge_signups",
+                        params={"customer_email": f"ilike.{email}"},
+                        json={"campaign_email_sent_at": now_iso, "campaign_id": campaign_id},
+                        headers={
+                            "apikey": SUPABASE_SERVICE_KEY,
+                            "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                            "Content-Type": "application/json",
+                            "Prefer": "return=minimal"
+                        },
+                        timeout=10
+                    )
+                except Exception:
+                    pass
+                _t.sleep(2)  # 2 second delay between emails
+            except Exception as e:
+                print(f"[campaign] Failed to send to {email}: {e}")
+                _campaign_status["errors"] += 1
+                _campaign_status["error_log"].append(f"{email}: {e}")
+        try:
+            server.quit()
+        except Exception:
+            pass
+        _campaign_status["running"] = False
+        _campaign_status["finished"] = True
+        _campaign_status["status_text"] = f"Done — {_campaign_status['sent']} sent, {_campaign_status['errors']} errors"
+        print(f"[campaign] Finished: {_campaign_status['sent']} sent, {_campaign_status['errors']} errors out of {len(recipients)}")
+
+    t = threading.Thread(target=_send_in_background, args=(recipients, template, subject, campaign_id, ai_instructions), daemon=True)
+    t.start()
+    return jsonify({"ok": True, "message": f"Campaign started for {len(recipients)} recipients. Poll /api/club-fitness/campaign-status for progress."})
 
 
 @app.route("/api/club-fitness/campaign-clear", methods=["POST"])
@@ -15373,6 +15408,44 @@ def club_fitness_campaign_clear():
         return jsonify({"ok": r.ok})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/club-fitness/campaign-template", methods=["GET", "POST"])
+def club_fitness_campaign_template():
+    """Save/load campaign template, subject, and AI prompt."""
+    _SB = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+           "Content-Type": "application/json", "Prefer": "return=minimal"}
+    if request.method == "GET":
+        try:
+            r = requests.get(f"{SUPABASE_URL}/rest/v1/challenge_links",
+                params={"select": "campaign_subject,campaign_template,campaign_ai_prompt", "limit": "1"},
+                headers=_SB, timeout=10)
+            data = r.json()
+            if isinstance(data, list) and data:
+                return jsonify({"ok": True, **data[0]})
+            return jsonify({"ok": True, "campaign_subject": "", "campaign_template": "", "campaign_ai_prompt": ""})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 502
+    else:
+        d = request.json or {}
+        update = {}
+        for key in ["campaign_subject", "campaign_template", "campaign_ai_prompt"]:
+            if key in d:
+                update[key] = d[key]
+        if not update:
+            return jsonify({"ok": False, "error": "Nothing to save."}), 400
+        try:
+            # Update the first link record (shared template across all links)
+            r = requests.get(f"{SUPABASE_URL}/rest/v1/challenge_links",
+                params={"select": "id", "limit": "1"}, headers=_SB, timeout=10)
+            rows = r.json()
+            if isinstance(rows, list) and rows:
+                requests.patch(f"{SUPABASE_URL}/rest/v1/challenge_links",
+                    params={"id": f"eq.{rows[0]['id']}"},
+                    json=update, headers=_SB, timeout=10)
+            return jsonify({"ok": True})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 502
 
 
 # ── Club Fitness Template ─────────────────────────────────────────────────────
@@ -15625,21 +15698,31 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         <div style="display:flex;gap:16px;flex-wrap:wrap;">
             <div style="flex:1;min-width:300px;">
                 <label style="font-size:12px;font-weight:bold;color:#555;">Subject Line</label>
-                <input type="text" class="campaign-subject" id="campaign-subject" placeholder="e.g. Ready for the next challenge?">
+                <input type="text" class="campaign-subject" id="campaign-subject" placeholder="e.g. Ready for the next challenge?" oninput="_autoSaveCampaignTemplate()">
                 <label style="font-size:12px;font-weight:bold;color:#555;">Email Template</label>
                 <div style="display:flex;gap:4px;margin-bottom:4px;">
                     <span style="font-size:11px;color:#888;line-height:24px;">Insert:</span>
                     <button class="btn-token" onclick="insertToken('first_name')">{first_name}</button>
                     <button class="btn-token" onclick="insertToken('last_challenge')">{last_challenge}</button>
                 </div>
-                <textarea class="campaign-template" id="campaign-template" placeholder="Hi {first_name},&#10;&#10;How are you going since your last challenge back in {last_challenge}? We've got a new one starting soon and thought you might be interested...&#10;&#10;Cheers,&#10;Club Fitness Whanganui"></textarea>
+                <textarea class="campaign-template" id="campaign-template" placeholder="Hi {first_name},&#10;&#10;How are you going since your last challenge back in {last_challenge}? We've got a new one starting soon and thought you might be interested...&#10;&#10;Cheers,&#10;Club Fitness Whanganui" oninput="_autoSaveCampaignTemplate()"></textarea>
                 <label style="font-size:12px;font-weight:bold;color:#555;margin-top:10px;">AI Variation Instructions <span style="color:#888;font-weight:normal;">(how Haiku should vary the emails)</span></label>
-                <textarea class="campaign-template" id="campaign-ai-prompt" style="min-height:60px;font-size:12px;">Swap the greeting (hi/hey/hello/good morning/kia ora/g'day), vary transitional phrases slightly, and swap the sign-off (thanks/cheers/have a great day/take care/kind regards/all the best). Keep the core message and meaning identical each time.</textarea>
+                <textarea class="campaign-template" id="campaign-ai-prompt" style="min-height:60px;font-size:12px;" oninput="_autoSaveCampaignTemplate()">Swap the greeting (hi/hey/hello/good morning/kia ora/g'day), vary transitional phrases slightly, and swap the sign-off (thanks/cheers/have a great day/take care/kind regards/all the best). Keep the core message and meaning identical each time.</textarea>
                 <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
                     <button class="btn btn-sm" style="background:#8e44ad;color:white;" onclick="previewVariations()"><i class="fa-solid fa-eye"></i> Preview Variations</button>
                     <button class="btn btn-sm" style="background:#3498db;color:white;" onclick="testCampaignEmail()"><i class="fa-solid fa-flask"></i> Send Test to Me</button>
                     <button class="btn btn-sm" style="background:#c0392b;color:white;" onclick="sendCampaign()"><i class="fa-solid fa-paper-plane"></i> Send to Selected</button>
                     <button class="btn btn-sm" style="background:#e2e8f0;color:#555;" onclick="clearCampaignStatus()"><i class="fa-solid fa-rotate-left"></i> Clear Sent Status</button>
+                </div>
+                <div id="campaign-progress" style="display:none;margin-top:10px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;background:#f8f9fa;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                        <strong style="font-size:12px;" id="campaign-progress-text">Starting...</strong>
+                        <span style="font-size:11px;color:#888;" id="campaign-progress-count"></span>
+                    </div>
+                    <div style="width:100%;background:#e2e8f0;border-radius:4px;height:8px;">
+                        <div id="campaign-progress-bar" style="width:0%;background:#27ae60;height:8px;border-radius:4px;transition:width 0.3s;"></div>
+                    </div>
+                    <div id="campaign-error-log" style="display:none;margin-top:8px;font-size:11px;color:#e74c3c;max-height:100px;overflow-y:auto;"></div>
                 </div>
                 <div id="variation-preview" style="display:none;margin-top:12px;border:1px solid #e2e8f0;border-radius:8px;padding:12px;background:#fafbfc;max-height:400px;overflow-y:auto;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
@@ -15655,6 +15738,7 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
                     <div style="display:flex;gap:8px;">
                         <button class="btn btn-sm" style="background:#f0f0f0;color:#555;font-size:11px;" onclick="selectAllRecipients(true)">Select All</button>
                         <button class="btn btn-sm" style="background:#f0f0f0;color:#555;font-size:11px;" onclick="selectAllRecipients(false)">Deselect All</button>
+                        <button class="btn btn-sm" style="background:#e8f4fd;color:#2980b9;font-size:11px;" onclick="selectUnsentOnly()">Unsent Only</button>
                         <button class="btn btn-sm" style="background:#f0f0f0;color:#555;font-size:11px;" onclick="loadCampaignRecipients()"><i class="fa-solid fa-rotate"></i></button>
                     </div>
                 </div>
@@ -16097,7 +16181,31 @@ function toggleCampaign() {
         panel.classList.add('active');
         document.getElementById('campaign-sender').textContent = '{{ cf_smtp_user }}';
         loadCampaignRecipients();
+        _loadCampaignTemplate();
     }
+}
+
+function _loadCampaignTemplate() {
+    fetch('/api/club-fitness/campaign-template').then(r=>r.json()).then(d=>{
+        if (!d.ok) return;
+        if (d.campaign_subject) document.getElementById('campaign-subject').value = d.campaign_subject;
+        if (d.campaign_template) document.getElementById('campaign-template').value = d.campaign_template;
+        if (d.campaign_ai_prompt) document.getElementById('campaign-ai-prompt').value = d.campaign_ai_prompt;
+    });
+}
+
+var _saveTimer = null;
+function _autoSaveCampaignTemplate() {
+    if (_saveTimer) clearTimeout(_saveTimer);
+    _saveTimer = setTimeout(function(){
+        fetch('/api/club-fitness/campaign-template', {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({
+                campaign_subject: document.getElementById('campaign-subject').value,
+                campaign_template: document.getElementById('campaign-template').value,
+                campaign_ai_prompt: document.getElementById('campaign-ai-prompt').value
+            })
+        });
+    }, 2000);
 }
 
 function loadCampaignRecipients() {
@@ -16218,17 +16326,48 @@ function sendCampaign() {
     if (!selected.length) { alert('No recipients selected.'); return; }
     if (selected.length > 450) { alert('Gmail limits to ~450 emails per batch. Please deselect some and send in batches.'); return; }
     var sender = document.getElementById('campaign-sender').textContent;
-    if (!confirm('Send ' + selected.length + ' emails?\n\nFrom: ' + sender + '\nSubject: ' + subject + '\n\nThis will take about ' + Math.ceil(selected.length * 2 / 60) + ' minutes.')) return;
-    msg('Sending ' + selected.length + ' emails... please wait.');
+    if (!confirm('Send ' + selected.length + ' emails?\n\nFrom: ' + sender + '\nSubject: ' + subject + '\n\nThis will take about ' + Math.ceil(selected.length * 2 / 60) + ' minutes.\n\nYou can close this page — emails will continue sending in the background.')) return;
     var campaignId = 'campaign_' + Date.now();
+    document.getElementById('campaign-progress').style.display = 'block';
+    document.getElementById('campaign-progress-text').textContent = 'Starting campaign...';
+    document.getElementById('campaign-progress-bar').style.width = '0%';
     fetch('/api/club-fitness/campaign-send', {method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({recipients: selected, subject: subject, template: template, campaign_id: campaignId, ai_instructions: document.getElementById('campaign-ai-prompt').value.trim()})
     }).then(r=>r.json()).then(d=>{
-        if (!d.ok) { msg('Error: ' + (d.error||'Unknown')); return; }
-        msg('Campaign complete: ' + d.sent + ' sent, ' + d.errors + ' errors. From: ' + d.sent_from);
-        alert('Campaign complete!\n\n' + d.sent + ' emails sent\n' + d.errors + ' errors\nSent from: ' + d.sent_from);
-        loadCampaignRecipients();
+        if (!d.ok) { msg('Error: ' + (d.error||'Unknown')); document.getElementById('campaign-progress-text').textContent = 'Error: ' + (d.error||'Unknown'); return; }
+        msg(d.message || 'Campaign started...');
+        _pollCampaignProgress();
     });
+}
+
+var _campaignPollTimer = null;
+function _pollCampaignProgress() {
+    if (_campaignPollTimer) clearInterval(_campaignPollTimer);
+    _campaignPollTimer = setInterval(function(){
+        fetch('/api/club-fitness/campaign-status').then(r=>r.json()).then(d=>{
+            var pct = d.total > 0 ? Math.round((d.sent + d.errors) / d.total * 100) : 0;
+            document.getElementById('campaign-progress-bar').style.width = pct + '%';
+            document.getElementById('campaign-progress-text').textContent = d.status_text || 'Sending...';
+            document.getElementById('campaign-progress-count').textContent = d.sent + ' sent, ' + d.errors + ' errors / ' + d.total;
+            if (d.error_log && d.error_log.length > 0) {
+                var el = document.getElementById('campaign-error-log');
+                el.style.display = 'block';
+                el.innerHTML = d.error_log.map(function(e){ return '<div>' + e + '</div>'; }).join('');
+            }
+            if (d.finished) {
+                clearInterval(_campaignPollTimer);
+                _campaignPollTimer = null;
+                document.getElementById('campaign-progress-bar').style.background = d.errors > 0 ? '#e67e22' : '#27ae60';
+                loadCampaignRecipients();
+                alert('Campaign complete!\n\n' + d.sent + ' emails sent\n' + d.errors + ' errors');
+            }
+        });
+    }, 3000);
+}
+
+function selectUnsentOnly() {
+    _campaignRecipients.forEach(function(r){ r._selected = !r.last_sent; });
+    renderRecipients();
 }
 
 function clearCampaignStatus() {
