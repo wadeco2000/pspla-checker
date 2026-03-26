@@ -13569,48 +13569,64 @@ function flexSave(fsIdx) {
 function toggleFlexSchedule(fsIdx, turnOn) {
     var fs = _flexSchedules[fsIdx];
     if (!fs) return;
-    // Find the main (non-override, non-flex-rule) schedule to link/unlink
-    var mainSched = _schedules.find(function(s){ return s.enabled && !s.is_override && (turnOn ? !s.flex_schedule : s.flex_schedule === fs.id); });
-    if (!mainSched) {
-        // Fallback: use any enabled non-override schedule
-        mainSched = _schedules.find(function(s){ return s.enabled && !s.is_override; });
-    }
-    if (!mainSched) { alert('No schedule found to link/unlink flex.'); return; }
+    var siteId = document.getElementById('site-id').value;
     var action = turnOn ? 'Enable' : 'Disable';
-    if (!confirm(action + ' flex scheduling?\n\nThis will ' + (turnOn ? 'link' : 'unlink') + ' Schedule #' + mainSched.id + ' ' + (turnOn ? 'to' : 'from') + ' Flex Schedule #' + fs.id + '.')) {
-        loadSchedules(); // revert checkbox
+    // Find ALL enabled non-override schedules that need updating
+    var schedsToUpdate;
+    if (turnOn) {
+        // Link all enabled non-override schedules that aren't already linked to a flex
+        schedsToUpdate = _schedules.filter(function(s){ return s.enabled && !s.is_override && !s.flex_schedule; });
+    } else {
+        // Unlink all schedules linked to this flex
+        schedsToUpdate = _schedules.filter(function(s){ return s.enabled && !s.is_override && s.flex_schedule === fs.id; });
+    }
+    if (!schedsToUpdate.length) { alert('No schedules found to ' + action.toLowerCase() + '.'); loadSchedules(); return; }
+    var schedIds = schedsToUpdate.map(function(s){ return '#' + s.id; }).join(', ');
+    if (!confirm(action + ' flex scheduling?\n\nSchedule(s) ' + schedIds + ' will be ' + (turnOn ? 'linked to' : 'unlinked from') + ' Flex Schedule #' + fs.id + '.')) {
+        loadSchedules();
         return;
     }
-    var siteId = document.getElementById('site-id').value;
     var newFlexVal = turnOn ? fs.id : null;
-    fetch('/api/actuate/schedule-update', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            site_id: siteId,
-            schedule_id: String(mainSched.id),
-            data: {
-                start_time: mainSched.start_time,
-                end_time: mainSched.end_time,
-                enabled: mainSched.enabled,
-                always_on: mainSched.always_on,
-                day_of_week: mainSched.day_of_week,
-                customer: parseInt(siteId),
-                schedule_status: mainSched.schedule_status,
-                is_override: mainSched.is_override,
-                buffer_time: mainSched.buffer_time || 0,
-                flex_schedule: newFlexVal
-            }
-        })
-    }).then(r=>r.json()).then(function(d) {
-        if (!d.ok) { alert('Error: ' + (d.error || 'Unknown')); loadSchedules(); return; }
-        addLog('Flex scheduling ' + (turnOn ? 'enabled' : 'disabled') + '. Schedule #' + mainSched.id + (turnOn ? ' linked to' : ' unlinked from') + ' flex #' + fs.id, 'log-ok');
-        loadSchedules();
-        _autoDeployAfterSave();
-    }).catch(function(e) {
-        alert('Network error: ' + e);
-        loadSchedules();
-    });
+    // Update all schedules sequentially
+    var updateIdx = 0;
+    function updateNext() {
+        if (updateIdx >= schedsToUpdate.length) {
+            addLog('Flex scheduling ' + (turnOn ? 'enabled' : 'disabled') + '. ' + schedsToUpdate.length + ' schedule(s) updated.', 'log-ok');
+            loadSchedules();
+            _autoDeployAfterSave();
+            return;
+        }
+        var s = schedsToUpdate[updateIdx];
+        fetch('/api/actuate/schedule-update', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                site_id: siteId,
+                schedule_id: String(s.id),
+                data: {
+                    start_time: s.start_time,
+                    end_time: s.end_time,
+                    enabled: s.enabled,
+                    always_on: s.always_on,
+                    day_of_week: s.day_of_week,
+                    customer: parseInt(siteId),
+                    schedule_status: s.schedule_status,
+                    is_override: s.is_override,
+                    buffer_time: s.buffer_time || 0,
+                    flex_schedule: newFlexVal
+                }
+            })
+        }).then(r=>r.json()).then(function(d) {
+            if (!d.ok) { alert('Error updating schedule #' + s.id + ': ' + (d.error || 'Unknown')); }
+            updateIdx++;
+            updateNext();
+        }).catch(function(e) {
+            alert('Network error updating schedule #' + s.id + ': ' + e);
+            updateIdx++;
+            updateNext();
+        });
+    }
+    updateNext();
 }
 
 function editScheduleDay(dayNum) {
