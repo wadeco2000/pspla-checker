@@ -526,9 +526,9 @@ Dashboard is responsive with CSS media queries at two breakpoints:
 - App Service: `pspla-checker`, Linux container, New Zealand North region
 - Direct URL: `pspla-checker-eub7bpa0gphthhgh.newzealandnorth-01.azurewebsites.net`
 - Custom domain: `www.psplachecker.co.nz`
-- Startup command: `gunicorn --bind=0.0.0.0 --timeout 600 --preload dashboard:app`
-- `--preload` loads the app in the master process before forking workers — avoids double-boot timeout
-- `WEBSITES_CONTAINER_START_TIME_LIMIT` should be 300+ seconds
+- Startup command: `gunicorn --bind 0.0.0.0:8000 --timeout 600 --workers 1 dashboard:app`
+- `--preload` was REMOVED (26 Mar 2026) — at 17k+ lines, preloading took 6+ minutes and exceeded Azure's startup limit. Without it, boot takes ~33 seconds.
+- `WEBSITES_CONTAINER_START_TIME_LIMIT` set to `900` (15 minutes safety margin)
 - `_redirect_to_custom_domain()` middleware: redirects `.azurewebsites.net` requests to custom domain via 301
 
 ---
@@ -565,7 +565,66 @@ Standalone page at `/actuate` for managing Actuate camera AI system. Communicate
 **Endpoint categories** (`_ACTUATE_ENDPOINTS` dict):
 - Site & Customer, Command History, Cameras, Schedules, Alerts & Alarms, Webhooks, AI & Configuration, Users & Groups
 
-**Other actions:** ARM/DISARM buttons (POST), Get Site Info, Test All Endpoints
+**Other actions:** ARM/DISARM/Deploy buttons (POST), Get Site Info, Test All Endpoints
+
+**Grab Everything enhancements:**
+- Each endpoint shows "Allows changes (POST,PATCH,DELETE)" or "Read only" badge
+- Truncated tables show clickable "X more..." link to expand all rows
+- Product IDs mapped to friendly names (Intruder, Loitering, Fire, etc.) via `_ACTUATE_PRODUCTS` dict
+
+**Visual Schedule Editor (added 26 Mar 2026):**
+- Grid mimics Actuate's own UI: days as rows, 24 hour columns, green armed blocks
+- Drag-to-select: click and drag across cells to set armed hours
+- Multi-day drag: drag vertically/diagonally across multiple days
+- Toggle mode: dragging on armed cells removes them (red preview), empty cells adds them (green preview)
+- Overnight detection: selecting hours like [22,23,0,1] → Start: 22:00, End: 02:00
+- Edit panel shows selected days and time inputs
+- Save writes back to Actuate API via PATCH (creates new schedule ID — old one auto-deleted)
+- Deploy prompt after save — calls `deploy_now` action to sync changes
+- Disabled/expired override schedules hidden by default with toggle to show
+
+**Flex Schedule Toggle (added 26 Mar 2026):**
+- Purple toggle switch on/off — links/unlinks schedules to flex schedule object
+- Actuate's model: ONE set of schedule records shared between normal and flex mode
+- Toggle ON: PATCHes `flex_schedule` field on all enabled non-override schedules
+- Toggle OFF: sets `flex_schedule=null` on all linked schedules
+- PATCH creates new schedule IDs — server-side endpoint handles old ID cleanup + phantom deletion
+- Endpoint: `POST /api/actuate/flex-toggle` — does all PATCH/DELETE server-side
+- When flex is ON: shows editable display name, product checkboxes (17 AI analytics), save button
+- When flex is OFF: shows explanation text
+
+**Actuate API quirks (learned 26 Mar 2026):**
+- PATCH on schedule always creates a NEW record with new ID, deletes (sometimes) the old one
+- If schedule doesn't cover all 7 days, Actuate creates a "phantom" schedule for remaining days with `start_time=null`
+- Our code deletes these phantoms after every PATCH
+- Editing a day to a different time splits into separate schedule records per unique time range
+- The `flex_schedule` field on regular schedules controls flex behaviour, NOT separate schedule data
+
+**Patriot Numbers (added 26 Mar 2026):**
+- Patriot card inline next to site controls — shows current site's Patriot client number
+- "Patriot Numbers" button — table of ALL sites with Patriot numbers, groups, status
+- Columns: Group, Site ID, Site Name, Active, Armed, Cams (active/inactive), Patriot Client No, Motion %, Last Alert, Last Motion, Deployed
+- Last Alert/Motion red if older than 60 days, Deployed green if recent
+- Data source: `camera/{id}/general_info/` → `streams[].patriot_alerts[].patriot_client_no` (discovered via Actuate portal network inspection)
+- Group from `customer/{id}/about/` → `parent_group.name`
+- Active/Armed/Motion% from `customer/{id}/about/`
+- Active/Inactive camera counts from `camera/site/?customer__id=X`
+- Endpoint: `GET /api/actuate/patriot-numbers?site_id=X` (optional site_id)
+
+**Monthly Patriot Report (added 26 Mar 2026):**
+- `run_patriot_report.py` — fetches all sites, builds HTML email table
+- GitHub Actions workflow: `scheduled-patriot-report.yml` — 1st of month at 8am NZ, manual trigger available
+- Emailed to accounts@alarmwatch.co.nz and wade@alarmwatch.co.nz
+- Subject: "Actuate List by Bureau"
+- Same columns as web page, sorted by group
+- Requires `ACTUATE_API_TOKEN` in GitHub Secrets
+
+**Actuate API endpoints discovered (not in their docs):**
+- `customer/{id}/about/` — parent_group, armed, active, last_motion, last_alert, deployed_date, motion_percentage
+- `camera/{id}/general_info/` — full camera config including streams[].patriot_alerts[]
+- `camera/site/?customer__id=X` — cameras with active/deployed/health status
+- `schedule/by_customer/{id}/` — schedules filtered by site
+- `customer/{id}/action/deploy_now/` — deploy settings + start site
 
 **User access:** Actuate-only users see header with My Account, Sign out, Dashboard links. Template receives `user_email`, `user_avatar`, `has_pspla_access` from route.
 
