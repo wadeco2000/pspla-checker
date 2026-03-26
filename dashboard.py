@@ -12982,9 +12982,10 @@ function renderGrabResults(results, cats, siteId) {
             }
 
             html += '<div class="grab-ep">';
+            var writeBadge = _ACTUATE_WRITABLE[epFiltered.name] ? ' <span style="background:#e8f5e9;color:#2e7d32;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:normal;">Allows changes (' + _ACTUATE_WRITABLE[epFiltered.name] + ')</span>' : ' <span style="background:#f3f4f6;color:#888;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:normal;">Read only</span>';
             html += '<div class="grab-ep-head" onclick="toggleGrabEp(\'' + uid + '\')">'
                 + '<span class="ep-status ' + statusCls + '">' + statusLabel + '</span>'
-                + '<strong>' + epFiltered.name + '</strong>'
+                + '<strong>' + epFiltered.name + '</strong>' + writeBadge
                 + (countLabel ? ' <span class="ep-count">(' + countLabel + ')</span>' : '')
                 + '</div>';
             html += '<div class="grab-ep-data" id="grab-ep-' + uid + '">';
@@ -13084,6 +13085,7 @@ var _scheduleEdited = false;
 var _editingSchedule = null; // {id, start_time, end_time, day_of_week, always_on, enabled, customer}
 var _DAY_NAMES = ['SUNDAY','MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY'];
 var _ACTUATE_PRODUCTS = {43:'Intruder',44:'Slip and Fall',45:'All',47:'Crowd',48:'Loitering',50:'Gun',51:'False Positive Reduction',59:'Postal Vehicle ID',60:'Summary',109:'Vehicle Loitering',117:'Hard Hat',139:'Fire',195:'Package',258:'Health Monitoring',260:'Non-Postal',325:'Motion +',339:'Line Crossing'};
+var _ACTUATE_WRITABLE = {'camera':'POST,PATCH,DELETE','schedule':'POST,PATCH,DELETE','flex_schedule':'POST,PATCH,DELETE','customer':'POST,PATCH,DELETE','calendar':'POST,PATCH,DELETE','group':'POST,PATCH','nvr_camera':'POST','proactive_alerting':'POST','webhook':'POST','command_history':'POST'};
 
 function toggleScheduleEditor() {
     var el = document.getElementById('schedule-editor');
@@ -13107,7 +13109,13 @@ function loadSchedules() {
         var schedData = results[0].ok ? (Array.isArray(results[0].upstream_body) ? results[0].upstream_body : [results[0].upstream_body]) : [];
         var flexData = results[1].ok ? (Array.isArray(results[1].upstream_body) ? results[1].upstream_body : [results[1].upstream_body]) : [];
         _schedules = schedData.filter(function(s){return s && s.id;});
-        _flexSchedules = flexData.filter(function(s){return s && s.id;});
+        var sid = parseInt(document.getElementById('site-id').value);
+        _flexSchedules = flexData.filter(function(s){
+            if (!s || !s.id) return false;
+            if (s.customer === sid) return true;
+            if (s.customer && typeof s.customer === 'object' && s.customer.id === sid) return true;
+            return false;
+        });
         renderScheduleGrid();
     });
 }
