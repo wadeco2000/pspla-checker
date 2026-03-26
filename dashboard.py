@@ -13262,23 +13262,46 @@ function schedDragEnd(e, day, hour) {
     var loD = Math.min(_dragDay, _dragEndDay);
     var hiD = Math.max(_dragDay, _dragEndDay);
     for (var d = loD; d <= hiD; d++) {
-        if (!_selectedHours[d]) _selectedHours[d] = new Set();
+        if (!_selectedHours[d]) {
+            // Seed with existing armed hours from loaded schedule
+            _selectedHours[d] = new Set();
+            document.querySelectorAll('.sched-cell.armed[data-day="' + d + '"]').forEach(function(el) {
+                _selectedHours[d].add(parseInt(el.dataset.hour));
+            });
+        }
         for (var h = loH; h <= hiH; h++) _selectedHours[d].add(h);
     }
     // Clear drag preview
     document.querySelectorAll('.sched-cell.drag-preview').forEach(function(el){ el.classList.remove('drag-preview'); });
     // Show selected hours on grid
     _showSelectedHours();
-    // Apply to all affected days
-    var affectedDays = [];
+    // Combine ALL selected hours across all affected days to calculate one time range
+    var allHours = new Set();
     for (var d = loD; d <= hiD; d++) {
-        _applySelectedHours(d);
-        affectedDays.push(d);
+        if (_selectedHours[d]) _selectedHours[d].forEach(function(h){ allHours.add(h); });
     }
-    // Show multi-day edit panel
+    var calcTimes = _calcStartEnd(allHours);
+    // Apply to schedule
+    var sched = _schedules.find(function(s){ return s.enabled; }) || _schedules[0];
+    if (sched) {
+        sched.start_time = calcTimes.startStr;
+        sched.end_time = calcTimes.endStr;
+        var days = (sched.day_of_week || []).map(String);
+        for (var d = loD; d <= hiD; d++) {
+            if (days.indexOf(String(d)) === -1) days.push(String(d));
+        }
+        sched.day_of_week = days;
+        sched.always_on = false;
+    }
+    // Show edit panel
+    var affectedDays = [];
+    for (var d = loD; d <= hiD; d++) affectedDays.push(d);
     if (affectedDays.length > 1) {
         _showMultiDayEditPanel(affectedDays);
+    } else {
+        editScheduleDay(affectedDays[0]);
     }
+    markScheduleDirty();
 }
 
 function _highlightDragRange() {
@@ -13306,45 +13329,41 @@ function _showSelectedHours() {
     });
 }
 
-function _applySelectedHours(day) {
-    var hours = _selectedHours[day];
-    if (!hours || hours.size === 0) return;
-    var sorted = Array.from(hours).sort(function(a,b){ return a - b; });
-
-    // Detect overnight: if hours span across the midnight gap
-    // e.g. [0, 1, 22, 23] → start=22, end=2 (overnight)
-    // e.g. [8, 9, 10] → start=8, end=11 (daytime)
+function _calcStartEnd(hoursSet) {
+    if (!hoursSet || hoursSet.size === 0) return {startStr: '00:00:00', endStr: '00:00:00'};
+    var sorted = Array.from(hoursSet).sort(function(a,b){ return a - b; });
     var hasLow = sorted.some(function(h){ return h < 12; });
     var hasHigh = sorted.some(function(h){ return h >= 12; });
     var startH, endH;
-
     if (hasLow && hasHigh) {
-        // Overnight — find the gap to determine start/end
-        // The start is the first hour >= 12, end is last hour < 12 + 1
         var eveningHours = sorted.filter(function(h){ return h >= 12; });
         var morningHours = sorted.filter(function(h){ return h < 12; });
         startH = Math.min.apply(null, eveningHours);
         endH = Math.max.apply(null, morningHours) + 1;
         if (endH >= 24) endH = 0;
     } else {
-        // Daytime — simple min/max
         startH = sorted[0];
         endH = sorted[sorted.length - 1] + 1;
         if (endH >= 24) endH = 0;
     }
+    return {
+        startStr: String(startH).padStart(2,'0') + ':00:00',
+        endStr: String(endH).padStart(2,'0') + ':00:00'
+    };
+}
 
-    // Find the first enabled schedule
+function _applySelectedHours(day) {
+    var hours = _selectedHours[day];
+    if (!hours || hours.size === 0) return;
+    var calc = _calcStartEnd(hours);
     var sched = _schedules.find(function(s){ return s.enabled; }) || _schedules[0];
     if (!sched) return;
-    var startStr = String(startH).padStart(2,'0') + ':00:00';
-    var endStr = String(endH).padStart(2,'0') + ':00:00';
     var days = (sched.day_of_week || []).map(String);
     if (days.indexOf(String(day)) === -1) days.push(String(day));
-    sched.start_time = startStr;
-    sched.end_time = endStr;
+    sched.start_time = calc.startStr;
+    sched.end_time = calc.endStr;
     sched.day_of_week = days;
     sched.always_on = false;
-    // Show in edit panel and mark dirty
     editScheduleDay(day);
     markScheduleDirty();
 }
