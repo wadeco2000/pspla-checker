@@ -13506,8 +13506,8 @@ function toggleFlexSchedule(fsIdx, turnOn) {
     }).then(r=>r.json()).then(function(d) {
         if (!d.ok) { alert('Error: ' + (d.error || 'Unknown')); loadSchedules(); return; }
         addLog('Flex ' + (turnOn ? 'enabled' : 'disabled') + '. ' + (d.detail || ''), 'log-ok');
-        loadSchedules();
-        _autoDeployAfterSave();
+        // Brief delay to let Actuate sync before reloading
+        setTimeout(function(){ loadSchedules(); _autoDeployAfterSave(); }, 1000);
     }).catch(function(e) {
         alert('Network error: ' + e);
         loadSchedules();
