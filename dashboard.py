@@ -12508,6 +12508,7 @@ ACTUATE_TEMPLATE = r"""
         .sched-cell.armed:hover{background:#43A047;}
         .sched-cell:not(.armed):hover{background:#e8f5e9;}
         .sched-cell.drag-preview{background:#81C784 !important;opacity:0.8;}
+        .sched-cell.drag-selected{background:#66BB6A !important;}
         .sched-times{background:#f8f9fa;padding:6px 8px;border-bottom:1px solid #eee;font-weight:600;color:#333;display:flex;align-items:center;justify-content:center;font-size:12px;}
         .sched-edit-row{display:flex;gap:8px;align-items:center;padding:8px 12px;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;margin-top:8px;}
         .sched-edit-row input[type=time]{padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:13px;}
@@ -12558,7 +12559,8 @@ ACTUATE_TEMPLATE = r"""
                     <span><i class="fa-solid fa-calendar-days"></i> Schedule Editor</span>
                     <div style="display:flex;gap:8px;align-items:center;">
                         <button class="btn btn-sm" style="background:#27ae60;color:white;" id="sched-save-btn" onclick="saveSchedule()" disabled><i class="fa-solid fa-floppy-disk"></i> Save Changes</button>
-                        <button class="btn btn-sm" style="background:#e74c3c;color:white;" id="sched-cancel-btn" onclick="cancelScheduleEdit()" style="display:none;"><i class="fa-solid fa-xmark"></i> Cancel</button>
+                        <button class="btn btn-sm" style="background:#e74c3c;color:white;" id="sched-cancel-btn" onclick="cancelScheduleEdit()"><i class="fa-solid fa-xmark"></i> Cancel</button>
+                        <button class="btn btn-sm" style="background:#f39c12;color:white;" onclick="schedClearSelection()"><i class="fa-solid fa-eraser"></i> Clear Selection</button>
                         <button class="btn btn-sm" style="background:#95a5a6;color:white;" onclick="loadSchedules()"><i class="fa-solid fa-rotate"></i> Refresh</button>
                     </div>
                 </div>
@@ -13211,6 +13213,7 @@ var _dragActive = false;
 var _dragDay = -1;
 var _dragStartHour = -1;
 var _dragEndHour = -1;
+var _selectedHours = {}; // {dayNum: Set of selected hours}
 
 function schedDragStart(e, day, hour) {
     e.preventDefault();
@@ -13218,6 +13221,8 @@ function schedDragStart(e, day, hour) {
     _dragDay = day;
     _dragStartHour = hour;
     _dragEndHour = hour;
+    // Don't clear previous selections on same day — accumulate
+    if (!_selectedHours[day]) _selectedHours[day] = new Set();
     _highlightDragRange();
 }
 
@@ -13231,23 +13236,21 @@ function schedDragEnd(e, day, hour) {
     if (!_dragActive) return;
     _dragActive = false;
     _dragEndHour = hour;
-    // Always use drag direction: start where mouse went down, end where released +1
-    var startH = _dragStartHour;
-    var endH = _dragEndHour + 1;
-    if (endH >= 24) endH = 0;
-    // If dragged backwards (right to left), swap
-    if (_dragStartHour > _dragEndHour) {
-        startH = _dragEndHour;
-        endH = _dragStartHour + 1;
-        if (endH >= 24) endH = 0;
-    }
+    // Add dragged hours to selection
+    var lo = Math.min(_dragStartHour, _dragEndHour);
+    var hi = Math.max(_dragStartHour, _dragEndHour);
+    if (!_selectedHours[_dragDay]) _selectedHours[_dragDay] = new Set();
+    for (var h = lo; h <= hi; h++) _selectedHours[_dragDay].add(h);
     // Clear drag preview
     document.querySelectorAll('.sched-cell.drag-preview').forEach(function(el){ el.classList.remove('drag-preview'); });
-    // Apply the new range
-    _applyDragRange(_dragDay, startH, endH);
+    // Show selected hours on grid
+    _showSelectedHours();
+    // Calculate start/end from all selected hours
+    _applySelectedHours(_dragDay);
 }
 
 function _highlightDragRange() {
+    // Clear only drag-preview, keep selected
     document.querySelectorAll('.sched-cell.drag-preview').forEach(function(el){ el.classList.remove('drag-preview'); });
     var lo = Math.min(_dragStartHour, _dragEndHour);
     var hi = Math.max(_dragStartHour, _dragEndHour);
@@ -13257,33 +13260,51 @@ function _highlightDragRange() {
     });
 }
 
-function schedClearDay(e, day) {
-    // Right-click to clear a day from the schedule
-    e.preventDefault();
-    var sched = _schedules.find(function(s){ return s.enabled; }) || _schedules[0];
-    if (!sched) return;
-    var days = (sched.day_of_week || []).map(String);
-    var idx = days.indexOf(String(day));
-    if (idx >= 0) {
-        days.splice(idx, 1);
-        sched.day_of_week = days;
-        markScheduleDirty();
-        renderScheduleGrid();
-    }
+function _showSelectedHours() {
+    // Highlight all accumulated selected hours across all days
+    document.querySelectorAll('.sched-cell.drag-selected').forEach(function(el){ el.classList.remove('drag-selected'); });
+    Object.keys(_selectedHours).forEach(function(day) {
+        _selectedHours[day].forEach(function(h) {
+            var el = document.querySelector('.sched-cell[data-day="' + day + '"][data-hour="' + h + '"]');
+            if (el) el.classList.add('drag-selected');
+        });
+    });
 }
 
-function _applyDragRange(day, startH, endH) {
+function _applySelectedHours(day) {
+    var hours = _selectedHours[day];
+    if (!hours || hours.size === 0) return;
+    var sorted = Array.from(hours).sort(function(a,b){ return a - b; });
+
+    // Detect overnight: if hours span across the midnight gap
+    // e.g. [0, 1, 22, 23] → start=22, end=2 (overnight)
+    // e.g. [8, 9, 10] → start=8, end=11 (daytime)
+    var hasLow = sorted.some(function(h){ return h < 12; });
+    var hasHigh = sorted.some(function(h){ return h >= 12; });
+    var startH, endH;
+
+    if (hasLow && hasHigh) {
+        // Overnight — find the gap to determine start/end
+        // The start is the first hour >= 12, end is last hour < 12 + 1
+        var eveningHours = sorted.filter(function(h){ return h >= 12; });
+        var morningHours = sorted.filter(function(h){ return h < 12; });
+        startH = Math.min.apply(null, eveningHours);
+        endH = Math.max.apply(null, morningHours) + 1;
+        if (endH >= 24) endH = 0;
+    } else {
+        // Daytime — simple min/max
+        startH = sorted[0];
+        endH = sorted[sorted.length - 1] + 1;
+        if (endH >= 24) endH = 0;
+    }
+
     // Find the first enabled schedule
     var sched = _schedules.find(function(s){ return s.enabled; }) || _schedules[0];
     if (!sched) return;
-    // Update the schedule times
     var startStr = String(startH).padStart(2,'0') + ':00:00';
     var endStr = String(endH).padStart(2,'0') + ':00:00';
-    // Check if this day is already in the schedule
     var days = (sched.day_of_week || []).map(String);
-    if (days.indexOf(String(day)) === -1) {
-        days.push(String(day));
-    }
+    if (days.indexOf(String(day)) === -1) days.push(String(day));
     sched.start_time = startStr;
     sched.end_time = endStr;
     sched.day_of_week = days;
@@ -13291,11 +13312,11 @@ function _applyDragRange(day, startH, endH) {
     // Show in edit panel and mark dirty
     editScheduleDay(day);
     markScheduleDirty();
-    // Re-render grid to show new range
-    renderScheduleGrid();
-    // Re-open edit panel
-    editScheduleDay(day);
-    markScheduleDirty();
+}
+
+function schedClearSelection() {
+    _selectedHours = {};
+    document.querySelectorAll('.sched-cell.drag-selected').forEach(function(el){ el.classList.remove('drag-selected'); });
 }
 
 // Prevent drag from selecting text
@@ -13344,6 +13365,7 @@ function cancelScheduleEdit() {
     document.getElementById('sched-save-btn').disabled = true;
     _scheduleEdited = false;
     _editingSchedule = null;
+    _selectedHours = {};
     // Reload from API to revert any unsaved changes
     loadSchedules();
 }
