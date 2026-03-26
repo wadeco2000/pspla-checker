@@ -12909,24 +12909,24 @@ function renderGrabResults(results, cats, siteId) {
                 html += '<div style="margin-bottom:8px;"><strong style="font-size:12px;">' + ep.name + '</strong><span class="grab-ov-count">(' + d.length + ' items)</span>';
                 if (typeof d[0] === 'object' && d[0] !== null) {
                     var keys = Object.keys(d[0]).slice(0, 6);
-                    var rows = d.slice(0, 5);
-                    html += '<table class="grab-ov-mini-tbl"><thead><tr>';
+                    var tblId = 'ov-tbl-' + ep.name.replace(/[^a-zA-Z0-9]/g, '_') + '-' + Math.random().toString(36).substr(2,5);
+                    html += '<table class="grab-ov-mini-tbl" id="' + tblId + '"><thead><tr>';
                     keys.forEach(function(k) { html += '<th>' + k + '</th>'; });
                     html += '</tr></thead><tbody>';
-                    rows.forEach(function(row) {
-                        html += '<tr>';
+                    d.forEach(function(row, rowIdx) {
+                        html += '<tr' + (rowIdx >= 5 ? ' class="' + tblId + '-extra" style="display:none;"' : '') + '>';
                         keys.forEach(function(k) {
                             var v = row[k];
                             if (v === null || v === undefined) v = '';
                             else if (typeof v === 'object') v = JSON.stringify(v);
                             else v = String(v);
-                            if (v.length > 40) v = v.substring(0, 40) + '...';
+                            if (v.length > 60) v = v.substring(0, 60) + '...';
                             html += '<td>' + v.replace(/</g, '&lt;') + '</td>';
                         });
                         html += '</tr>';
                     });
                     html += '</tbody></table>';
-                    if (d.length > 5) html += '<div class="grab-ov-null">' + (d.length - 5) + ' more...</div>';
+                    if (d.length > 5) html += '<a href="#" onclick="var rows=document.querySelectorAll(\'.' + tblId + '-extra\');var show=rows[0]&&rows[0].style.display===\'none\';rows.forEach(function(r){r.style.display=show?\'table-row\':\'none\';});this.textContent=show?\'Show less\':(\'' + (d.length - 5) + ' more...\');return false;" style="font-size:11px;color:#3498db;cursor:pointer;">' + (d.length - 5) + ' more...</a>';
                 } else {
                     html += '<div style="font-size:11px;color:#555;">' + d.slice(0, 10).join(', ') + (d.length > 10 ? '...' : '') + '</div>';
                 }
