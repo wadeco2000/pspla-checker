@@ -13231,12 +13231,19 @@ function schedDragEnd(e, day, hour) {
     if (!_dragActive) return;
     _dragActive = false;
     _dragEndHour = hour;
-    var startH = Math.min(_dragStartHour, _dragEndHour);
-    var endH = Math.max(_dragStartHour, _dragEndHour) + 1;
-    if (endH >= 24) endH = 0; // wrap midnight
+    // Always use drag direction: start where mouse went down, end where released +1
+    var startH = _dragStartHour;
+    var endH = _dragEndHour + 1;
+    if (endH >= 24) endH = 0;
+    // If dragged backwards (right to left), swap
+    if (_dragStartHour > _dragEndHour) {
+        startH = _dragEndHour;
+        endH = _dragStartHour + 1;
+        if (endH >= 24) endH = 0;
+    }
     // Clear drag preview
     document.querySelectorAll('.sched-cell.drag-preview').forEach(function(el){ el.classList.remove('drag-preview'); });
-    // Apply the new range — find or create schedule for this day
+    // Apply the new range
     _applyDragRange(_dragDay, startH, endH);
 }
 
@@ -13248,6 +13255,21 @@ function _highlightDragRange() {
         var h = parseInt(el.dataset.hour);
         if (h >= lo && h <= hi) el.classList.add('drag-preview');
     });
+}
+
+function schedClearDay(e, day) {
+    // Right-click to clear a day from the schedule
+    e.preventDefault();
+    var sched = _schedules.find(function(s){ return s.enabled; }) || _schedules[0];
+    if (!sched) return;
+    var days = (sched.day_of_week || []).map(String);
+    var idx = days.indexOf(String(day));
+    if (idx >= 0) {
+        days.splice(idx, 1);
+        sched.day_of_week = days;
+        markScheduleDirty();
+        renderScheduleGrid();
+    }
 }
 
 function _applyDragRange(day, startH, endH) {
@@ -13322,6 +13344,8 @@ function cancelScheduleEdit() {
     document.getElementById('sched-save-btn').disabled = true;
     _scheduleEdited = false;
     _editingSchedule = null;
+    // Reload from API to revert any unsaved changes
+    loadSchedules();
 }
 
 function saveSchedule() {
