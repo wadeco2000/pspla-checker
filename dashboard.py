@@ -12545,6 +12545,7 @@ ACTUATE_TEMPLATE = r"""
             </label>
             <button class="btn btn-arm" onclick="doAction('arm')"><i class="fa-solid fa-lock"></i> ARM</button>
             <button class="btn btn-disarm" onclick="doAction('disarm')"><i class="fa-solid fa-lock-open"></i> DISARM</button>
+            <button class="btn btn-sm" style="background:#2196F3;color:white;" onclick="deployNow()"><i class="fa-solid fa-cloud-arrow-up"></i> Deploy</button>
             <button class="btn btn-info" onclick="getSiteInfo()"><i class="fa-solid fa-circle-info"></i> Get Site Info</button>
             <button class="btn btn-sm" style="background:#8e44ad;color:white;" onclick="testAllEndpoints()"><i class="fa-solid fa-flask"></i> Test All Endpoints</button>
             <button class="btn" style="background:#e67e22;color:white;" onclick="grabEverything()" id="grab-btn"><i class="fa-solid fa-download"></i> Grab Everything</button>
@@ -12680,6 +12681,20 @@ function doAction(action) {
     }).catch(function(e) {
         addLog('Network error: ' + e, 'log-err');
     });
+}
+
+function deployNow() {
+    var siteId = sid();
+    if (!siteId) { alert('Enter a Site ID'); return; }
+    if (!confirm('Deploy settings for site ' + siteId + '?\n\nThis will sync all changes and start the site immediately.')) return;
+    doAction('deploy_now');
+}
+
+function _autoDeployAfterSave() {
+    var siteId = sid();
+    if (!siteId) return;
+    if (!confirm('Schedule saved successfully.\n\nDeploy settings now to apply changes?\n(Required for changes to take effect on the Actuate system)')) return;
+    doAction('deploy_now');
 }
 
 function getSiteInfo() {
@@ -13491,9 +13506,11 @@ function saveSchedule() {
         }
         _scheduleEdited = false;
         _editingSchedule = null;
+        _selectedHours = {};
         document.getElementById('sched-edit-panel').style.display = 'none';
-        addLog('Schedule updated successfully. New ID: ' + (d.new_id || '?'), true);
+        addLog('Schedule updated successfully. New ID: ' + (d.new_id || '?'), 'log-ok');
         loadSchedules(); // refresh grid
+        _autoDeployAfterSave();
     }).catch(function(e) {
         document.getElementById('sched-save-btn').innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save Changes';
         document.getElementById('sched-save-btn').disabled = false;
@@ -13516,8 +13533,8 @@ def actuate_page():
 
 @app.route("/api/actuate/action/<action>", methods=["POST"])
 def actuate_action(action):
-    if action not in ("arm", "disarm"):
-        return jsonify({"ok": False, "error": "Invalid action. Use arm or disarm."}), 400
+    if action not in ("arm", "disarm", "deploy_now"):
+        return jsonify({"ok": False, "error": "Invalid action. Use arm, disarm, or deploy_now."}), 400
     if not ACTUATE_API_TOKEN:
         return jsonify({"ok": False, "error": "ACTUATE_API_TOKEN not configured."}), 500
     data = request.get_json(silent=True) or {}
