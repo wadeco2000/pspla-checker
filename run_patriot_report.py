@@ -154,6 +154,16 @@ def build_html(results):
 </thead>
 <tbody>"""
 
+    now_ts = datetime.now(timezone.utc).timestamp()
+    sixty_days_ago = now_ts - (60 * 86400)
+    # "This month or prior month" = anything in the last ~62 days from 1st of last month
+    from datetime import date
+    today = date.today()
+    if today.month == 1:
+        recent_cutoff = datetime(today.year - 1, 12, 1, tzinfo=timezone.utc).timestamp()
+    else:
+        recent_cutoff = datetime(today.year, today.month - 1, 1, tzinfo=timezone.utc).timestamp()
+
     last_group = ""
     for i, r in enumerate(results):
         group = r.get("group") or "-"
@@ -164,14 +174,26 @@ def build_html(results):
         border_top = "border-top:2px solid #1a252f;" if show_group else ""
         grey = "color:#ccc;" if not has_patriot else ""
 
+        # Last alert colour: red if older than 60 days
+        last_alert_ts = r.get("last_alert")
+        alert_style = "font-size:11px;"
+        if last_alert_ts and float(last_alert_ts) < sixty_days_ago:
+            alert_style += "color:#e74c3c;font-weight:600;"
+
+        # Deployed colour: green if this month or last month
+        deployed_ts = r.get("deployed_date")
+        deploy_style = "font-size:11px;"
+        if deployed_ts and float(deployed_ts) >= recent_cutoff:
+            deploy_style += "color:#27ae60;font-weight:600;"
+
         html += f"""<tr style="background:{bg};{border_top}{grey}">
 <td style="padding:6px 8px;font-weight:{'600' if show_group else 'normal'};color:#2980b9;">{group if show_group else ''}</td>
 <td style="padding:6px 8px;">{r['site_id']}</td>
 <td style="padding:6px 8px;">{r['site_name']}</td>
 <td style="padding:6px 8px;text-align:center;">{r['camera_count']}</td>
 <td style="padding:6px 8px;font-weight:600;{'color:#c0392b;' if has_patriot else ''}">{r.get('patriot_client_no') or '-'}</td>
-<td style="padding:6px 8px;font-size:11px;">{_ts_to_str(r.get('last_alert'))}</td>
-<td style="padding:6px 8px;font-size:11px;">{_ts_to_str(r.get('deployed_date'))}</td>
+<td style="padding:6px 8px;{alert_style}">{_ts_to_str(last_alert_ts)}</td>
+<td style="padding:6px 8px;{deploy_style}">{_ts_to_str(deployed_ts)}</td>
 </tr>"""
 
     html += """</tbody></table>
