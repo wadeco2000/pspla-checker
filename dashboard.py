@@ -12503,10 +12503,11 @@ ACTUATE_TEMPLATE = r"""
         .sched-grid{display:grid;grid-template-columns:90px repeat(24,1fr) 120px;border:1px solid #ddd;border-radius:6px;overflow:hidden;font-size:11px;}
         .sched-header{background:#f8f9fa;font-weight:bold;text-align:center;padding:6px 2px;border-bottom:1px solid #ddd;color:#555;font-size:10px;}
         .sched-day-label{background:#f8f9fa;font-weight:600;padding:6px 8px;border-bottom:1px solid #eee;border-right:1px solid #eee;color:#333;display:flex;align-items:center;}
-        .sched-cell{border-bottom:1px solid #eee;border-right:1px solid #eee;min-height:28px;cursor:pointer;transition:background 0.15s;}
+        .sched-cell{border-bottom:1px solid #eee;border-right:1px solid #eee;min-height:28px;cursor:crosshair;transition:background 0.15s;user-select:none;}
         .sched-cell.armed{background:#4CAF50;}
         .sched-cell.armed:hover{background:#43A047;}
         .sched-cell:not(.armed):hover{background:#e8f5e9;}
+        .sched-cell.drag-preview{background:#81C784 !important;opacity:0.8;}
         .sched-times{background:#f8f9fa;padding:6px 8px;border-bottom:1px solid #eee;font-weight:600;color:#333;display:flex;align-items:center;justify-content:center;font-size:12px;}
         .sched-edit-row{display:flex;gap:8px;align-items:center;padding:8px 12px;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;margin-top:8px;}
         .sched-edit-row input[type=time]{padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:13px;}
@@ -13146,7 +13147,7 @@ function renderScheduleGrid() {
                 if (r.always_on) { armed = true; return; }
                 if (isHourArmed(h, r.startH, r.endH)) armed = true;
             });
-            html += '<div class="sched-cell' + (armed ? ' armed' : '') + '" onclick="editScheduleDay(' + d + ')"></div>';
+            html += '<div class="sched-cell' + (armed ? ' armed' : '') + '" data-day="' + d + '" data-hour="' + h + '" onmousedown="schedDragStart(event,' + d + ',' + h + ')" onmouseover="schedDragMove(event,' + d + ',' + h + ')" onmouseup="schedDragEnd(event,' + d + ',' + h + ')"></div>';
         }
         // Times column
         if (ranges.length > 0 && !ranges[0].always_on) {
@@ -13204,6 +13205,84 @@ function isHourArmed(hour, startH, endH) {
         return hour >= startH || hour < endH;
     }
 }
+
+// ── Drag-to-select on schedule grid ──
+var _dragActive = false;
+var _dragDay = -1;
+var _dragStartHour = -1;
+var _dragEndHour = -1;
+
+function schedDragStart(e, day, hour) {
+    e.preventDefault();
+    _dragActive = true;
+    _dragDay = day;
+    _dragStartHour = hour;
+    _dragEndHour = hour;
+    _highlightDragRange();
+}
+
+function schedDragMove(e, day, hour) {
+    if (!_dragActive || day !== _dragDay) return;
+    _dragEndHour = hour;
+    _highlightDragRange();
+}
+
+function schedDragEnd(e, day, hour) {
+    if (!_dragActive) return;
+    _dragActive = false;
+    _dragEndHour = hour;
+    var startH = Math.min(_dragStartHour, _dragEndHour);
+    var endH = Math.max(_dragStartHour, _dragEndHour) + 1;
+    if (endH >= 24) endH = 0; // wrap midnight
+    // Clear drag preview
+    document.querySelectorAll('.sched-cell.drag-preview').forEach(function(el){ el.classList.remove('drag-preview'); });
+    // Apply the new range — find or create schedule for this day
+    _applyDragRange(_dragDay, startH, endH);
+}
+
+function _highlightDragRange() {
+    document.querySelectorAll('.sched-cell.drag-preview').forEach(function(el){ el.classList.remove('drag-preview'); });
+    var lo = Math.min(_dragStartHour, _dragEndHour);
+    var hi = Math.max(_dragStartHour, _dragEndHour);
+    document.querySelectorAll('.sched-cell[data-day="' + _dragDay + '"]').forEach(function(el) {
+        var h = parseInt(el.dataset.hour);
+        if (h >= lo && h <= hi) el.classList.add('drag-preview');
+    });
+}
+
+function _applyDragRange(day, startH, endH) {
+    // Find the first enabled schedule
+    var sched = _schedules.find(function(s){ return s.enabled; }) || _schedules[0];
+    if (!sched) return;
+    // Update the schedule times
+    var startStr = String(startH).padStart(2,'0') + ':00:00';
+    var endStr = String(endH).padStart(2,'0') + ':00:00';
+    // Check if this day is already in the schedule
+    var days = (sched.day_of_week || []).map(String);
+    if (days.indexOf(String(day)) === -1) {
+        days.push(String(day));
+    }
+    sched.start_time = startStr;
+    sched.end_time = endStr;
+    sched.day_of_week = days;
+    sched.always_on = false;
+    // Show in edit panel and mark dirty
+    editScheduleDay(day);
+    markScheduleDirty();
+    // Re-render grid to show new range
+    renderScheduleGrid();
+    // Re-open edit panel
+    editScheduleDay(day);
+    markScheduleDirty();
+}
+
+// Prevent drag from selecting text
+document.addEventListener('mouseup', function() {
+    if (_dragActive) {
+        _dragActive = false;
+        document.querySelectorAll('.sched-cell.drag-preview').forEach(function(el){ el.classList.remove('drag-preview'); });
+    }
+});
 
 function editScheduleDay(dayNum) {
     // Find the schedule that covers this day
