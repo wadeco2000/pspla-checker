@@ -505,6 +505,7 @@ _RATE_LIMITS = {
     'clear_db':                (2, 300),     # 2 clear attempts per 5 min
     'export_csv':              (5, 60),      # 5 exports per minute
     'actuate_query':           (60, 60),     # 60 Actuate API calls per minute
+    'actuate_schedule_update':  (10, 60),    # 10 schedule updates per minute
     'club_fitness_signups':    (10, 60),     # 10 Stripe fetches per minute
     'club_fitness_sync':       (5, 60),      # 5 syncs per minute
     'club_fitness_export':     (5, 60),      # 5 exports per minute
@@ -722,7 +723,7 @@ _ROUTE_PERMISSIONS = {
     'util_electrician_search': 'utilities',
     # actuate
     'actuate_page': 'actuate', 'actuate_action': 'actuate',
-    'actuate_site_info': 'actuate', 'actuate_query': 'actuate',
+    'actuate_site_info': 'actuate', 'actuate_query': 'actuate', 'actuate_schedule_update': 'actuate',
     # shelly
     'shelly_page': 'shelly', 'shelly_devices_api': 'shelly',
     'shelly_toggle': 'shelly', 'shelly_command_log_api': 'shelly',
@@ -12498,6 +12499,22 @@ ACTUATE_TEMPLATE = r"""
         .grab-ov-mini-tbl{width:100%;border-collapse:collapse;font-size:11px;margin-top:4px;}
         .grab-ov-mini-tbl th{text-align:left;padding:3px 6px;background:#f8f9fa;border:1px solid #eee;font-weight:600;color:#555;}
         .grab-ov-mini-tbl td{padding:3px 6px;border:1px solid #eee;color:#333;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+        /* Schedule grid */
+        .sched-grid{display:grid;grid-template-columns:90px repeat(24,1fr) 120px;border:1px solid #ddd;border-radius:6px;overflow:hidden;font-size:11px;}
+        .sched-header{background:#f8f9fa;font-weight:bold;text-align:center;padding:6px 2px;border-bottom:1px solid #ddd;color:#555;font-size:10px;}
+        .sched-day-label{background:#f8f9fa;font-weight:600;padding:6px 8px;border-bottom:1px solid #eee;border-right:1px solid #eee;color:#333;display:flex;align-items:center;}
+        .sched-cell{border-bottom:1px solid #eee;border-right:1px solid #eee;min-height:28px;cursor:pointer;transition:background 0.15s;}
+        .sched-cell.armed{background:#4CAF50;}
+        .sched-cell.armed:hover{background:#43A047;}
+        .sched-cell:not(.armed):hover{background:#e8f5e9;}
+        .sched-times{background:#f8f9fa;padding:6px 8px;border-bottom:1px solid #eee;font-weight:600;color:#333;display:flex;align-items:center;justify-content:center;font-size:12px;}
+        .sched-edit-row{display:flex;gap:8px;align-items:center;padding:8px 12px;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;margin-top:8px;}
+        .sched-edit-row input[type=time]{padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:13px;}
+        .sched-edit-row label{font-size:12px;font-weight:600;color:#555;}
+        .sched-always-on{background:#4CAF50;color:white;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:bold;}
+        .sched-disabled{background:#e74c3c;color:white;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:bold;}
+        .sched-flex-card{background:#f0f4f8;border:1px solid #d0d7de;border-radius:8px;padding:12px;margin-top:12px;}
+        .sched-flex-card h4{margin:0 0 8px;font-size:13px;color:#333;}
     </style>
 </head>
 <body>
@@ -12529,7 +12546,25 @@ ACTUATE_TEMPLATE = r"""
             <button class="btn btn-info" onclick="getSiteInfo()"><i class="fa-solid fa-circle-info"></i> Get Site Info</button>
             <button class="btn btn-sm" style="background:#8e44ad;color:white;" onclick="testAllEndpoints()"><i class="fa-solid fa-flask"></i> Test All Endpoints</button>
             <button class="btn" style="background:#e67e22;color:white;" onclick="grabEverything()" id="grab-btn"><i class="fa-solid fa-download"></i> Grab Everything</button>
+            <button class="btn" style="background:#2980b9;color:white;" onclick="toggleScheduleEditor()"><i class="fa-solid fa-calendar-days"></i> Schedules</button>
             <button class="btn btn-sm" style="background:#95a5a6;color:white;" onclick="clearLog()"><i class="fa-solid fa-eraser"></i> Clear Log</button>
+        </div>
+
+        <!-- Schedule Editor -->
+        <div id="schedule-editor" style="display:none;margin-bottom:16px;">
+            <div class="card">
+                <div class="card-head" style="display:flex;justify-content:space-between;align-items:center;">
+                    <span><i class="fa-solid fa-calendar-days"></i> Schedule Editor</span>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <button class="btn btn-sm" style="background:#27ae60;color:white;" id="sched-save-btn" onclick="saveSchedule()" disabled><i class="fa-solid fa-floppy-disk"></i> Save Changes</button>
+                        <button class="btn btn-sm" style="background:#e74c3c;color:white;" id="sched-cancel-btn" onclick="cancelScheduleEdit()" style="display:none;"><i class="fa-solid fa-xmark"></i> Cancel</button>
+                        <button class="btn btn-sm" style="background:#95a5a6;color:white;" onclick="loadSchedules()"><i class="fa-solid fa-rotate"></i> Refresh</button>
+                    </div>
+                </div>
+                <div class="card-body" id="schedule-editor-body">
+                    <div style="text-align:center;padding:30px;color:#888;">Click "Schedules" to load schedule data for this site.</div>
+                </div>
+            </div>
         </div>
 
         <!-- Two column: Explorer + Response -->
@@ -13038,6 +13073,231 @@ function toggleGrabEp(uid) {
     var el = document.getElementById('grab-ep-' + uid);
     el.classList.toggle('show');
 }
+
+// ── Schedule Editor ──
+var _schedules = [];
+var _flexSchedules = [];
+var _scheduleEdited = false;
+var _editingSchedule = null; // {id, start_time, end_time, day_of_week, always_on, enabled, customer}
+var _DAY_NAMES = ['SUNDAY','MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY'];
+
+function toggleScheduleEditor() {
+    var el = document.getElementById('schedule-editor');
+    if (el.style.display === 'none') {
+        el.style.display = 'block';
+        loadSchedules();
+    } else {
+        el.style.display = 'none';
+    }
+}
+
+function loadSchedules() {
+    var siteId = document.getElementById('site-id').value;
+    var body = document.getElementById('schedule-editor-body');
+    body.innerHTML = '<div style="text-align:center;padding:30px;color:#888;"><i class="fa-solid fa-spinner fa-spin"></i> Loading schedules...</div>';
+    var filterParam = document.getElementById('site-filter-toggle').checked ? '&filter_site_id=' + siteId : '';
+    Promise.all([
+        fetch('/api/actuate/query?site_id=' + siteId + '&path=schedule/' + filterParam).then(r=>r.json()),
+        fetch('/api/actuate/query?site_id=' + siteId + '&path=flex_schedule/' + filterParam).then(r=>r.json())
+    ]).then(function(results) {
+        var schedData = results[0].ok ? (Array.isArray(results[0].upstream_body) ? results[0].upstream_body : [results[0].upstream_body]) : [];
+        var flexData = results[1].ok ? (Array.isArray(results[1].upstream_body) ? results[1].upstream_body : [results[1].upstream_body]) : [];
+        _schedules = schedData.filter(function(s){return s && s.id;});
+        _flexSchedules = flexData.filter(function(s){return s && s.id;});
+        renderScheduleGrid();
+    });
+}
+
+function renderScheduleGrid() {
+    var body = document.getElementById('schedule-editor-body');
+    if (!_schedules.length) {
+        body.innerHTML = '<div style="text-align:center;padding:30px;color:#888;">No schedules found for this site.</div>';
+        return;
+    }
+    // Build per-day armed ranges from all schedules
+    var dayArmed = {}; // {0: [{start:23, end:1, startMin:0, endMin:0, schedId:123}], ...}
+    for (var d = 0; d < 7; d++) dayArmed[d] = [];
+    _schedules.forEach(function(s) {
+        if (!s.enabled) return;
+        var days = (s.day_of_week || []).map(Number);
+        var startH = 0, startM = 0, endH = 0, endM = 0;
+        if (s.start_time) { var sp = s.start_time.split(':'); startH = parseInt(sp[0]); startM = parseInt(sp[1] || '0'); }
+        if (s.end_time) { var ep = s.end_time.split(':'); endH = parseInt(ep[0]); endM = parseInt(ep[1] || '0'); }
+        days.forEach(function(day) {
+            dayArmed[day].push({startH: startH, startM: startM, endH: endH, endM: endM, schedId: s.id, always_on: s.always_on, start_time: s.start_time, end_time: s.end_time});
+        });
+    });
+
+    var html = '<div class="sched-grid">';
+    // Header row
+    html += '<div class="sched-header">DAY</div>';
+    for (var h = 0; h < 24; h++) {
+        html += '<div class="sched-header">' + String(h).padStart(2, '0') + ':00</div>';
+    }
+    html += '<div class="sched-header">ARM START - ARM END</div>';
+
+    // Day rows
+    for (var d = 0; d < 7; d++) {
+        var ranges = dayArmed[d];
+        html += '<div class="sched-day-label" onclick="editScheduleDay(' + d + ')" title="Click to edit">' + _DAY_NAMES[d] + '</div>';
+        for (var h = 0; h < 24; h++) {
+            var armed = false;
+            ranges.forEach(function(r) {
+                if (r.always_on) { armed = true; return; }
+                if (isHourArmed(h, r.startH, r.endH)) armed = true;
+            });
+            html += '<div class="sched-cell' + (armed ? ' armed' : '') + '" onclick="editScheduleDay(' + d + ')"></div>';
+        }
+        // Times column
+        if (ranges.length > 0 && !ranges[0].always_on) {
+            html += '<div class="sched-times">' + (ranges[0].start_time || '00:00') + ' - ' + (ranges[0].end_time || '00:00') + '</div>';
+        } else if (ranges.length > 0 && ranges[0].always_on) {
+            html += '<div class="sched-times"><span class="sched-always-on">ALWAYS ON</span></div>';
+        } else {
+            html += '<div class="sched-times" style="color:#ccc;">Not armed</div>';
+        }
+    }
+    html += '</div>';
+
+    // Edit panel (initially hidden)
+    html += '<div id="sched-edit-panel" style="display:none;"></div>';
+
+    // Schedule info
+    _schedules.forEach(function(s, i) {
+        html += '<div style="margin-top:8px;font-size:11px;color:#888;">Schedule #' + s.id + ': ' +
+            (s.enabled ? '<span style="color:#27ae60;">Enabled</span>' : '<span class="sched-disabled">Disabled</span>') +
+            ' | Start: ' + (s.start_time || '-') + ' | End: ' + (s.end_time || '-') +
+            ' | Always on: ' + (s.always_on ? 'Yes' : 'No') +
+            ' | Days: ' + (s.day_of_week || []).map(function(d){return _DAY_NAMES[parseInt(d)].substring(0,3);}).join(', ') +
+            ' | Buffer: ' + (s.buffer_time || 0) + 'min</div>';
+    });
+
+    // Flex schedule card
+    if (_flexSchedules.length > 0) {
+        _flexSchedules.forEach(function(fs) {
+            html += '<div class="sched-flex-card">';
+            html += '<h4><i class="fa-solid fa-clock-rotate-left"></i> Flex Schedule: ' + (fs.display_name || 'Unnamed') + '</h4>';
+            html += '<div style="font-size:12px;color:#555;">';
+            html += 'ID: ' + fs.id + ' | Running: ' + (fs.is_running ? '<span style="color:#27ae60;">Yes</span>' : 'No');
+            html += ' | Next run: ' + (fs.next_run || 'None');
+            html += ' | Products: ' + JSON.stringify(fs.product || []);
+            if (fs.schedule && fs.schedule.length > 0) {
+                html += '<br>Rules: ' + JSON.stringify(fs.schedule);
+            } else {
+                html += '<br><span style="color:#888;">No flex schedule rules configured</span>';
+            }
+            html += '</div>';
+            html += '<div style="font-size:10px;color:#aaa;margin-top:4px;">Edit flex schedules in the Actuate dashboard</div>';
+            html += '</div>';
+        });
+    }
+
+    body.innerHTML = html;
+}
+
+function isHourArmed(hour, startH, endH) {
+    if (startH <= endH) {
+        // Same day: e.g. 08:00-17:00
+        return hour >= startH && hour < endH;
+    } else {
+        // Overnight: e.g. 23:00-01:00 → armed at 23 and 0
+        return hour >= startH || hour < endH;
+    }
+}
+
+function editScheduleDay(dayNum) {
+    // Find the schedule that covers this day
+    var sched = null;
+    for (var i = 0; i < _schedules.length; i++) {
+        var days = (_schedules[i].day_of_week || []).map(Number);
+        if (days.indexOf(dayNum) >= 0) { sched = _schedules[i]; break; }
+    }
+    if (!sched) { sched = _schedules[0]; } // fallback
+    _editingSchedule = JSON.parse(JSON.stringify(sched)); // deep copy
+
+    var panel = document.getElementById('sched-edit-panel');
+    panel.style.display = 'block';
+    var html = '<div class="sched-edit-row">';
+    html += '<label>Editing: ' + _DAY_NAMES[dayNum] + ' (Schedule #' + sched.id + ')</label>';
+    html += '<label>Start: <input type="time" id="sched-start" value="' + (sched.start_time || '00:00').substring(0,5) + '" onchange="markScheduleDirty()"></label>';
+    html += '<label>End: <input type="time" id="sched-end" value="' + (sched.end_time || '00:00').substring(0,5) + '" onchange="markScheduleDirty()"></label>';
+    html += '<label><input type="checkbox" id="sched-enabled" ' + (sched.enabled ? 'checked' : '') + ' onchange="markScheduleDirty()"> Enabled</label>';
+    html += '<label><input type="checkbox" id="sched-always-on" ' + (sched.always_on ? 'checked' : '') + ' onchange="markScheduleDirty()"> Always On</label>';
+    html += '<label>Days:</label>';
+    for (var d = 0; d < 7; d++) {
+        var checked = (sched.day_of_week || []).map(Number).indexOf(d) >= 0;
+        html += '<label style="font-weight:normal;"><input type="checkbox" class="sched-day-cb" data-day="' + d + '" ' + (checked ? 'checked' : '') + ' onchange="markScheduleDirty()"> ' + _DAY_NAMES[d].substring(0,3) + '</label>';
+    }
+    html += '</div>';
+    panel.innerHTML = html;
+    document.getElementById('sched-save-btn').disabled = false;
+}
+
+function markScheduleDirty() {
+    _scheduleEdited = true;
+    document.getElementById('sched-save-btn').disabled = false;
+}
+
+function cancelScheduleEdit() {
+    document.getElementById('sched-edit-panel').style.display = 'none';
+    document.getElementById('sched-save-btn').disabled = true;
+    _scheduleEdited = false;
+    _editingSchedule = null;
+}
+
+function saveSchedule() {
+    if (!_editingSchedule) { alert('No schedule selected for editing.'); return; }
+    var startTime = document.getElementById('sched-start').value + ':00';
+    var endTime = document.getElementById('sched-end').value + ':00';
+    var enabled = document.getElementById('sched-enabled').checked;
+    var alwaysOn = document.getElementById('sched-always-on').checked;
+    var days = [];
+    document.querySelectorAll('.sched-day-cb').forEach(function(cb) {
+        if (cb.checked) days.push(String(cb.getAttribute('data-day')));
+    });
+    if (!days.length) { alert('Select at least one day.'); return; }
+    var changes = 'Start: ' + startTime + '\\nEnd: ' + endTime + '\\nDays: ' + days.map(function(d){return _DAY_NAMES[parseInt(d)].substring(0,3);}).join(', ') + '\\nEnabled: ' + enabled + '\\nAlways On: ' + alwaysOn;
+    if (!confirm('Save these schedule changes?\\n\\n' + changes)) return;
+    document.getElementById('sched-save-btn').disabled = true;
+    document.getElementById('sched-save-btn').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
+    var siteId = document.getElementById('site-id').value;
+    fetch('/api/actuate/schedule-update', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            site_id: siteId,
+            schedule_id: String(_editingSchedule.id),
+            data: {
+                start_time: startTime,
+                end_time: endTime,
+                enabled: enabled,
+                always_on: alwaysOn,
+                day_of_week: days,
+                customer: parseInt(siteId),
+                schedule_status: _editingSchedule.schedule_status,
+                is_override: _editingSchedule.is_override,
+                buffer_time: _editingSchedule.buffer_time || 0,
+                flex_schedule: _editingSchedule.flex_schedule
+            }
+        })
+    }).then(r=>r.json()).then(function(d) {
+        document.getElementById('sched-save-btn').innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save Changes';
+        if (!d.ok) {
+            alert('Error saving schedule: ' + (d.error || 'Unknown error'));
+            document.getElementById('sched-save-btn').disabled = false;
+            return;
+        }
+        _scheduleEdited = false;
+        _editingSchedule = null;
+        document.getElementById('sched-edit-panel').style.display = 'none';
+        addLog('Schedule updated successfully. New ID: ' + (d.new_id || '?'), true);
+        loadSchedules(); // refresh grid
+    }).catch(function(e) {
+        document.getElementById('sched-save-btn').innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save Changes';
+        document.getElementById('sched-save-btn').disabled = false;
+        alert('Error: ' + e);
+    });
+}
 </script>
 </body>
 </html>
@@ -13131,6 +13391,49 @@ def actuate_query():
         if isinstance(body, dict) and "results" in body and "count" in body:
             body = body["results"]
         return jsonify({"ok": r.ok, "upstream_status": r.status_code, "upstream_body": body})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/actuate/schedule-update", methods=["POST"])
+def actuate_schedule_update():
+    """Proxy PATCH to Actuate schedule API — updates a schedule."""
+    if not ACTUATE_API_TOKEN:
+        return jsonify({"ok": False, "error": "ACTUATE_API_TOKEN not configured."}), 500
+    data = request.get_json(silent=True) or {}
+    site_id = str(data.get("site_id", ""))
+    schedule_id = str(data.get("schedule_id", ""))
+    sched_data = data.get("data", {})
+    import re as _re_sched
+    if not _re_sched.match(r"^[0-9]+$", schedule_id):
+        return jsonify({"ok": False, "error": "Invalid schedule_id."}), 400
+    if not _re_sched.match(r"^[0-9]+$", site_id):
+        return jsonify({"ok": False, "error": "Invalid site_id."}), 400
+    # Whitelist allowed fields
+    _ALLOWED_FIELDS = {"start_time", "end_time", "always_on", "day_of_week", "enabled",
+                       "customer", "schedule_status", "is_override", "buffer_time",
+                       "flex_schedule", "location_dusk_dawn", "override_start_date", "override_end_date"}
+    filtered = {k: v for k, v in sched_data.items() if k in _ALLOWED_FIELDS}
+    if not filtered:
+        return jsonify({"ok": False, "error": "No valid fields to update."}), 400
+    try:
+        import requests as _req
+        url = f"{ACTUATE_BASE_URL}/api/schedule/{schedule_id}/"
+        r = _req.patch(url, headers={
+            "Authorization": f"Token {ACTUATE_API_TOKEN}",
+            "Content-Type": "application/json",
+        }, json=filtered, timeout=15)
+        try:
+            body = r.json()
+        except Exception:
+            body = r.text
+        new_id = None
+        if isinstance(body, list) and body and isinstance(body[0], dict):
+            new_id = body[0].get("id")
+        elif isinstance(body, dict):
+            new_id = body.get("id")
+        return jsonify({"ok": r.ok or r.status_code == 201, "upstream_status": r.status_code,
+                        "upstream_body": body, "new_id": new_id})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
