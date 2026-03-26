@@ -196,7 +196,7 @@ def build_html(results):
 <td style="padding:6px 8px;text-align:center;">{r['camera_count']}</td>
 <td style="padding:6px 8px;font-weight:600;{'color:#c0392b;' if has_patriot else ''}">{r.get('patriot_client_no') or '-'}</td>
 <td style="padding:6px 8px;{alert_style}">{_ts_to_str(last_alert_ts)}</td>
-<td style="padding:6px 8px;font-size:11px;">{_ts_to_str(r.get('last_motion'))}</td>
+<td style="padding:6px 8px;font-size:11px;{"color:#e74c3c;font-weight:600;" if r.get("last_motion") and float(r["last_motion"]) < sixty_days_ago else ""}">{_ts_to_str(r.get('last_motion'))}</td>
 <td style="padding:6px 8px;{deploy_style}">{_ts_to_str(deployed_ts)}</td>
 </tr>"""
 
