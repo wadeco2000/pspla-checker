@@ -12690,7 +12690,7 @@ function loadPatriotNumbers() {
         html += '<th style="padding:8px;text-align:left;">Site Name</th>';
         html += '<th style="padding:8px;text-align:center;">Active</th>';
         html += '<th style="padding:8px;text-align:center;">Armed</th>';
-        html += '<th style="padding:8px;text-align:center;">Cams</th>';
+        html += '<th style="padding:8px;text-align:center;">Cams (A/I)</th>';
         html += '<th style="padding:8px;text-align:left;">Patriot Client No</th>';
         html += '<th style="padding:8px;text-align:center;">Motion %</th>';
         html += '<th style="padding:8px;text-align:left;">Last Alert</th>';
@@ -12720,7 +12720,7 @@ function loadPatriotNumbers() {
             html += '<td style="padding:6px 8px;">' + r.site_name + '</td>';
             html += '<td style="padding:6px 8px;text-align:center;">' + activeIcon + '</td>';
             html += '<td style="padding:6px 8px;text-align:center;">' + armedIcon + '</td>';
-            html += '<td style="padding:6px 8px;text-align:center;">' + (r.camera_count || 0) + '</td>';
+            html += '<td style="padding:6px 8px;text-align:center;">' + (r.camera_count || 0) + ' <span style="font-size:10px;">(<span style="color:#27ae60;">' + (r.cameras_active || 0) + '</span>/<span style="color:#e74c3c;">' + (r.cameras_inactive || 0) + '</span>)</span></td>';
             html += '<td style="padding:6px 8px;font-weight:600;' + (hasPatriot ? 'color:#c0392b;' : '') + '">' + (r.patriot_client_no || '-') + '</td>';
             html += '<td style="padding:6px 8px;text-align:center;font-size:11px;">' + motionPct + '</td>';
             html += '<td style="padding:6px 8px;font-size:11px;' + alertStyle + '">' + alertDate + '</td>';
@@ -14028,7 +14028,8 @@ def actuate_patriot_numbers():
                      "patriot_client_no": None, "patriot_server": None, "group": None,
                      "active": None, "armed": None, "motion_pct": None,
                      "last_alert": None, "last_motion": None, "deployed_date": None,
-                     "camera_count": len(site_cameras.get(sid, []))}
+                     "camera_count": len(site_cameras.get(sid, [])),
+                     "cameras_active": 0, "cameras_inactive": 0}
             # Get group from about endpoint
             try:
                 ra = _req.get(f"{ACTUATE_BASE_URL}/api/customer/{sid}/about/", headers=_headers, timeout=10)
@@ -14044,6 +14045,19 @@ def actuate_patriot_numbers():
                     entry["deployed_date"] = about.get("deployed_date")
                     mp = about.get("motion_percentage")
                     entry["motion_pct"] = round(float(mp) * 100, 1) if mp is not None else None
+            except Exception:
+                pass
+            # Get active/inactive camera counts
+            try:
+                _rc = _req.get(f"{ACTUATE_BASE_URL}/api/camera/site/",
+                    params={"customer__id": str(sid), "page": "1"}, headers=_headers, timeout=10)
+                if _rc.ok:
+                    _rcj = _rc.json()
+                    _site_cams = _rcj.get("results", _rcj) if isinstance(_rcj, dict) else _rcj
+                    if isinstance(_site_cams, list):
+                        entry["cameras_active"] = sum(1 for c in _site_cams if c.get("active"))
+                        entry["cameras_inactive"] = sum(1 for c in _site_cams if not c.get("active"))
+                        entry["camera_count"] = len(_site_cams)
             except Exception:
                 pass
             # Get patriot from camera general_info
