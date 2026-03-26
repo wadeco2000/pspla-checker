@@ -87,6 +87,7 @@ def fetch_report():
             "group": None,
             "patriot_client_no": None,
             "last_alert": None,
+            "last_motion": None,
             "deployed_date": None,
             "camera_count": len(site_cameras.get(sid, [])),
         }
@@ -100,6 +101,7 @@ def fetch_report():
                 if pg and isinstance(pg, dict):
                     entry["group"] = pg.get("name", "")
                 entry["last_alert"] = about.get("last_alert")
+                entry["last_motion"] = about.get("last_motion")
                 entry["deployed_date"] = about.get("deployed_date")
         except Exception:
             pass
@@ -149,6 +151,7 @@ def build_html(results):
 <th style="padding:8px;text-align:left;">Cameras</th>
 <th style="padding:8px;text-align:left;">Patriot Client No</th>
 <th style="padding:8px;text-align:left;">Last Alert</th>
+<th style="padding:8px;text-align:left;">Last Motion</th>
 <th style="padding:8px;text-align:left;">Deployed</th>
 </tr>
 </thead>
@@ -193,6 +196,7 @@ def build_html(results):
 <td style="padding:6px 8px;text-align:center;">{r['camera_count']}</td>
 <td style="padding:6px 8px;font-weight:600;{'color:#c0392b;' if has_patriot else ''}">{r.get('patriot_client_no') or '-'}</td>
 <td style="padding:6px 8px;{alert_style}">{_ts_to_str(last_alert_ts)}</td>
+<td style="padding:6px 8px;font-size:11px;">{_ts_to_str(r.get('last_motion'))}</td>
 <td style="padding:6px 8px;{deploy_style}">{_ts_to_str(deployed_ts)}</td>
 </tr>"""
 
