@@ -13083,6 +13083,7 @@ var _flexSchedules = [];
 var _scheduleEdited = false;
 var _editingSchedule = null; // {id, start_time, end_time, day_of_week, always_on, enabled, customer}
 var _DAY_NAMES = ['SUNDAY','MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY'];
+var _ACTUATE_PRODUCTS = {43:'Intruder',44:'Slip and Fall',45:'All',47:'Crowd',48:'Loitering',50:'Gun',51:'False Positive Reduction',59:'Postal Vehicle ID',60:'Summary',109:'Vehicle Loitering',117:'Hard Hat',139:'Fire',195:'Package',258:'Health Monitoring',260:'Non-Postal',325:'Motion +',339:'Line Crossing'};
 
 function toggleScheduleEditor() {
     var el = document.getElementById('schedule-editor');
@@ -13183,7 +13184,8 @@ function renderScheduleGrid() {
             html += '<div style="font-size:12px;color:#555;">';
             html += 'ID: ' + fs.id + ' | Running: ' + (fs.is_running ? '<span style="color:#27ae60;">Yes</span>' : 'No');
             html += ' | Next run: ' + (fs.next_run || 'None');
-            html += ' | Products: ' + JSON.stringify(fs.product || []);
+            var prodNames = (fs.product || []).map(function(id){ return _ACTUATE_PRODUCTS[id] || ('ID:' + id); });
+            html += ' | Products: ' + (prodNames.length ? prodNames.join(', ') : 'None');
             if (fs.schedule && fs.schedule.length > 0) {
                 html += '<br>Rules: ' + JSON.stringify(fs.schedule);
             } else {
