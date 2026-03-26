@@ -506,6 +506,7 @@ _RATE_LIMITS = {
     'export_csv':              (5, 60),      # 5 exports per minute
     'actuate_query':           (60, 60),     # 60 Actuate API calls per minute
     'actuate_schedule_update':  (10, 60),    # 10 schedule updates per minute
+    'actuate_flex_schedule_update': (10, 60),
     'club_fitness_signups':    (10, 60),     # 10 Stripe fetches per minute
     'club_fitness_sync':       (5, 60),      # 5 syncs per minute
     'club_fitness_export':     (5, 60),      # 5 exports per minute
@@ -724,6 +725,7 @@ _ROUTE_PERMISSIONS = {
     # actuate
     'actuate_page': 'actuate', 'actuate_action': 'actuate',
     'actuate_site_info': 'actuate', 'actuate_query': 'actuate', 'actuate_schedule_update': 'actuate',
+    'actuate_flex_schedule_update': 'actuate',
     # shelly
     'shelly_page': 'shelly', 'shelly_devices_api': 'shelly',
     'shelly_toggle': 'shelly', 'shelly_command_log_api': 'shelly',
@@ -13215,46 +13217,72 @@ function renderScheduleGrid() {
         html += '</div>';
     }
 
-    // Flex schedule card — user-friendly and editable
+    // Flex schedule card — full editor
     if (_flexSchedules.length > 0) {
         _flexSchedules.forEach(function(fs, fsIdx) {
             var prodNames = (fs.product || []).map(function(id){ return _ACTUATE_PRODUCTS[id] || ('ID:' + id); });
-            html += '<div class="sched-flex-card" style="margin-top:12px;padding:16px;border:1px solid #d1d5db;border-radius:8px;background:#f9fafb;">';
+            html += '<div class="sched-flex-card" style="margin-top:12px;padding:16px;border:2px solid #8e44ad;border-radius:8px;background:#faf5ff;">';
             html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
-            html += '<h4 style="margin:0;font-size:14px;color:#333;"><i class="fa-solid fa-clock-rotate-left" style="color:#8e44ad;"></i> Flex Schedule: ' + (fs.display_name || 'Unnamed') + '</h4>';
+            html += '<h4 style="margin:0;font-size:14px;color:#333;"><i class="fa-solid fa-clock-rotate-left" style="color:#8e44ad;"></i> Flex Schedule</h4>';
             html += '<div style="display:flex;gap:6px;align-items:center;">';
             html += '<span style="font-size:10px;padding:2px 8px;border-radius:10px;' + (fs.is_running ? 'background:#d4edda;color:#155724;' : 'background:#f8d7da;color:#721c24;') + '">' + (fs.is_running ? 'Running' : 'Not Running') + '</span>';
             html += '<span style="font-size:10px;color:#888;">ID: ' + fs.id + '</span>';
             html += '</div></div>';
 
-            // Info grid
-            html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-bottom:10px;">';
+            // Editable display name
+            html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px;">';
             html += '<div style="background:white;padding:8px 12px;border-radius:6px;border:1px solid #e5e7eb;">';
-            html += '<div style="font-size:10px;color:#888;text-transform:uppercase;">Products</div>';
-            html += '<div style="font-size:13px;font-weight:600;color:#333;">' + (prodNames.length ? prodNames.join(', ') : '<span style="color:#ccc;">None</span>') + '</div></div>';
-            html += '<div style="background:white;padding:8px 12px;border-radius:6px;border:1px solid #e5e7eb;">';
-            html += '<div style="font-size:10px;color:#888;text-transform:uppercase;">Next Run</div>';
-            html += '<div style="font-size:13px;font-weight:600;color:#333;">' + (fs.next_run ? new Date(fs.next_run * 1000).toLocaleString('en-NZ') : '<span style="color:#ccc;">Not scheduled</span>') + '</div></div>';
-            html += '</div>';
+            html += '<div style="font-size:10px;color:#888;text-transform:uppercase;">Display Name</div>';
+            html += '<input type="text" id="fs-name-' + fsIdx + '" value="' + (fs.display_name || '') + '" style="width:100%;border:1px solid #ddd;border-radius:4px;padding:4px 6px;font-size:13px;font-weight:600;"></div>';
 
-            // Schedule rules
+            // Products — checkboxes
+            html += '<div style="background:white;padding:8px 12px;border-radius:6px;border:1px solid #e5e7eb;grid-column:span 2;">';
+            html += '<div style="font-size:10px;color:#888;text-transform:uppercase;margin-bottom:4px;">Products (AI Analytics)</div>';
+            html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
+            var currentProds = fs.product || [];
+            Object.keys(_ACTUATE_PRODUCTS).forEach(function(pid) {
+                var checked = currentProds.indexOf(parseInt(pid)) >= 0;
+                html += '<label style="font-size:11px;font-weight:normal;display:flex;align-items:center;gap:3px;"><input type="checkbox" class="fs-prod-' + fsIdx + '" value="' + pid + '" ' + (checked ? 'checked' : '') + '> ' + _ACTUATE_PRODUCTS[pid] + '</label>';
+            });
+            html += '</div></div>';
+
+            // Next run
+            html += '</div>';
+            html += '<div style="font-size:11px;color:#888;margin-bottom:10px;">Next run: ' + (fs.next_run ? new Date(fs.next_run * 1000).toLocaleString('en-NZ') : 'Not scheduled') + '</div>';
+
+            // Schedule rules — editable
+            html += '<div style="font-size:11px;font-weight:600;color:#555;margin-bottom:6px;">Schedule Rules:</div>';
             if (fs.schedule && fs.schedule.length > 0) {
-                html += '<div style="margin-top:8px;"><div style="font-size:11px;font-weight:600;color:#555;margin-bottom:6px;">Schedule Rules:</div>';
-                fs.schedule.forEach(function(rule) {
-                    var ruleDays = (rule.day_of_week || []).map(function(d){return _DAY_NAMES[parseInt(d)].substring(0,3);}).join(', ');
-                    html += '<div style="background:white;padding:8px 12px;border-radius:6px;border:1px solid #e5e7eb;margin-bottom:4px;font-size:12px;">';
-                    html += '<span style="color:#27ae60;font-weight:600;">' + (rule.enabled ? 'Enabled' : '<span style="color:#e74c3c;">Disabled</span>') + '</span>';
-                    html += ' | ' + (rule.always_on ? '<span style="color:#2196F3;">Always On</span>' : '<span style="font-weight:600;">' + (rule.start_time || '?') + ' - ' + (rule.end_time || '?') + '</span>');
-                    html += ' | Days: ' + ruleDays;
-                    html += ' | Buffer: ' + (rule.buffer_time || 0) + 'min';
+                fs.schedule.forEach(function(rule, rIdx) {
+                    var ruleDays = (rule.day_of_week || []).map(Number);
+                    html += '<div style="background:white;padding:10px 12px;border-radius:6px;border:1px solid #e5e7eb;margin-bottom:6px;">';
+                    html += '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px;">';
+                    html += '<label style="font-weight:normal;"><input type="checkbox" id="fs-rule-enabled-' + fsIdx + '-' + rIdx + '" ' + (rule.enabled ? 'checked' : '') + '> Enabled</label>';
+                    html += '<label style="font-weight:normal;"><input type="checkbox" id="fs-rule-alwayson-' + fsIdx + '-' + rIdx + '" ' + (rule.always_on ? 'checked' : '') + '> Always On</label>';
+                    html += '<label>Start: <input type="time" id="fs-rule-start-' + fsIdx + '-' + rIdx + '" value="' + (rule.start_time || '00:00').substring(0,5) + '" style="padding:2px 4px;border:1px solid #ddd;border-radius:4px;"></label>';
+                    html += '<label>End: <input type="time" id="fs-rule-end-' + fsIdx + '-' + rIdx + '" value="' + (rule.end_time || '00:00').substring(0,5) + '" style="padding:2px 4px;border:1px solid #ddd;border-radius:4px;"></label>';
+                    html += '<label>Buffer: <input type="number" id="fs-rule-buffer-' + fsIdx + '-' + rIdx + '" value="' + (rule.buffer_time || 0) + '" min="0" style="width:50px;padding:2px 4px;border:1px solid #ddd;border-radius:4px;"> min</label>';
+                    html += '<button class="btn btn-sm" style="background:#e74c3c;color:white;font-size:10px;padding:2px 8px;" onclick="flexRemoveRule(' + fsIdx + ',' + rIdx + ')"><i class="fa-solid fa-trash"></i></button>';
                     html += '</div>';
+                    html += '<div style="display:flex;gap:6px;margin-top:6px;">';
+                    for (var d = 0; d < 7; d++) {
+                        var dayChecked = ruleDays.indexOf(d) >= 0;
+                        html += '<label style="font-size:11px;font-weight:normal;"><input type="checkbox" class="fs-rule-day-' + fsIdx + '-' + rIdx + '" value="' + d + '" ' + (dayChecked ? 'checked' : '') + '> ' + _DAY_NAMES[d].substring(0,3) + '</label>';
+                    }
+                    html += '</div></div>';
                 });
-                html += '</div>';
             } else {
-                html += '<div style="background:#fff3cd;padding:10px 12px;border-radius:6px;border:1px solid #ffc107;font-size:12px;color:#856404;margin-top:8px;">';
-                html += '<i class="fa-solid fa-triangle-exclamation"></i> No flex schedule rules configured — this flex schedule is inactive.';
+                html += '<div style="background:#fff3cd;padding:10px 12px;border-radius:6px;border:1px solid #ffc107;font-size:12px;color:#856404;">';
+                html += '<i class="fa-solid fa-triangle-exclamation"></i> No rules configured — add one below.';
                 html += '</div>';
             }
+
+            // Add rule + Save buttons
+            html += '<div style="display:flex;gap:8px;margin-top:10px;">';
+            html += '<button class="btn btn-sm" style="background:#8e44ad;color:white;" onclick="flexAddRule(' + fsIdx + ')"><i class="fa-solid fa-plus"></i> Add Rule</button>';
+            html += '<button class="btn btn-sm" style="background:#27ae60;color:white;" onclick="flexSave(' + fsIdx + ')"><i class="fa-solid fa-floppy-disk"></i> Save Flex Schedule</button>';
+            html += '</div>';
+
             html += '</div>';
         });
     }
@@ -13444,6 +13472,87 @@ document.addEventListener('mouseup', function() {
         document.querySelectorAll('.sched-cell.drag-preview').forEach(function(el){ el.classList.remove('drag-preview'); });
     }
 });
+
+// ── Flex Schedule Editor ──
+function flexAddRule(fsIdx) {
+    var fs = _flexSchedules[fsIdx];
+    if (!fs) return;
+    fs.schedule = fs.schedule || [];
+    fs.schedule.push({
+        customer: fs.customer,
+        start_time: '22:00:00',
+        end_time: '04:00:00',
+        always_on: false,
+        day_of_week: ['0','1','2','3','4','5','6'],
+        enabled: true,
+        buffer_time: 0,
+        flex_schedule: fs.id
+    });
+    renderScheduleGrid();
+}
+
+function flexRemoveRule(fsIdx, ruleIdx) {
+    var fs = _flexSchedules[fsIdx];
+    if (!fs || !fs.schedule) return;
+    if (!confirm('Remove this rule?')) return;
+    fs.schedule.splice(ruleIdx, 1);
+    renderScheduleGrid();
+}
+
+function flexSave(fsIdx) {
+    var fs = _flexSchedules[fsIdx];
+    if (!fs) return;
+    // Gather display name
+    var nameEl = document.getElementById('fs-name-' + fsIdx);
+    var displayName = nameEl ? nameEl.value.trim() : fs.display_name;
+    // Gather products
+    var prods = [];
+    document.querySelectorAll('.fs-prod-' + fsIdx + ':checked').forEach(function(cb) {
+        prods.push(parseInt(cb.value));
+    });
+    // Gather rules
+    var rules = [];
+    (fs.schedule || []).forEach(function(rule, rIdx) {
+        var enabled = document.getElementById('fs-rule-enabled-' + fsIdx + '-' + rIdx);
+        var alwaysOn = document.getElementById('fs-rule-alwayson-' + fsIdx + '-' + rIdx);
+        var startTime = document.getElementById('fs-rule-start-' + fsIdx + '-' + rIdx);
+        var endTime = document.getElementById('fs-rule-end-' + fsIdx + '-' + rIdx);
+        var buffer = document.getElementById('fs-rule-buffer-' + fsIdx + '-' + rIdx);
+        var days = [];
+        document.querySelectorAll('.fs-rule-day-' + fsIdx + '-' + rIdx + ':checked').forEach(function(cb) {
+            days.push(String(cb.value));
+        });
+        rules.push({
+            customer: fs.customer,
+            start_time: (startTime ? startTime.value : '00:00') + ':00',
+            end_time: (endTime ? endTime.value : '00:00') + ':00',
+            always_on: alwaysOn ? alwaysOn.checked : false,
+            day_of_week: days,
+            enabled: enabled ? enabled.checked : true,
+            buffer_time: buffer ? parseInt(buffer.value) || 0 : 0,
+            flex_schedule: fs.id
+        });
+    });
+    var summary = 'Display Name: ' + displayName + '\nProducts: ' + prods.map(function(p){ return _ACTUATE_PRODUCTS[p] || p; }).join(', ') + '\nRules: ' + rules.length;
+    if (!confirm('Save flex schedule changes?\n\n' + summary)) return;
+    var siteId = document.getElementById('site-id').value;
+    fetch('/api/actuate/flex-schedule-update', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            site_id: siteId,
+            flex_schedule_id: String(fs.id),
+            data: {display_name: displayName, product: prods, schedule: rules}
+        })
+    }).then(r=>r.json()).then(function(d) {
+        if (!d.ok) { alert('Error: ' + (d.error || 'Unknown')); return; }
+        addLog('Flex schedule updated. ' + (d.detail || ''), 'log-ok');
+        loadSchedules();
+        _autoDeployAfterSave();
+    }).catch(function(e) {
+        alert('Network error: ' + e);
+    });
+}
 
 function editScheduleDay(dayNum) {
     // Find the schedule that covers this day
@@ -13702,6 +13811,42 @@ def actuate_schedule_update():
             new_id = body.get("id")
         return jsonify({"ok": r.ok or r.status_code == 201, "upstream_status": r.status_code,
                         "upstream_body": body, "new_id": new_id})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/actuate/flex-schedule-update", methods=["POST"])
+def actuate_flex_schedule_update():
+    """Proxy PATCH to Actuate flex_schedule API — updates a flex schedule."""
+    if not ACTUATE_API_TOKEN:
+        return jsonify({"ok": False, "error": "ACTUATE_API_TOKEN not configured."}), 500
+    data = request.get_json(silent=True) or {}
+    site_id = str(data.get("site_id", ""))
+    fs_id = str(data.get("flex_schedule_id", ""))
+    fs_data = data.get("data", {})
+    import re as _re_fs
+    if not _re_fs.match(r"^[0-9]+$", fs_id):
+        return jsonify({"ok": False, "error": "Invalid flex_schedule_id."}), 400
+    if not _re_fs.match(r"^[0-9]+$", site_id):
+        return jsonify({"ok": False, "error": "Invalid site_id."}), 400
+    # Whitelist allowed fields
+    _ALLOWED = {"display_name", "product", "schedule"}
+    filtered = {k: v for k, v in fs_data.items() if k in _ALLOWED}
+    if not filtered:
+        return jsonify({"ok": False, "error": "No valid fields to update."}), 400
+    try:
+        import requests as _req
+        url = f"{ACTUATE_BASE_URL}/api/flex_schedule/{fs_id}/"
+        r = _req.patch(url, headers={
+            "Authorization": f"Token {ACTUATE_API_TOKEN}",
+            "Content-Type": "application/json",
+        }, json=filtered, timeout=15)
+        try:
+            body = r.json()
+        except Exception:
+            body = r.text
+        return jsonify({"ok": r.ok, "upstream_status": r.status_code,
+                        "upstream_body": body, "detail": "Flex schedule updated"})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
