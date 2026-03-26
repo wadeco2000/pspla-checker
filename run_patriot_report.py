@@ -86,6 +86,9 @@ def fetch_report():
             "site_name": cust_map.get(sid, "?"),
             "group": None,
             "patriot_client_no": None,
+            "active": None,
+            "armed": None,
+            "motion_pct": None,
             "last_alert": None,
             "last_motion": None,
             "deployed_date": None,
@@ -102,6 +105,10 @@ def fetch_report():
                     entry["group"] = pg.get("name", "")
                 entry["last_alert"] = about.get("last_alert")
                 entry["last_motion"] = about.get("last_motion")
+                entry["active"] = about.get("active")
+                entry["armed"] = about.get("armed")
+                mp = about.get("motion_percentage")
+                entry["motion_pct"] = round(float(mp) * 100, 1) if mp is not None else None
                 entry["deployed_date"] = about.get("deployed_date")
         except Exception:
             pass
@@ -148,8 +155,11 @@ def build_html(results):
 <th style="padding:8px;text-align:left;">Group</th>
 <th style="padding:8px;text-align:left;">Site ID</th>
 <th style="padding:8px;text-align:left;">Site Name</th>
-<th style="padding:8px;text-align:left;">Cameras</th>
+<th style="padding:8px;text-align:center;">Active</th>
+<th style="padding:8px;text-align:center;">Armed</th>
+<th style="padding:8px;text-align:center;">Cams</th>
 <th style="padding:8px;text-align:left;">Patriot Client No</th>
+<th style="padding:8px;text-align:center;">Motion %</th>
 <th style="padding:8px;text-align:left;">Last Alert</th>
 <th style="padding:8px;text-align:left;">Last Motion</th>
 <th style="padding:8px;text-align:left;">Deployed</th>
@@ -193,8 +203,11 @@ def build_html(results):
 <td style="padding:6px 8px;font-weight:{'600' if show_group else 'normal'};color:#2980b9;">{group if show_group else ''}</td>
 <td style="padding:6px 8px;">{r['site_id']}</td>
 <td style="padding:6px 8px;">{r['site_name']}</td>
+<td style="padding:6px 8px;text-align:center;">{'<span style="color:#27ae60;">&#x2705;</span>' if r.get('active') else '<span style="color:#e74c3c;">&#x274C;</span>' if r.get('active') is not None else '-'}</td>
+<td style="padding:6px 8px;text-align:center;">{'<span style="color:#27ae60;">&#x2705;</span>' if r.get('armed') else '<span style="color:#e74c3c;">&#x274C;</span>' if r.get('armed') is not None else '-'}</td>
 <td style="padding:6px 8px;text-align:center;">{r['camera_count']}</td>
 <td style="padding:6px 8px;font-weight:600;{'color:#c0392b;' if has_patriot else ''}">{r.get('patriot_client_no') or '-'}</td>
+<td style="padding:6px 8px;text-align:center;font-size:11px;">{str(r.get('motion_pct', '-')) + '%' if r.get('motion_pct') is not None else '-'}</td>
 <td style="padding:6px 8px;{alert_style}">{_ts_to_str(last_alert_ts)}</td>
 <td style="padding:6px 8px;font-size:11px;{"color:#e74c3c;font-weight:600;" if r.get("last_motion") and float(r["last_motion"]) < sixty_days_ago else ""}">{_ts_to_str(r.get('last_motion'))}</td>
 <td style="padding:6px 8px;{deploy_style}">{_ts_to_str(deployed_ts)}</td>

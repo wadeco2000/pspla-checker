@@ -12688,21 +12688,44 @@ function loadPatriotNumbers() {
         html += '<th style="padding:8px;text-align:left;">Group</th>';
         html += '<th style="padding:8px;text-align:left;">Site ID</th>';
         html += '<th style="padding:8px;text-align:left;">Site Name</th>';
+        html += '<th style="padding:8px;text-align:center;">Active</th>';
+        html += '<th style="padding:8px;text-align:center;">Armed</th>';
+        html += '<th style="padding:8px;text-align:center;">Cams</th>';
         html += '<th style="padding:8px;text-align:left;">Patriot Client No</th>';
-        html += '<th style="padding:8px;text-align:left;">Patriot Server</th>';
+        html += '<th style="padding:8px;text-align:center;">Motion %</th>';
+        html += '<th style="padding:8px;text-align:left;">Last Alert</th>';
+        html += '<th style="padding:8px;text-align:left;">Last Motion</th>';
+        html += '<th style="padding:8px;text-align:left;">Deployed</th>';
         html += '</tr></thead><tbody>';
         var lastGroup = '';
+        var now = Date.now() / 1000;
+        var sixtyDaysAgo = now - (60 * 86400);
         results.forEach(function(r) {
             var hasPatriot = r.patriot_client_no;
             var group = r.group || '-';
             var showGroup = group !== lastGroup;
             lastGroup = group;
+            var activeIcon = r.active === true ? '<span style="color:#27ae60;">&#x2705;</span>' : (r.active === false ? '<span style="color:#e74c3c;">&#x274C;</span>' : '-');
+            var armedIcon = r.armed === true ? '<span style="color:#27ae60;">&#x2705;</span>' : (r.armed === false ? '<span style="color:#e74c3c;">&#x274C;</span>' : '-');
+            var motionPct = r.motion_pct !== null && r.motion_pct !== undefined ? r.motion_pct + '%' : '-';
+            var alertStyle = r.last_alert && r.last_alert < sixtyDaysAgo ? 'color:#e74c3c;font-weight:600;' : '';
+            var motionStyle = r.last_motion && r.last_motion < sixtyDaysAgo ? 'color:#e74c3c;font-weight:600;' : '';
+            var deployStyle = r.deployed_date && r.deployed_date > (now - 62*86400) ? 'color:#27ae60;font-weight:600;' : '';
+            var alertDate = r.last_alert ? new Date(r.last_alert * 1000).toLocaleDateString('en-NZ') : '-';
+            var motionDate = r.last_motion ? new Date(r.last_motion * 1000).toLocaleDateString('en-NZ') : '-';
+            var deployDate = r.deployed_date ? new Date(r.deployed_date * 1000).toLocaleDateString('en-NZ') : '-';
             html += '<tr style="border-bottom:1px solid #eee;' + (hasPatriot ? '' : 'color:#ccc;') + (showGroup ? 'border-top:2px solid #e2e8f0;' : '') + '">';
             html += '<td style="padding:6px 8px;font-weight:' + (showGroup ? '600' : 'normal') + ';color:#2980b9;">' + (showGroup ? group : '') + '</td>';
             html += '<td style="padding:6px 8px;">' + r.site_id + '</td>';
             html += '<td style="padding:6px 8px;">' + r.site_name + '</td>';
+            html += '<td style="padding:6px 8px;text-align:center;">' + activeIcon + '</td>';
+            html += '<td style="padding:6px 8px;text-align:center;">' + armedIcon + '</td>';
+            html += '<td style="padding:6px 8px;text-align:center;">' + (r.camera_count || 0) + '</td>';
             html += '<td style="padding:6px 8px;font-weight:600;' + (hasPatriot ? 'color:#c0392b;' : '') + '">' + (r.patriot_client_no || '-') + '</td>';
-            html += '<td style="padding:6px 8px;">' + (r.patriot_server || '-') + '</td>';
+            html += '<td style="padding:6px 8px;text-align:center;font-size:11px;">' + motionPct + '</td>';
+            html += '<td style="padding:6px 8px;font-size:11px;' + alertStyle + '">' + alertDate + '</td>';
+            html += '<td style="padding:6px 8px;font-size:11px;' + motionStyle + '">' + motionDate + '</td>';
+            html += '<td style="padding:6px 8px;font-size:11px;' + deployStyle + '">' + deployDate + '</td>';
             html += '</tr>';
         });
         html += '</tbody></table>';
@@ -14002,7 +14025,10 @@ def actuate_patriot_numbers():
         for sid in sites_to_check:
             cam_ids = site_cameras.get(sid, [])
             entry = {"site_id": sid, "site_name": cust_map.get(sid, "?"),
-                     "patriot_client_no": None, "patriot_server": None, "group": None}
+                     "patriot_client_no": None, "patriot_server": None, "group": None,
+                     "active": None, "armed": None, "motion_pct": None,
+                     "last_alert": None, "last_motion": None, "deployed_date": None,
+                     "camera_count": len(site_cameras.get(sid, []))}
             # Get group from about endpoint
             try:
                 ra = _req.get(f"{ACTUATE_BASE_URL}/api/customer/{sid}/about/", headers=_headers, timeout=10)
@@ -14011,6 +14037,13 @@ def actuate_patriot_numbers():
                     pg = about.get("parent_group")
                     if pg and isinstance(pg, dict):
                         entry["group"] = pg.get("name", "")
+                    entry["active"] = about.get("active")
+                    entry["armed"] = about.get("armed")
+                    entry["last_alert"] = about.get("last_alert")
+                    entry["last_motion"] = about.get("last_motion")
+                    entry["deployed_date"] = about.get("deployed_date")
+                    mp = about.get("motion_percentage")
+                    entry["motion_pct"] = round(float(mp) * 100, 1) if mp is not None else None
             except Exception:
                 pass
             # Get patriot from camera general_info
