@@ -508,6 +508,7 @@ _RATE_LIMITS = {
     'actuate_schedule_update':  (10, 60),    # 10 schedule updates per minute
     'actuate_flex_schedule_update': (10, 60),
     'actuate_flex_toggle': (5, 60),
+    'actuate_patriot_numbers': (5, 60),
     'club_fitness_signups':    (10, 60),     # 10 Stripe fetches per minute
     'club_fitness_sync':       (5, 60),      # 5 syncs per minute
     'club_fitness_export':     (5, 60),      # 5 exports per minute
@@ -728,6 +729,7 @@ _ROUTE_PERMISSIONS = {
     'actuate_site_info': 'actuate', 'actuate_query': 'actuate', 'actuate_schedule_update': 'actuate',
     'actuate_flex_schedule_update': 'actuate',
     'actuate_flex_toggle': 'actuate',
+    'actuate_patriot_numbers': 'actuate',
     # shelly
     'shelly_page': 'shelly', 'shelly_devices_api': 'shelly',
     'shelly_toggle': 'shelly', 'shelly_command_log_api': 'shelly',
@@ -12542,7 +12544,7 @@ ACTUATE_TEMPLATE = r"""
         <!-- Controls -->
         <div class="ctrl-row">
             <label>Site ID:</label>
-            <input type="text" id="site-id" value="35218">
+            <input type="text" id="site-id" value="35218" onchange="loadPatriotCard()">
             <label class="site-filter-toggle" title="When ON, individual endpoint buttons filter results to this Site ID only. When OFF, they return data for all sites.">
                 <input type="checkbox" id="site-filter-toggle" checked>
                 <span class="site-filter-slider"></span>
@@ -12555,7 +12557,13 @@ ACTUATE_TEMPLATE = r"""
             <button class="btn btn-sm" style="background:#8e44ad;color:white;" onclick="testAllEndpoints()"><i class="fa-solid fa-flask"></i> Test All Endpoints</button>
             <button class="btn" style="background:#e67e22;color:white;" onclick="grabEverything()" id="grab-btn"><i class="fa-solid fa-download"></i> Grab Everything</button>
             <button class="btn" style="background:#2980b9;color:white;" onclick="toggleScheduleEditor()"><i class="fa-solid fa-calendar-days"></i> Schedules</button>
+            <button class="btn btn-sm" style="background:#c0392b;color:white;" onclick="togglePatriotPanel()"><i class="fa-solid fa-shield-halved"></i> Patriot Numbers</button>
             <button class="btn btn-sm" style="background:#95a5a6;color:white;" onclick="clearLog()"><i class="fa-solid fa-eraser"></i> Clear Log</button>
+            <div style="margin-left:auto;background:#fff5f5;border:1px solid #e8c4c4;border-radius:6px;padding:4px 10px;display:flex;align-items:center;gap:6px;">
+                <i class="fa-solid fa-shield-halved" style="color:#c0392b;font-size:12px;"></i>
+                <span style="font-size:10px;color:#888;">Patriot:</span>
+                <span id="patriot-card"><span style="color:#ccc;font-size:11px;">Enter Site ID</span></span>
+            </div>
         </div>
 
         <!-- Schedule Editor -->
@@ -12572,6 +12580,19 @@ ACTUATE_TEMPLATE = r"""
                 </div>
                 <div class="card-body" id="schedule-editor-body">
                     <div style="text-align:center;padding:30px;color:#888;">Click "Schedules" to load schedule data for this site.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Patriot Numbers Panel -->
+        <div id="patriot-panel" style="display:none;margin-bottom:16px;">
+            <div class="card" style="border:2px solid #c0392b;">
+                <div class="card-head" style="background:#c0392b;display:flex;justify-content:space-between;align-items:center;">
+                    <span><i class="fa-solid fa-shield-halved"></i> Patriot Numbers — All Sites</span>
+                    <button class="btn btn-sm" style="background:rgba(255,255,255,0.2);color:white;" onclick="loadPatriotNumbers()"><i class="fa-solid fa-rotate"></i> Refresh</button>
+                </div>
+                <div id="patriot-panel-body" style="padding:12px;">
+                    <div style="text-align:center;padding:20px;color:#888;">Click "Patriot Numbers" to load.</div>
                 </div>
             </div>
         </div>
@@ -12643,6 +12664,67 @@ function addLog(msg, cls) {
     e.innerHTML = '<span class=\"log-ts\">[' + ts() + ']</span> <span class=\"' + (cls||'') + '\">' + msg + '</span>';
     log.appendChild(e);
     log.scrollTop = log.scrollHeight;
+}
+
+// ── Patriot Numbers ──
+function togglePatriotPanel() {
+    var el = document.getElementById('patriot-panel');
+    if (el.style.display === 'none') {
+        el.style.display = 'block';
+        loadPatriotNumbers();
+    } else {
+        el.style.display = 'none';
+    }
+}
+
+function loadPatriotNumbers() {
+    var body = document.getElementById('patriot-panel-body');
+    body.innerHTML = '<div style="text-align:center;padding:20px;color:#888;"><i class="fa-solid fa-spinner fa-spin"></i> Loading patriot numbers for all sites...</div>';
+    fetch('/api/actuate/patriot-numbers').then(r=>r.json()).then(function(d) {
+        if (!d.ok) { body.innerHTML = '<div style="color:red;">Error: ' + (d.error||'') + '</div>'; return; }
+        var results = d.results || [];
+        var html = '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
+        html += '<thead><tr style="background:#f8f9fa;border-bottom:2px solid #e2e8f0;">';
+        html += '<th style="padding:8px;text-align:left;">Site ID</th>';
+        html += '<th style="padding:8px;text-align:left;">Site Name</th>';
+        html += '<th style="padding:8px;text-align:left;">Patriot Client No</th>';
+        html += '<th style="padding:8px;text-align:left;">Patriot Server</th>';
+        html += '</tr></thead><tbody>';
+        results.forEach(function(r) {
+            var hasPatriot = r.patriot_client_no;
+            html += '<tr style="border-bottom:1px solid #eee;' + (hasPatriot ? '' : 'color:#ccc;') + '">';
+            html += '<td style="padding:6px 8px;">' + r.site_id + '</td>';
+            html += '<td style="padding:6px 8px;">' + r.site_name + '</td>';
+            html += '<td style="padding:6px 8px;font-weight:600;' + (hasPatriot ? 'color:#c0392b;' : '') + '">' + (r.patriot_client_no || '-') + '</td>';
+            html += '<td style="padding:6px 8px;">' + (r.patriot_server || '-') + '</td>';
+            html += '</tr>';
+        });
+        html += '</tbody></table>';
+        html += '<div style="font-size:10px;color:#888;margin-top:8px;">' + results.filter(function(r){return r.patriot_client_no;}).length + ' of ' + results.length + ' sites have Patriot configured</div>';
+        body.innerHTML = html;
+    }).catch(function(e) {
+        body.innerHTML = '<div style="color:red;">Error: ' + e + '</div>';
+    });
+}
+
+// Also load patriot info for current site into a card
+function loadPatriotCard() {
+    var siteId = document.getElementById('site-id').value;
+    if (!siteId) return;
+    var card = document.getElementById('patriot-card');
+    if (!card) return;
+    card.innerHTML = '<span style="color:#888;font-size:11px;"><i class="fa-solid fa-spinner fa-spin"></i></span>';
+    fetch('/api/actuate/patriot-numbers?site_id=' + siteId).then(r=>r.json()).then(function(d) {
+        if (!d.ok || !d.results || !d.results.length) { card.innerHTML = '<span style="color:#ccc;font-size:11px;">No data</span>'; return; }
+        var p = d.results[0];
+        if (p.patriot_client_no) {
+            card.innerHTML = '<div style="font-size:11px;"><strong style="color:#c0392b;">' + p.patriot_client_no + '</strong><br><span style="color:#888;">' + (p.patriot_server || '') + '</span></div>';
+        } else {
+            card.innerHTML = '<span style="color:#ccc;font-size:11px;">Not configured</span>';
+        }
+    }).catch(function() {
+        card.innerHTML = '<span style="color:#ccc;font-size:11px;">Error</span>';
+    });
 }
 
 function clearLog() {
@@ -13635,6 +13717,8 @@ function saveSchedule() {
         alert('Error: ' + e);
     });
 }
+// Load patriot card on page load
+loadPatriotCard();
 </script>
 </body>
 </html>
@@ -13877,6 +13961,57 @@ def actuate_flex_toggle():
         action = "enabled" if turn_on else "disabled"
         return jsonify({"ok": True, "detail": f"Flex {action}. {updated} schedule(s) updated, {cleaned} phantom(s) cleaned.",
                         "updated": updated, "cleaned": cleaned})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/actuate/patriot-numbers", methods=["GET"])
+def actuate_patriot_numbers():
+    """Get patriot client numbers for all sites or a specific site."""
+    if not ACTUATE_API_TOKEN:
+        return jsonify({"ok": False, "error": "ACTUATE_API_TOKEN not configured."}), 500
+    site_id = request.args.get("site_id", "")
+    try:
+        import requests as _req
+        _headers = {"Authorization": f"Token {ACTUATE_API_TOKEN}"}
+        # Get customers
+        rc = _req.get(f"{ACTUATE_BASE_URL}/api/customer/", headers=_headers, timeout=15)
+        customers = rc.json().get("results", rc.json()) if isinstance(rc.json(), dict) else rc.json()
+        cust_map = {c["id"]: c.get("name", "?") for c in customers} if isinstance(customers, list) else {}
+        # Get cameras
+        cam_params = {"customer__id": site_id} if site_id else {}
+        rcam = _req.get(f"{ACTUATE_BASE_URL}/api/camera/", params=cam_params, headers=_headers, timeout=15)
+        cameras = rcam.json().get("results", rcam.json()) if isinstance(rcam.json(), dict) else rcam.json()
+        # Group cameras by customer
+        site_cameras = {}
+        for c in cameras:
+            cust = c.get("customer")
+            cid = cust.get("id") if isinstance(cust, dict) else cust
+            if cid not in site_cameras:
+                site_cameras[cid] = []
+            site_cameras[cid].append(c["id"])
+        # For each site, get first camera's general_info for patriot
+        results = []
+        sites_to_check = [int(site_id)] if site_id else list(site_cameras.keys())
+        for sid in sites_to_check:
+            cam_ids = site_cameras.get(sid, [])
+            entry = {"site_id": sid, "site_name": cust_map.get(sid, "?"), "patriot_client_no": None, "patriot_server": None}
+            if cam_ids:
+                try:
+                    rg = _req.get(f"{ACTUATE_BASE_URL}/api/camera/{cam_ids[0]}/general_info/", headers=_headers, timeout=10)
+                    if rg.ok:
+                        info = rg.json()
+                        for stream in info.get("streams", []):
+                            for pa in stream.get("patriot_alerts", []):
+                                entry["patriot_client_no"] = pa.get("patriot_client_no")
+                                entry["patriot_server"] = pa.get("patriot_server")
+                                break
+                            if entry["patriot_client_no"]:
+                                break
+                except Exception:
+                    pass
+            results.append(entry)
+        return jsonify({"ok": True, "results": results})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
