@@ -13231,8 +13231,14 @@ function schedDragStart(e, day, hour) {
     _dragDay = day;
     _dragStartHour = hour;
     _dragEndHour = hour;
-    // Don't clear previous selections on same day — accumulate
-    if (!_selectedHours[day]) _selectedHours[day] = new Set();
+    _dragEndDay = day;
+    // First drag on this day — seed with currently armed hours from loaded schedule
+    if (!_selectedHours[day]) {
+        _selectedHours[day] = new Set();
+        document.querySelectorAll('.sched-cell.armed[data-day="' + day + '"]').forEach(function(el) {
+            _selectedHours[day].add(parseInt(el.dataset.hour));
+        });
+    }
     _highlightDragRange();
 }
 
@@ -13264,8 +13270,14 @@ function schedDragEnd(e, day, hour) {
     // Show selected hours on grid
     _showSelectedHours();
     // Apply to all affected days
+    var affectedDays = [];
     for (var d = loD; d <= hiD; d++) {
         _applySelectedHours(d);
+        affectedDays.push(d);
+    }
+    // Show multi-day edit panel
+    if (affectedDays.length > 1) {
+        _showMultiDayEditPanel(affectedDays);
     }
 }
 
@@ -13378,6 +13390,29 @@ function editScheduleDay(dayNum) {
     document.getElementById('sched-save-btn').disabled = false;
 }
 
+function _showMultiDayEditPanel(dayNums) {
+    var sched = _schedules.find(function(s){ return s.enabled; }) || _schedules[0];
+    if (!sched) return;
+    _editingSchedule = JSON.parse(JSON.stringify(sched));
+    var dayNames = dayNums.map(function(d){ return _DAY_NAMES[d]; }).join(', ');
+    var panel = document.getElementById('sched-edit-panel');
+    panel.style.display = 'block';
+    var html = '<div class="sched-edit-row">';
+    html += '<label>Editing: <strong>' + dayNames + '</strong> (Schedule #' + sched.id + ')</label>';
+    html += '<label>Start: <input type="time" id="sched-start" value="' + (sched.start_time || '00:00').substring(0,5) + '" onchange="markScheduleDirty()"></label>';
+    html += '<label>End: <input type="time" id="sched-end" value="' + (sched.end_time || '00:00').substring(0,5) + '" onchange="markScheduleDirty()"></label>';
+    html += '<label><input type="checkbox" id="sched-enabled" ' + (sched.enabled ? 'checked' : '') + ' onchange="markScheduleDirty()"> Enabled</label>';
+    html += '<label><input type="checkbox" id="sched-always-on" ' + (sched.always_on ? 'checked' : '') + ' onchange="markScheduleDirty()"> Always On</label>';
+    html += '<label>Days:</label>';
+    for (var d = 0; d < 7; d++) {
+        var checked = dayNums.indexOf(d) >= 0 || (sched.day_of_week || []).map(Number).indexOf(d) >= 0;
+        html += '<label style="font-weight:normal;"><input type="checkbox" class="sched-day-cb" data-day="' + d + '" ' + (checked ? 'checked' : '') + ' onchange="markScheduleDirty()"> ' + _DAY_NAMES[d].substring(0,3) + '</label>';
+    }
+    html += '</div>';
+    panel.innerHTML = html;
+    document.getElementById('sched-save-btn').disabled = false;
+}
+
 function markScheduleDirty() {
     _scheduleEdited = true;
     document.getElementById('sched-save-btn').disabled = false;
@@ -13404,8 +13439,8 @@ function saveSchedule() {
         if (cb.checked) days.push(String(cb.getAttribute('data-day')));
     });
     if (!days.length) { alert('Select at least one day.'); return; }
-    var changes = 'Start: ' + startTime + '\\nEnd: ' + endTime + '\\nDays: ' + days.map(function(d){return _DAY_NAMES[parseInt(d)].substring(0,3);}).join(', ') + '\\nEnabled: ' + enabled + '\\nAlways On: ' + alwaysOn;
-    if (!confirm('Save these schedule changes?\\n\\n' + changes)) return;
+    var changes = 'Start: ' + startTime + '\nEnd: ' + endTime + '\nDays: ' + days.map(function(d){return _DAY_NAMES[parseInt(d)].substring(0,3);}).join(', ') + '\nEnabled: ' + enabled + '\nAlways On: ' + alwaysOn;
+    if (!confirm('Save these schedule changes?\n\n' + changes)) return;
     document.getElementById('sched-save-btn').disabled = true;
     document.getElementById('sched-save-btn').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
     var siteId = document.getElementById('site-id').value;
