@@ -13854,10 +13854,18 @@ def actuate_flex_toggle():
             rp = _req.patch(f"{ACTUATE_BASE_URL}/api/schedule/{old_id}/", headers=_headers, json=sched, timeout=15)
             if rp.ok or rp.status_code == 201:
                 body = rp.json()
+                new_id = None
                 if isinstance(body, list) and body:
-                    new_ids.append(body[0].get("id"))
+                    new_id = body[0].get("id")
+                elif isinstance(body, dict):
+                    new_id = body.get("id")
+                if new_id:
+                    new_ids.append(new_id)
+                # PATCH creates a new record — delete the old one if it still exists
+                if new_id and new_id != old_id:
+                    _req.delete(f"{ACTUATE_BASE_URL}/api/schedule/{old_id}/", headers=_headers, timeout=15)
                 updated += 1
-        # Clean up: delete phantom schedules (start_time=None) and orphaned old IDs
+        # Clean up: delete phantom schedules (start_time=None)
         r2 = _req.get(f"{ACTUATE_BASE_URL}/api/schedule/",
             params={"customer__id": site_id}, headers=_headers, timeout=15)
         after_scheds = r2.json().get("results", r2.json()) if isinstance(r2.json(), dict) else r2.json()
