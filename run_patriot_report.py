@@ -46,12 +46,30 @@ def fetch_report():
 
     # Get all customers
     r = requests.get(f"{ACTUATE_BASE_URL}/api/customer/", headers=headers, timeout=30)
-    customers = r.json().get("results", r.json()) if isinstance(r.json(), dict) else r.json()
+    if not r.ok:
+        print(f"  ERROR: Customer API returned {r.status_code}: {r.text[:200]}")
+        return []
+    try:
+        rj = r.json()
+    except Exception:
+        print(f"  ERROR: Customer API returned non-JSON: {r.text[:200]}")
+        return []
+    customers = rj.get("results", rj) if isinstance(rj, dict) else rj
+    if not isinstance(customers, list):
+        print(f"  ERROR: Expected list of customers, got: {type(customers)}")
+        return []
     cust_map = {c["id"]: c.get("name", "?") for c in customers}
 
     # Get all cameras
     r2 = requests.get(f"{ACTUATE_BASE_URL}/api/camera/", headers=headers, timeout=30)
-    cameras = r2.json().get("results", r2.json()) if isinstance(r2.json(), dict) else r2.json()
+    try:
+        r2j = r2.json()
+    except Exception:
+        print(f"  ERROR: Camera API returned non-JSON: {r2.text[:200]}")
+        r2j = []
+    cameras = r2j.get("results", r2j) if isinstance(r2j, dict) else r2j
+    if not isinstance(cameras, list):
+        cameras = []
     site_cameras = {}
     for c in cameras:
         cust = c.get("customer")
