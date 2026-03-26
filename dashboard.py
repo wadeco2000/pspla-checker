@@ -12508,6 +12508,7 @@ ACTUATE_TEMPLATE = r"""
         .sched-cell.armed:hover{background:#43A047;}
         .sched-cell:not(.armed):hover{background:#e8f5e9;}
         .sched-cell.drag-preview{background:#81C784 !important;opacity:0.8;}
+        .sched-cell.drag-remove{background:#ef9a9a !important;opacity:0.8;}
         .sched-cell.drag-selected{background:#66BB6A !important;}
         .sched-times{background:#f8f9fa;padding:6px 8px;border-bottom:1px solid #eee;font-weight:600;color:#333;display:flex;align-items:center;justify-content:center;font-size:12px;}
         .sched-edit-row{display:flex;gap:8px;align-items:center;padding:8px 12px;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;margin-top:8px;}
@@ -13239,6 +13240,7 @@ var _dragDay = -1;
 var _dragStartHour = -1;
 var _dragEndHour = -1;
 var _selectedHours = {}; // {dayNum: Set of selected hours}
+var _dragMode = 'add'; // 'add' or 'remove'
 
 function schedDragStart(e, day, hour) {
     e.preventDefault();
@@ -13254,6 +13256,9 @@ function schedDragStart(e, day, hour) {
             _selectedHours[day].add(parseInt(el.dataset.hour));
         });
     }
+    // Detect mode: if starting cell is armed/selected → remove mode, else add mode
+    var startCell = document.querySelector('.sched-cell[data-day="' + day + '"][data-hour="' + hour + '"]');
+    _dragMode = (startCell && (startCell.classList.contains('armed') || startCell.classList.contains('drag-selected'))) ? 'remove' : 'add';
     _highlightDragRange();
 }
 
@@ -13284,7 +13289,13 @@ function schedDragEnd(e, day, hour) {
                 _selectedHours[d].add(parseInt(el.dataset.hour));
             });
         }
-        for (var h = loH; h <= hiH; h++) _selectedHours[d].add(h);
+        for (var h = loH; h <= hiH; h++) {
+            if (_dragMode === 'remove') {
+                _selectedHours[d].delete(h);
+            } else {
+                _selectedHours[d].add(h);
+            }
+        }
     }
     // Clear drag preview
     document.querySelectorAll('.sched-cell.drag-preview').forEach(function(el){ el.classList.remove('drag-preview'); });
@@ -13320,7 +13331,7 @@ function schedDragEnd(e, day, hour) {
 }
 
 function _highlightDragRange() {
-    document.querySelectorAll('.sched-cell.drag-preview').forEach(function(el){ el.classList.remove('drag-preview'); });
+    document.querySelectorAll('.sched-cell.drag-preview,.sched-cell.drag-remove').forEach(function(el){ el.classList.remove('drag-preview'); el.classList.remove('drag-remove'); });
     var loH = Math.min(_dragStartHour, _dragEndHour);
     var hiH = Math.max(_dragStartHour, _dragEndHour);
     var loD = Math.min(_dragDay, _dragEndDay);
@@ -13328,7 +13339,7 @@ function _highlightDragRange() {
     for (var d = loD; d <= hiD; d++) {
         document.querySelectorAll('.sched-cell[data-day="' + d + '"]').forEach(function(el) {
             var h = parseInt(el.dataset.hour);
-            if (h >= loH && h <= hiH) el.classList.add('drag-preview');
+            if (h >= loH && h <= hiH) el.classList.add(_dragMode === 'remove' ? 'drag-remove' : 'drag-preview');
         });
     }
 }
