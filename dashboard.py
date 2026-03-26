@@ -12685,14 +12685,20 @@ function loadPatriotNumbers() {
         var results = d.results || [];
         var html = '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
         html += '<thead><tr style="background:#f8f9fa;border-bottom:2px solid #e2e8f0;">';
+        html += '<th style="padding:8px;text-align:left;">Group</th>';
         html += '<th style="padding:8px;text-align:left;">Site ID</th>';
         html += '<th style="padding:8px;text-align:left;">Site Name</th>';
         html += '<th style="padding:8px;text-align:left;">Patriot Client No</th>';
         html += '<th style="padding:8px;text-align:left;">Patriot Server</th>';
         html += '</tr></thead><tbody>';
+        var lastGroup = '';
         results.forEach(function(r) {
             var hasPatriot = r.patriot_client_no;
-            html += '<tr style="border-bottom:1px solid #eee;' + (hasPatriot ? '' : 'color:#ccc;') + '">';
+            var group = r.group || '-';
+            var showGroup = group !== lastGroup;
+            lastGroup = group;
+            html += '<tr style="border-bottom:1px solid #eee;' + (hasPatriot ? '' : 'color:#ccc;') + (showGroup ? 'border-top:2px solid #e2e8f0;' : '') + '">';
+            html += '<td style="padding:6px 8px;font-weight:' + (showGroup ? '600' : 'normal') + ';color:#2980b9;">' + (showGroup ? group : '') + '</td>';
             html += '<td style="padding:6px 8px;">' + r.site_id + '</td>';
             html += '<td style="padding:6px 8px;">' + r.site_name + '</td>';
             html += '<td style="padding:6px 8px;font-weight:600;' + (hasPatriot ? 'color:#c0392b;' : '') + '">' + (r.patriot_client_no || '-') + '</td>';
@@ -13990,12 +13996,24 @@ def actuate_patriot_numbers():
             if cid not in site_cameras:
                 site_cameras[cid] = []
             site_cameras[cid].append(c["id"])
-        # For each site, get first camera's general_info for patriot
+        # For each site, get camera general_info for patriot + about for group
         results = []
-        sites_to_check = [int(site_id)] if site_id else list(site_cameras.keys())
+        sites_to_check = [int(site_id)] if site_id else list(cust_map.keys())
         for sid in sites_to_check:
             cam_ids = site_cameras.get(sid, [])
-            entry = {"site_id": sid, "site_name": cust_map.get(sid, "?"), "patriot_client_no": None, "patriot_server": None}
+            entry = {"site_id": sid, "site_name": cust_map.get(sid, "?"),
+                     "patriot_client_no": None, "patriot_server": None, "group": None}
+            # Get group from about endpoint
+            try:
+                ra = _req.get(f"{ACTUATE_BASE_URL}/api/customer/{sid}/about/", headers=_headers, timeout=10)
+                if ra.ok:
+                    about = ra.json()
+                    pg = about.get("parent_group")
+                    if pg and isinstance(pg, dict):
+                        entry["group"] = pg.get("name", "")
+            except Exception:
+                pass
+            # Get patriot from camera general_info
             if cam_ids:
                 try:
                     rg = _req.get(f"{ACTUATE_BASE_URL}/api/camera/{cam_ids[0]}/general_info/", headers=_headers, timeout=10)
@@ -14011,6 +14029,8 @@ def actuate_patriot_numbers():
                 except Exception:
                     pass
             results.append(entry)
+        # Sort by group then site name
+        results.sort(key=lambda x: (x.get("group") or "zzz", x.get("site_name") or ""))
         return jsonify({"ok": True, "results": results})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
