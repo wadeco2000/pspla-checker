@@ -13226,9 +13226,12 @@ function schedDragStart(e, day, hour) {
     _highlightDragRange();
 }
 
+var _dragEndDay = -1;
+
 function schedDragMove(e, day, hour) {
-    if (!_dragActive || day !== _dragDay) return;
+    if (!_dragActive) return;
     _dragEndHour = hour;
+    _dragEndDay = day;
     _highlightDragRange();
 }
 
@@ -13236,28 +13239,38 @@ function schedDragEnd(e, day, hour) {
     if (!_dragActive) return;
     _dragActive = false;
     _dragEndHour = hour;
-    // Add dragged hours to selection
-    var lo = Math.min(_dragStartHour, _dragEndHour);
-    var hi = Math.max(_dragStartHour, _dragEndHour);
-    if (!_selectedHours[_dragDay]) _selectedHours[_dragDay] = new Set();
-    for (var h = lo; h <= hi; h++) _selectedHours[_dragDay].add(h);
+    _dragEndDay = day;
+    // Add dragged hours to selection for all days in range
+    var loH = Math.min(_dragStartHour, _dragEndHour);
+    var hiH = Math.max(_dragStartHour, _dragEndHour);
+    var loD = Math.min(_dragDay, _dragEndDay);
+    var hiD = Math.max(_dragDay, _dragEndDay);
+    for (var d = loD; d <= hiD; d++) {
+        if (!_selectedHours[d]) _selectedHours[d] = new Set();
+        for (var h = loH; h <= hiH; h++) _selectedHours[d].add(h);
+    }
     // Clear drag preview
     document.querySelectorAll('.sched-cell.drag-preview').forEach(function(el){ el.classList.remove('drag-preview'); });
     // Show selected hours on grid
     _showSelectedHours();
-    // Calculate start/end from all selected hours
-    _applySelectedHours(_dragDay);
+    // Apply to all affected days
+    for (var d = loD; d <= hiD; d++) {
+        _applySelectedHours(d);
+    }
 }
 
 function _highlightDragRange() {
-    // Clear only drag-preview, keep selected
     document.querySelectorAll('.sched-cell.drag-preview').forEach(function(el){ el.classList.remove('drag-preview'); });
-    var lo = Math.min(_dragStartHour, _dragEndHour);
-    var hi = Math.max(_dragStartHour, _dragEndHour);
-    document.querySelectorAll('.sched-cell[data-day="' + _dragDay + '"]').forEach(function(el) {
-        var h = parseInt(el.dataset.hour);
-        if (h >= lo && h <= hi) el.classList.add('drag-preview');
-    });
+    var loH = Math.min(_dragStartHour, _dragEndHour);
+    var hiH = Math.max(_dragStartHour, _dragEndHour);
+    var loD = Math.min(_dragDay, _dragEndDay);
+    var hiD = Math.max(_dragDay, _dragEndDay);
+    for (var d = loD; d <= hiD; d++) {
+        document.querySelectorAll('.sched-cell[data-day="' + d + '"]').forEach(function(el) {
+            var h = parseInt(el.dataset.hour);
+            if (h >= loH && h <= hiH) el.classList.add('drag-preview');
+        });
+    }
 }
 
 function _showSelectedHours() {
