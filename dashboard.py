@@ -507,6 +507,7 @@ _RATE_LIMITS = {
     'actuate_query':           (60, 60),     # 60 Actuate API calls per minute
     'actuate_schedule_update':  (10, 60),    # 10 schedule updates per minute
     'actuate_flex_schedule_update': (10, 60),
+    'actuate_flex_toggle': (5, 60),
     'club_fitness_signups':    (10, 60),     # 10 Stripe fetches per minute
     'club_fitness_sync':       (5, 60),      # 5 syncs per minute
     'club_fitness_export':     (5, 60),      # 5 exports per minute
@@ -726,6 +727,7 @@ _ROUTE_PERMISSIONS = {
     'actuate_page': 'actuate', 'actuate_action': 'actuate',
     'actuate_site_info': 'actuate', 'actuate_query': 'actuate', 'actuate_schedule_update': 'actuate',
     'actuate_flex_schedule_update': 'actuate',
+    'actuate_flex_toggle': 'actuate',
     # shelly
     'shelly_page': 'shelly', 'shelly_devices_api': 'shelly',
     'shelly_toggle': 'shelly', 'shelly_command_log_api': 'shelly',
@@ -13490,64 +13492,26 @@ function flexSave(fsIdx) {
 function toggleFlexSchedule(fsIdx, turnOn) {
     var fs = _flexSchedules[fsIdx];
     if (!fs) return;
-    var siteId = document.getElementById('site-id').value;
     var action = turnOn ? 'Enable' : 'Disable';
-    // Find ALL enabled non-override schedules that need updating
-    var schedsToUpdate;
-    if (turnOn) {
-        // Link all enabled non-override schedules that aren't already linked to a flex
-        schedsToUpdate = _schedules.filter(function(s){ return s.enabled && !s.is_override && !s.flex_schedule; });
-    } else {
-        // Unlink all schedules linked to this flex
-        schedsToUpdate = _schedules.filter(function(s){ return s.enabled && !s.is_override && s.flex_schedule === fs.id; });
-    }
-    if (!schedsToUpdate.length) { alert('No schedules found to ' + action.toLowerCase() + '.'); loadSchedules(); return; }
-    var schedIds = schedsToUpdate.map(function(s){ return '#' + s.id; }).join(', ');
-    if (!confirm(action + ' flex scheduling?\n\nSchedule(s) ' + schedIds + ' will be ' + (turnOn ? 'linked to' : 'unlinked from') + ' Flex Schedule #' + fs.id + '.')) {
+    if (!confirm(action + ' flex scheduling?')) {
         loadSchedules();
         return;
     }
-    var newFlexVal = turnOn ? fs.id : null;
-    // Update all schedules sequentially
-    var updateIdx = 0;
-    function updateNext() {
-        if (updateIdx >= schedsToUpdate.length) {
-            addLog('Flex scheduling ' + (turnOn ? 'enabled' : 'disabled') + '. ' + schedsToUpdate.length + ' schedule(s) updated.', 'log-ok');
-            loadSchedules();
-            _autoDeployAfterSave();
-            return;
-        }
-        var s = schedsToUpdate[updateIdx];
-        fetch('/api/actuate/schedule-update', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                site_id: siteId,
-                schedule_id: String(s.id),
-                data: {
-                    start_time: s.start_time,
-                    end_time: s.end_time,
-                    enabled: s.enabled,
-                    always_on: s.always_on,
-                    day_of_week: s.day_of_week,
-                    customer: parseInt(siteId),
-                    schedule_status: s.schedule_status,
-                    is_override: s.is_override,
-                    buffer_time: s.buffer_time || 0,
-                    flex_schedule: newFlexVal
-                }
-            })
-        }).then(r=>r.json()).then(function(d) {
-            if (!d.ok) { alert('Error updating schedule #' + s.id + ': ' + (d.error || 'Unknown')); }
-            updateIdx++;
-            updateNext();
-        }).catch(function(e) {
-            alert('Network error updating schedule #' + s.id + ': ' + e);
-            updateIdx++;
-            updateNext();
-        });
-    }
-    updateNext();
+    var siteId = document.getElementById('site-id').value;
+    addLog(action + ' flex scheduling...', 'log-req');
+    fetch('/api/actuate/flex-toggle', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({site_id: siteId, flex_schedule_id: String(fs.id), turn_on: turnOn})
+    }).then(r=>r.json()).then(function(d) {
+        if (!d.ok) { alert('Error: ' + (d.error || 'Unknown')); loadSchedules(); return; }
+        addLog('Flex ' + (turnOn ? 'enabled' : 'disabled') + '. ' + (d.detail || ''), 'log-ok');
+        loadSchedules();
+        _autoDeployAfterSave();
+    }).catch(function(e) {
+        alert('Network error: ' + e);
+        loadSchedules();
+    });
 }
 
 function editScheduleDay(dayNum) {
@@ -13843,6 +13807,68 @@ def actuate_flex_schedule_update():
             body = r.text
         return jsonify({"ok": r.ok, "upstream_status": r.status_code,
                         "upstream_body": body, "detail": "Flex schedule updated"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/actuate/flex-toggle", methods=["POST"])
+def actuate_flex_toggle():
+    """Toggle flex scheduling ON/OFF by linking/unlinking schedules."""
+    if not ACTUATE_API_TOKEN:
+        return jsonify({"ok": False, "error": "ACTUATE_API_TOKEN not configured."}), 500
+    data = request.get_json(silent=True) or {}
+    site_id = str(data.get("site_id", ""))
+    fs_id = str(data.get("flex_schedule_id", ""))
+    turn_on = data.get("turn_on", False)
+    import re as _re_ft
+    if not _re_ft.match(r"^[0-9]+$", site_id) or not _re_ft.match(r"^[0-9]+$", fs_id):
+        return jsonify({"ok": False, "error": "Invalid IDs."}), 400
+    try:
+        import requests as _req
+        _headers = {"Authorization": f"Token {ACTUATE_API_TOKEN}", "Content-Type": "application/json"}
+        # Get all schedules for this site
+        r = _req.get(f"{ACTUATE_BASE_URL}/api/schedule/",
+            params={"customer__id": site_id}, headers=_headers, timeout=15)
+        all_scheds = r.json().get("results", r.json()) if isinstance(r.json(), dict) else r.json()
+        # Filter to enabled non-override schedules
+        targets = [s for s in all_scheds if s.get("enabled") and not s.get("is_override")]
+        if turn_on:
+            targets = [s for s in targets if not s.get("flex_schedule")]
+        else:
+            targets = [s for s in targets if s.get("flex_schedule") == int(fs_id)]
+        if not targets:
+            return jsonify({"ok": True, "detail": "No schedules to update.", "updated": 0})
+        updated = 0
+        new_ids = []
+        for s in targets:
+            # GET full schedule, modify flex_schedule, PATCH
+            rg = _req.get(f"{ACTUATE_BASE_URL}/api/schedule/{s['id']}/", headers=_headers, timeout=15)
+            if not rg.ok:
+                continue
+            sched = rg.json()
+            old_id = sched.pop("id", None)
+            sched["flex_schedule"] = int(fs_id) if turn_on else None
+            # Remove fields that cause issues
+            for k in ["location_dusk_dawn", "override_start_date", "override_end_date"]:
+                sched.pop(k, None)
+            rp = _req.patch(f"{ACTUATE_BASE_URL}/api/schedule/{old_id}/", headers=_headers, json=sched, timeout=15)
+            if rp.ok or rp.status_code == 201:
+                body = rp.json()
+                if isinstance(body, list) and body:
+                    new_ids.append(body[0].get("id"))
+                updated += 1
+        # Clean up: delete phantom schedules (start_time=None) and orphaned old IDs
+        r2 = _req.get(f"{ACTUATE_BASE_URL}/api/schedule/",
+            params={"customer__id": site_id}, headers=_headers, timeout=15)
+        after_scheds = r2.json().get("results", r2.json()) if isinstance(r2.json(), dict) else r2.json()
+        cleaned = 0
+        for s in after_scheds:
+            if s.get("enabled") and not s.get("is_override") and s.get("start_time") is None:
+                _req.delete(f"{ACTUATE_BASE_URL}/api/schedule/{s['id']}/", headers=_headers, timeout=15)
+                cleaned += 1
+        action = "enabled" if turn_on else "disabled"
+        return jsonify({"ok": True, "detail": f"Flex {action}. {updated} schedule(s) updated, {cleaned} phantom(s) cleaned.",
+                        "updated": updated, "cleaned": cleaned})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
