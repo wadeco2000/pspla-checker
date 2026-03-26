@@ -13221,9 +13221,21 @@ function renderScheduleGrid() {
     if (_flexSchedules.length > 0) {
         _flexSchedules.forEach(function(fs, fsIdx) {
             var prodNames = (fs.product || []).map(function(id){ return _ACTUATE_PRODUCTS[id] || ('ID:' + id); });
-            html += '<div class="sched-flex-card" style="margin-top:12px;padding:16px;border:2px solid #8e44ad;border-radius:8px;background:#faf5ff;">';
+            // Detect if flex is ON — any enabled non-override schedule linked to this flex schedule
+            var flexLinkedSched = enabledScheds.find(function(s){ return s.flex_schedule === fs.id && !s.is_override; });
+            var flexIsOn = !!flexLinkedSched;
+            html += '<div class="sched-flex-card" style="margin-top:12px;padding:16px;border:2px solid ' + (flexIsOn ? '#8e44ad' : '#d1d5db') + ';border-radius:8px;background:' + (flexIsOn ? '#faf5ff' : '#f9fafb') + ';">';
             html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
+            html += '<div style="display:flex;align-items:center;gap:10px;">';
             html += '<h4 style="margin:0;font-size:14px;color:#333;"><i class="fa-solid fa-clock-rotate-left" style="color:#8e44ad;"></i> Flex Schedule</h4>';
+            // Toggle switch
+            html += '<label style="position:relative;display:inline-block;width:44px;height:24px;margin:0;cursor:pointer;" title="' + (flexIsOn ? 'Flex scheduling is ON — click to disable' : 'Flex scheduling is OFF — click to enable') + '">';
+            html += '<input type="checkbox" ' + (flexIsOn ? 'checked' : '') + ' onchange="toggleFlexSchedule(' + fsIdx + ',this.checked)" style="opacity:0;width:0;height:0;">';
+            html += '<span style="position:absolute;top:0;left:0;right:0;bottom:0;background:' + (flexIsOn ? '#8e44ad' : '#ccc') + ';border-radius:24px;transition:0.3s;"></span>';
+            html += '<span style="position:absolute;top:2px;left:' + (flexIsOn ? '22px' : '2px') + ';width:20px;height:20px;background:white;border-radius:50%;transition:0.3s;box-shadow:0 1px 3px rgba(0,0,0,0.2);"></span>';
+            html += '</label>';
+            html += '<span style="font-size:11px;color:' + (flexIsOn ? '#8e44ad' : '#888') + ';font-weight:600;">' + (flexIsOn ? 'ON' : 'OFF') + '</span>';
+            html += '</div>';
             html += '<div style="display:flex;gap:6px;align-items:center;">';
             html += '<span style="font-size:10px;padding:2px 8px;border-radius:10px;' + (fs.is_running ? 'background:#d4edda;color:#155724;' : 'background:#f8d7da;color:#721c24;') + '">' + (fs.is_running ? 'Running' : 'Not Running') + '</span>';
             html += '<span style="font-size:10px;color:#888;">ID: ' + fs.id + '</span>';
@@ -13551,6 +13563,53 @@ function flexSave(fsIdx) {
         _autoDeployAfterSave();
     }).catch(function(e) {
         alert('Network error: ' + e);
+    });
+}
+
+function toggleFlexSchedule(fsIdx, turnOn) {
+    var fs = _flexSchedules[fsIdx];
+    if (!fs) return;
+    // Find the main (non-override, non-flex-rule) schedule to link/unlink
+    var mainSched = _schedules.find(function(s){ return s.enabled && !s.is_override && (turnOn ? !s.flex_schedule : s.flex_schedule === fs.id); });
+    if (!mainSched) {
+        // Fallback: use any enabled non-override schedule
+        mainSched = _schedules.find(function(s){ return s.enabled && !s.is_override; });
+    }
+    if (!mainSched) { alert('No schedule found to link/unlink flex.'); return; }
+    var action = turnOn ? 'Enable' : 'Disable';
+    if (!confirm(action + ' flex scheduling?\n\nThis will ' + (turnOn ? 'link' : 'unlink') + ' Schedule #' + mainSched.id + ' ' + (turnOn ? 'to' : 'from') + ' Flex Schedule #' + fs.id + '.')) {
+        loadSchedules(); // revert checkbox
+        return;
+    }
+    var siteId = document.getElementById('site-id').value;
+    var newFlexVal = turnOn ? fs.id : null;
+    fetch('/api/actuate/schedule-update', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            site_id: siteId,
+            schedule_id: String(mainSched.id),
+            data: {
+                start_time: mainSched.start_time,
+                end_time: mainSched.end_time,
+                enabled: mainSched.enabled,
+                always_on: mainSched.always_on,
+                day_of_week: mainSched.day_of_week,
+                customer: parseInt(siteId),
+                schedule_status: mainSched.schedule_status,
+                is_override: mainSched.is_override,
+                buffer_time: mainSched.buffer_time || 0,
+                flex_schedule: newFlexVal
+            }
+        })
+    }).then(r=>r.json()).then(function(d) {
+        if (!d.ok) { alert('Error: ' + (d.error || 'Unknown')); loadSchedules(); return; }
+        addLog('Flex scheduling ' + (turnOn ? 'enabled' : 'disabled') + '. Schedule #' + mainSched.id + (turnOn ? ' linked to' : ' unlinked from') + ' flex #' + fs.id, 'log-ok');
+        loadSchedules();
+        _autoDeployAfterSave();
+    }).catch(function(e) {
+        alert('Network error: ' + e);
+        loadSchedules();
     });
 }
 
