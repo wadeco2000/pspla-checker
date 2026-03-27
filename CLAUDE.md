@@ -850,3 +850,113 @@ Run generate_static.py locally (or click Publish Live in dashboard) to regenerat
 
 **Run bulk NZSA recheck to find existing false positives:**
 Dashboard → Searches → Bulk Recheck → select NZSA only → All companies → Run.
+
+---
+
+## Gemini AI Phone Calls (added 28 Mar 2026)
+
+AI-powered outbound phone call system using Google Gemini 3.1 Flash Live + Twilio telephony. First Flask blueprint — lives in its own file.
+
+**Architecture:**
+```
+Dashboard (blueprints/gemini.py) → POST /api/gemini/make-call
+    → FastAPI Call Server (gemini_call_server.py on separate Azure Web App)
+        → Twilio creates outbound call
+        → Twilio connects WebSocket to /media-stream/{call_id}
+        → Call server bridges audio: Twilio (mulaw 8kHz) ↔ Gemini Live (PCM 16/24kHz)
+        → Live transcript broadcast via /ws/transcript/{call_id}
+```
+
+**Files:**
+- `blueprints/__init__.py` — Package init
+- `blueprints/gemini.py` — Flask blueprint: page, API endpoints, template
+- `gemini_call_server.py` — FastAPI WebSocket server: Twilio↔Gemini audio bridge
+
+**Azure Infrastructure:**
+- Dashboard: `pspla-checker` (existing App Service)
+- Call server: `gemini-call-server` (separate App Service, same resource group pattern)
+- Call server URL: `gemini-call-server-dqd4b6a8dtdpezcx.newzealandnorth-01.azurewebsites.net`
+- WebSockets MUST be enabled on the call server App Service
+- Deploy call server: `az webapp deploy --name gemini-call-server --resource-group gemini-call-server_group --src-path gemini-deploy.zip --type zip`
+- Azure CLI IS installed (`az --version` = 2.84.0) and logged in
+
+**Environment Variables (both .env and Azure):**
+
+| Variable | Where | Purpose |
+|----------|-------|---------|
+| `TWILIO_ACCOUNT_SID` | Both servers | Twilio account |
+| `TWILIO_AUTH_TOKEN` | Both servers | Twilio auth |
+| `TWILIO_PHONE_NUMBER` | Both servers | NZ calling number (+64...) |
+| `GEMINI_API_KEY` | Call server | Google AI API key |
+| `GEMINI_CALL_SERVER_URL` | Dashboard only | URL of the FastAPI call server |
+| `GEMINI_CALL_SERVER_SECRET` | Both servers | Shared secret for API auth |
+| `GEMINI_CALL_SERVER_SELF_URL` | Call server only | Its own public URL (for TwiML) |
+
+**Blueprint Pattern (first blueprint, template for future pages):**
+- Blueprint defined in `blueprints/gemini.py`, registered in `dashboard.py`
+- Shared helpers injected at registration: `_is_admin`, `_has_permission`, `SUPABASE_URL`, etc.
+- Environment variables read at REQUEST time with `os.getenv()` fallback (not import time — Azure sets vars after boot)
+- Permission group: `gemini` (opt-in, default False)
+- Routes registered in `_ROUTE_PERMISSIONS`, rate limits in `_RATE_LIMITS`
+- Partners menu updated with `{% if user_perms.gemini %}` conditional
+
+**Supabase Tables:**
+- `gemini_knowledge_bases` — id, name, content, voice_name, created_at, updated_at (RLS enabled, no anon policies)
+- `gemini_call_history` — id, call_sid, call_id, to_number, from_number, knowledge_base_id, status, duration_seconds, transcript (jsonb), recording_url, started_at, ended_at, triggered_by, notes (RLS enabled, no anon policies)
+
+**Audio Bridge (critical path):**
+- Twilio sends: mulaw 8kHz mono, base64-encoded via WebSocket `media` events
+- Convert to Gemini: `audioop.ulaw2lin()` → `audioop.ratecv(8kHz→16kHz)` → send as PCM
+- Gemini responds: PCM 24kHz
+- Convert to Twilio: `audioop.ratecv(24kHz→8kHz)` → `audioop.lin2ulaw()` → base64 → WebSocket
+- `audioop` is built-in on Python 3.11 (Azure), use `audioop-lts` on Python 3.13+
+
+**Gemini Live API specifics:**
+- Model: `gemini-3.1-flash-live-preview` (only Live model available)
+- Config uses typed objects: `types.LiveConnectConfig`, `types.SpeechConfig`, etc.
+- `session.receive()` iterator ends after `turn_complete` — MUST re-enter in `while True` loop (per official Google example)
+- `send_client_content()` crashes with "invalid argument" — do NOT use for initial greeting
+- Pre-connecting Gemini session times out during phone ring — session must be created in WebSocket handler
+- Known 5-10 second cold start on first response (Google issue, not ours) — mitigated with Twilio `<Say>` hold message
+- Transcription: `input_audio_transcription` and `output_audio_transcription` in config
+
+**Settings (configurable from dashboard):**
+- Language (BCP-47 code, default: en)
+- Thinking level (minimal/low/medium/high)
+- Include AI thoughts in transcript
+- VAD start/end speech sensitivity (low/default/high)
+- Silence duration (ms, default 500)
+- Voice (Kore, Charon, Fenrir, Aoede, Puck — selected per knowledge base)
+- Affective dialog and proactive audio: Gemini 2.5 Flash only (not 3.1) — noted in settings panel
+
+**CSP (Content Security Policy):**
+- `connect-src` MUST include `https://*.azurewebsites.net wss://*.azurewebsites.net` for transcript WebSocket
+- Without this, browser silently blocks the WebSocket and transcripts don't appear
+
+**Twilio specifics:**
+- TwiML endpoint must accept POST (Twilio sends POST, not GET)
+- NZ international calling must be enabled in Twilio Console → Voice → Geo Permissions
+- `python-multipart` package required for FastAPI to parse Twilio form callbacks
+- Status callback endpoint receives `CallSid`, `CallStatus`, `CallDuration` as form data
+
+**Security:**
+- Shared secret (`X-Server-Secret` header) on all FastAPI API endpoints
+- Phone number validation: `^\+?64[2-9]\d{7,9}$` regex
+- Call SID validation: `^CA[a-f0-9]{32}$` regex
+- Rate limited: 5 calls per 5 min
+- CSRF protected (automatic via before_request hook)
+- Permission gated: `gemini` group
+- Knowledge base content escaped with `markupsafe.escape()` in templates
+- API keys server-side only
+
+**Deploying the call server:**
+```bash
+cd /c/Users/WadeAdmin/pspla-checker
+python -c "import zipfile; z=zipfile.ZipFile('gemini-deploy.zip','w'); z.write('gemini_call_server.py'); z.write('requirements.txt'); z.close()"
+az webapp deploy --name gemini-call-server --resource-group gemini-call-server_group --src-path gemini-deploy.zip --type zip
+```
+
+**Setting Azure app settings via CLI:**
+```bash
+az webapp config appsettings set --name gemini-call-server --resource-group gemini-call-server_group --settings "KEY=value"
+```
