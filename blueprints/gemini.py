@@ -405,8 +405,8 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
             <div>
                 <label class="form-label">Start of Speech Sensitivity</label>
                 <select id="set-start-sensitivity" style="width:100%;">
-                    <option value="low">Low — less likely to trigger on noise</option>
-                    <option value="default" selected>Default</option>
+                    <option value="low" selected>Low — less likely to trigger on noise</option>
+                    <option value="default">Default</option>
                     <option value="high">High — more responsive</option>
                 </select>
             </div>

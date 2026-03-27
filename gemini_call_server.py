@@ -284,6 +284,29 @@ async def media_stream(websocket: WebSocket, call_id: str):
         # Build config from call settings
         _settings = call.get("settings", {})
 
+        # Map sensitivity strings to Gemini enum values
+        _START_SENS_MAP = {
+            "LOW": "START_SENSITIVITY_LOW",
+            "DEFAULT": "START_SENSITIVITY_DEFAULT",
+            "HIGH": "START_SENSITIVITY_HIGH",
+        }
+        _END_SENS_MAP = {
+            "LOW": "END_SENSITIVITY_LOW",
+            "DEFAULT": "END_SENSITIVITY_DEFAULT",
+            "HIGH": "END_SENSITIVITY_HIGH",
+        }
+
+        # Default to LOW start sensitivity to avoid coughs/hums triggering interruptions
+        start_sens = _START_SENS_MAP.get(
+            _settings.get("start_sensitivity", "LOW").upper(), "START_SENSITIVITY_LOW"
+        )
+        end_sens = _END_SENS_MAP.get(
+            _settings.get("end_sensitivity", "DEFAULT").upper(), "END_SENSITIVITY_DEFAULT"
+        )
+        silence_ms = int(_settings.get("silence_duration_ms", 500))
+        silence_secs = silence_ms // 1000
+        silence_nanos = (silence_ms % 1000) * 1_000_000
+
         config = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
             system_instruction=types.Content(
@@ -300,8 +323,16 @@ async def media_stream(websocket: WebSocket, call_id: str):
             output_audio_transcription=types.AudioTranscriptionConfig(),
             realtime_input_config=types.RealtimeInputConfig(
                 turn_coverage="TURN_INCLUDES_ONLY_ACTIVITY",
+                automatic_activity_detection=types.AutomaticActivityDetection(
+                    start_of_speech_sensitivity=start_sens,
+                    end_of_speech_sensitivity=end_sens,
+                    silence_duration=types.Duration(
+                        seconds=silence_secs, nanos=silence_nanos
+                    ),
+                ),
             ),
         )
+        log.info(f"[{call_id}] VAD config: start={start_sens}, end={end_sens}, silence={silence_ms}ms")
 
         async with gemini_client.aio.live.connect(model=GEMINI_MODEL, config=config) as gemini_session:
             call["status"] = "connected"
