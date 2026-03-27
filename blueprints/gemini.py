@@ -529,8 +529,8 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                 <label class="form-label">End of Speech Sensitivity</label>
                 <select id="set-end-sensitivity" style="width:100%;">
                     <option value="low">Low</option>
-                    <option value="default" selected>Default</option>
-                    <option value="high">High</option>
+                    <option value="default">Default</option>
+                    <option value="high" selected>High</option>
                 </select>
                 <span style="font-size:10px;color:#888;">How quickly the AI decides the caller has finished speaking. Low waits longer for the caller to continue (good for slow or thoughtful speakers). High responds quickly after any pause (good for fast-paced conversations).</span>
             </div>

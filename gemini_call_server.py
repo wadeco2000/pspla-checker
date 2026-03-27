@@ -353,9 +353,11 @@ async def media_stream(websocket: WebSocket, call_id: str):
             _settings.get("start_sensitivity", "LOW").upper(),
             types.StartSensitivity.START_SENSITIVITY_LOW
         )
+        # Default to HIGH end sensitivity — 8kHz telephony line static can be
+        # misinterpreted as whispering on LOW/UNSPECIFIED, causing long pauses
         end_sens = _END_SENS_MAP.get(
-            _settings.get("end_sensitivity", "DEFAULT").upper(),
-            types.EndSensitivity.END_SENSITIVITY_UNSPECIFIED
+            _settings.get("end_sensitivity", "HIGH").upper(),
+            types.EndSensitivity.END_SENSITIVITY_HIGH
         )
         silence_ms = int(_settings.get("silence_duration_ms", 500))
 
@@ -391,6 +393,20 @@ async def media_stream(websocket: WebSocket, call_id: str):
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
             log.info(f"[{call_id}] Gemini Live session connected")
+
+            # Send text trigger to make Gemini start speaking immediately
+            # (bypasses VAD waiting — Gemini responds to text instantly)
+            try:
+                await gemini_session.send_client_content(
+                    turns=types.Content(
+                        role="user",
+                        parts=[types.Part(text="The phone call has been answered. Start speaking now — greet the caller.")]
+                    ),
+                    turn_complete=True
+                )
+                log.info(f"[{call_id}] Text trigger sent to Gemini")
+            except Exception as e:
+                _log_error(call_id, f"send_client_content failed (non-fatal): {e}")
 
             # Transcript accumulation buffers — collect fragments into sentences
             _ai_transcript_buffer = []
