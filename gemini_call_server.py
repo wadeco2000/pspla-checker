@@ -356,18 +356,24 @@ async def media_stream(websocket: WebSocket, call_id: str):
 
                                     # Convert PCM 24kHz → mulaw 8kHz
                                     pcm_24k = part.inline_data.data
+                                    if len(pcm_24k) == 0:
+                                        continue
                                     pcm_8k, _ratecv_state_down = audioop.ratecv(
                                         pcm_24k, 2, 1, 24000, 8000, _ratecv_state_down
                                     )
                                     mulaw_8k = audioop.lin2ulaw(pcm_8k, 2)
-                                    payload = base64.b64encode(mulaw_8k).decode("utf-8")
 
+                                    # Send in small chunks (160 bytes = 20ms at 8kHz mulaw)
+                                    CHUNK_SIZE = 160
                                     if stream_sid:
-                                        await websocket.send_text(json.dumps({
-                                            "event": "media",
-                                            "streamSid": stream_sid,
-                                            "media": {"payload": payload}
-                                        }))
+                                        for ci in range(0, len(mulaw_8k), CHUNK_SIZE):
+                                            chunk = mulaw_8k[ci:ci + CHUNK_SIZE]
+                                            payload = base64.b64encode(chunk).decode("utf-8")
+                                            await websocket.send_text(json.dumps({
+                                                "event": "media",
+                                                "streamSid": stream_sid,
+                                                "media": {"payload": payload}
+                                            }))
 
                         # Handle input transcription (what the caller says)
                         if sc.input_transcription and sc.input_transcription.text:
@@ -406,7 +412,7 @@ async def media_stream(websocket: WebSocket, call_id: str):
                     _log_error(call_id, traceback.format_exc())
 
             # Run both directions concurrently
-            _log_error(call_id, "Starting audio bridge tasks...")
+            _log_error(call_id, "Gemini Live session connected! Starting audio bridge tasks...")
             results = await asyncio.gather(
                 twilio_to_gemini(),
                 gemini_to_twilio(),
