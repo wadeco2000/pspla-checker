@@ -363,17 +363,17 @@ async def media_stream(websocket: WebSocket, call_id: str):
                                     )
                                     mulaw_8k = audioop.lin2ulaw(pcm_8k, 2)
 
-                                    # Send in small chunks (160 bytes = 20ms at 8kHz mulaw)
-                                    CHUNK_SIZE = 160
-                                    if stream_sid:
-                                        for ci in range(0, len(mulaw_8k), CHUNK_SIZE):
-                                            chunk = mulaw_8k[ci:ci + CHUNK_SIZE]
-                                            payload = base64.b64encode(chunk).decode("utf-8")
+                                    # Send as one payload — Twilio handles buffering
+                                    if stream_sid and len(mulaw_8k) > 0:
+                                        payload = base64.b64encode(mulaw_8k).decode("utf-8")
+                                        try:
                                             await websocket.send_text(json.dumps({
                                                 "event": "media",
                                                 "streamSid": stream_sid,
                                                 "media": {"payload": payload}
                                             }))
+                                        except Exception:
+                                            break  # Twilio disconnected
 
                         # Handle input transcription (what the caller says)
                         if sc.input_transcription and sc.input_transcription.text:
