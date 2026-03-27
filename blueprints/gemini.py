@@ -392,6 +392,7 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                     <option value="ko">Korean</option>
                     <option value="hi">Hindi</option>
                 </select>
+                <span style="font-size:10px;color:#888;">The language the AI will speak and listen in. The caller can still speak another language but transcription accuracy may be reduced.</span>
             </div>
             <div>
                 <label class="form-label">Thinking Level</label>
@@ -401,33 +402,37 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                     <option value="medium">Medium</option>
                     <option value="high">High (most thoughtful)</option>
                 </select>
+                <span style="font-size:10px;color:#888;">Controls how much the AI "thinks" before responding. Higher levels give more considered answers but add latency. Minimal is best for natural phone conversations.</span>
             </div>
             <div>
                 <label class="form-label">Start of Speech Sensitivity</label>
                 <select id="set-start-sensitivity" style="width:100%;">
-                    <option value="low" selected>Low — less likely to trigger on noise</option>
+                    <option value="low" selected>Low</option>
                     <option value="default">Default</option>
-                    <option value="high">High — more responsive</option>
+                    <option value="high">High</option>
                 </select>
+                <span style="font-size:10px;color:#888;">How easily the caller's voice interrupts the AI. Low means background noise, coughs, and "hmm" sounds won't interrupt. High means the AI stops at the slightest sound. Low is recommended for phone calls.</span>
             </div>
             <div>
                 <label class="form-label">End of Speech Sensitivity</label>
                 <select id="set-end-sensitivity" style="width:100%;">
-                    <option value="low">Low — waits longer before responding</option>
+                    <option value="low">Low</option>
                     <option value="default" selected>Default</option>
-                    <option value="high">High — responds faster after silence</option>
+                    <option value="high">High</option>
                 </select>
+                <span style="font-size:10px;color:#888;">How quickly the AI decides the caller has finished speaking. Low waits longer for the caller to continue (good for slow or thoughtful speakers). High responds quickly after any pause (good for fast-paced conversations).</span>
             </div>
             <div>
                 <label class="form-label">Silence Duration (ms)</label>
                 <input type="number" id="set-silence-ms" value="500" min="100" max="5000" step="100" style="width:100%;">
-                <span style="font-size:10px;color:#888;">How long to wait after speech stops (default 500ms)</span>
+                <span style="font-size:10px;color:#888;">How many milliseconds of silence before the AI considers the caller's turn finished and starts responding. Lower values (300ms) feel snappier but may cut people off. Higher values (1000ms+) give the caller more time to pause and continue.</span>
             </div>
             <div>
                 <label class="form-label">Include AI Thoughts</label>
                 <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;">
                     <input type="checkbox" id="set-include-thoughts"> Show AI reasoning in transcript
                 </label>
+                <span style="font-size:10px;color:#888;">When enabled, the AI's internal reasoning is included in the live transcript. Useful for debugging knowledge base prompts but adds noise to the transcript.</span>
             </div>
         </div>
         <div style="margin-top:12px;padding:8px;background:#fff3cd;border-radius:6px;font-size:11px;color:#856404;">
