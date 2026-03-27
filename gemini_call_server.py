@@ -184,8 +184,6 @@ async def twiml(call_id: str):
     ws_url = SELF_URL.replace("http://", "wss://").replace("https://", "wss://")
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Polly.Amy">Please hold for just a moment.</Say>
-    <Pause length="1"/>
     <Connect>
         <Stream url="{ws_url}/media-stream/{call_id}" />
     </Connect>
@@ -276,27 +274,6 @@ async def media_stream(websocket: WebSocket, call_id: str):
 
         # Build config from call settings
         _settings = call.get("settings", {})
-        _lang = _settings.get("language", "en")
-        _thinking = _settings.get("thinking_level", "minimal")
-        _include_thoughts = _settings.get("include_thoughts", False)
-        _start_sens = _settings.get("start_sensitivity", "default")
-        _end_sens = _settings.get("end_sensitivity", "default")
-        _silence_ms = _settings.get("silence_duration_ms", 500)
-
-        # Map sensitivity strings to SDK enums
-        _start_sens_map = {"low": types.StartSensitivity.START_SENSITIVITY_LOW,
-                           "high": types.StartSensitivity.START_SENSITIVITY_HIGH}
-        _end_sens_map = {"low": types.EndSensitivity.END_SENSITIVITY_LOW,
-                         "high": types.EndSensitivity.END_SENSITIVITY_HIGH}
-
-        # Build VAD config
-        _vad_kwargs = {"disabled": False}
-        if _start_sens in _start_sens_map:
-            _vad_kwargs["start_of_speech_sensitivity"] = _start_sens_map[_start_sens]
-        if _end_sens in _end_sens_map:
-            _vad_kwargs["end_of_speech_sensitivity"] = _end_sens_map[_end_sens]
-        if _silence_ms != 500:
-            _vad_kwargs["silence_duration_ms"] = _silence_ms
 
         config = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
@@ -308,18 +285,12 @@ async def media_stream(websocket: WebSocket, call_id: str):
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
                         voice_name=call.get("voice_name", "Kore")
                     )
-                ),
-                language_code=_lang,
+                )
             ),
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
             realtime_input_config=types.RealtimeInputConfig(
                 turn_coverage="TURN_INCLUDES_ONLY_ACTIVITY",
-                automatic_activity_detection=types.AutomaticActivityDetection(**_vad_kwargs),
-            ),
-            thinking_config=types.ThinkingConfig(
-                thinking_level=_thinking,
-                include_thoughts=_include_thoughts,
             ),
         )
 
@@ -330,6 +301,10 @@ async def media_stream(websocket: WebSocket, call_id: str):
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
             log.info(f"[{call_id}] Gemini Live session connected")
+
+            # Transcript accumulation buffers — collect fragments into sentences
+            _ai_transcript_buffer = []
+            _caller_transcript_buffer = []
 
             # Rate conversion state
             _ratecv_state_up = None    # 8kHz → 16kHz
@@ -418,27 +393,34 @@ async def media_stream(websocket: WebSocket, call_id: str):
                                             except Exception:
                                                 return  # Twilio disconnected
 
-                            # Handle input transcription (what the caller says)
+                            # Handle input transcription (what the caller says) — accumulate
                             if sc.input_transcription and sc.input_transcription.text:
-                                text = sc.input_transcription.text
-                                ts = datetime.now(timezone.utc).isoformat()
-                                call["transcript"].append({"speaker": "caller", "text": text, "timestamp": ts})
-                                await _broadcast_transcript(call_id, {
-                                    "type": "transcript", "speaker": "caller", "text": text, "timestamp": ts
-                                })
+                                _caller_transcript_buffer.append(sc.input_transcription.text)
 
-                            # Handle output transcription (what the AI says)
+                            # Handle output transcription (what the AI says) — accumulate
                             if sc.output_transcription and sc.output_transcription.text:
-                                text = sc.output_transcription.text
-                                ts = datetime.now(timezone.utc).isoformat()
-                                call["transcript"].append({"speaker": "ai", "text": text, "timestamp": ts})
-                                await _broadcast_transcript(call_id, {
-                                    "type": "transcript", "speaker": "ai", "text": text, "timestamp": ts
-                                })
+                                _ai_transcript_buffer.append(sc.output_transcription.text)
 
-                            # Handle turn complete — iterator will end, while loop re-enters
+                            # Handle turn complete — flush transcript buffers, then re-enter receive loop
                             if sc.turn_complete:
-                                _log_error(call_id, "Turn complete — re-entering receive loop")
+                                # Flush AI buffer
+                                if _ai_transcript_buffer:
+                                    full_text = " ".join(_ai_transcript_buffer)
+                                    ts = datetime.now(timezone.utc).isoformat()
+                                    call["transcript"].append({"speaker": "ai", "text": full_text, "timestamp": ts})
+                                    await _broadcast_transcript(call_id, {
+                                        "type": "transcript", "speaker": "ai", "text": full_text, "timestamp": ts
+                                    })
+                                    _ai_transcript_buffer.clear()
+                                # Flush caller buffer
+                                if _caller_transcript_buffer:
+                                    full_text = " ".join(_caller_transcript_buffer)
+                                    ts = datetime.now(timezone.utc).isoformat()
+                                    call["transcript"].append({"speaker": "caller", "text": full_text, "timestamp": ts})
+                                    await _broadcast_transcript(call_id, {
+                                        "type": "transcript", "speaker": "caller", "text": full_text, "timestamp": ts
+                                    })
+                                    _caller_transcript_buffer.clear()
 
                             # Handle interrupted (barge-in by caller)
                             if sc.interrupted:
