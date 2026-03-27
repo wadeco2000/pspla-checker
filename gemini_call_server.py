@@ -396,17 +396,15 @@ async def media_stream(websocket: WebSocket, call_id: str):
 
             # Send text trigger to make Gemini start speaking immediately
             # (bypasses VAD waiting — Gemini responds to text instantly)
+            # NOTE: send_client_content() crashes on 3.1 Flash Live with 1007 error.
+            # send_realtime_input(text=...) is the correct method for audio sessions.
             try:
-                await gemini_session.send_client_content(
-                    turns=types.Content(
-                        role="user",
-                        parts=[types.Part(text="The phone call has been answered. Start speaking now — greet the caller.")]
-                    ),
-                    turn_complete=True
+                await gemini_session.send_realtime_input(
+                    text="The phone call has been answered. Start speaking now — greet the caller."
                 )
                 log.info(f"[{call_id}] Text trigger sent to Gemini")
             except Exception as e:
-                _log_error(call_id, f"send_client_content failed (non-fatal): {e}")
+                _log_error(call_id, f"send_realtime_input text trigger failed (non-fatal): {e}")
 
             # Transcript accumulation buffers — collect fragments into sentences
             _ai_transcript_buffer = []
