@@ -139,7 +139,7 @@ async def make_call(request: Request):
         raise HTTPException(status_code=502, detail=f"Twilio error: {e}")
 
 
-@app.get("/twiml/{call_id}")
+@app.api_route("/twiml/{call_id}", methods=["GET", "POST"])
 async def twiml(call_id: str):
     """Return TwiML that tells Twilio to connect a media stream to us."""
     if call_id not in _active_calls:
