@@ -15516,7 +15516,7 @@ def club_fitness_session_detail():
     try:
         import stripe
         stripe.api_key = STRIPE_SECRET_KEY
-        s = stripe.checkout.Session.retrieve(sid, expand=["line_items", "payment_intent"])
+        s = stripe.checkout.Session.retrieve(sid, expand=["line_items"])
         # Extract useful fields
         detail = {
             "id": s["id"],
