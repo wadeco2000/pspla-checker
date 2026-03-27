@@ -696,9 +696,12 @@ function endCall() {
     _callTimerInterval = null;
     _callStartTime = null;
     if (_transcriptWs) { _transcriptWs.close(); _transcriptWs = null; }
+    // Clean up monitor and barge resources
+    if (_monitorActive) _stopMonitor();
+    if (_bargeActive) _stopBarge();
+    document.getElementById('active-call-panel').style.display = 'none';
+    document.getElementById('call-status').style.color = '#888';
     document.getElementById('btn-call').disabled = false;
-    _monitorActive = false;
-    _bargeActive = false;
     loadHistory();
 }
 
@@ -721,7 +724,13 @@ function connectTranscriptWs() {
         };
         _transcriptWs.onclose = function() {
             if (_activeCallSid) {
-                document.getElementById('call-status').textContent = 'Disconnected';
+                // WS closed but we still think call is active — poll once to check
+                setTimeout(function() {
+                    if (_activeCallSid) {
+                        endCall();
+                        showStatus('Call ended (connection closed).', 'success');
+                    }
+                }, 3000);
             }
         };
     } catch(e) {
@@ -740,20 +749,200 @@ function addTranscriptLine(speaker, text, timestamp) {
     panel.scrollTop = panel.scrollHeight;
 }
 
-function toggleMonitor() {
-    _monitorActive = !_monitorActive;
-    var btn = document.getElementById('btn-monitor');
-    btn.style.background = _monitorActive ? '#27ae60' : '#e67e22';
-    btn.innerHTML = _monitorActive ? '<i class="fa-solid fa-headphones"></i> Monitoring...' : '<i class="fa-solid fa-headphones"></i> Monitor';
-    // TODO: connect audio monitoring WebSocket
+// ── Mulaw codec (ITU-T G.711) ──
+var _MULAW_DECODE_TABLE = (function() {
+    // Build mulaw → int16 lookup table
+    var t = new Int16Array(256);
+    for (var i = 0; i < 256; i++) {
+        var v = ~i & 0xFF;
+        var sign = v & 0x80;
+        var exponent = (v >> 4) & 0x07;
+        var mantissa = v & 0x0F;
+        var sample = ((mantissa << 3) + 132) << exponent;
+        sample -= 132;
+        t[i] = sign ? -sample : sample;
+    }
+    return t;
+})();
+
+function _mulawEncode(sample) {
+    // int16 PCM → mulaw byte
+    var BIAS = 132, CLIP = 32635;
+    var sign = 0;
+    if (sample < 0) { sign = 0x80; sample = -sample; }
+    if (sample > CLIP) sample = CLIP;
+    sample += BIAS;
+    var exponent = 7;
+    for (var expMask = 0x4000; exponent > 0; exponent--, expMask >>= 1) {
+        if (sample & expMask) break;
+    }
+    var mantissa = (sample >> (exponent + 3)) & 0x0F;
+    return ~(sign | (exponent << 4) | mantissa) & 0xFF;
 }
 
+function _downsample(buffer, fromRate, toRate) {
+    // Linear interpolation downsample
+    var ratio = fromRate / toRate;
+    var outLen = Math.floor(buffer.length / ratio);
+    var out = new Float32Array(outLen);
+    for (var i = 0; i < outLen; i++) {
+        var srcIdx = i * ratio;
+        var lo = Math.floor(srcIdx);
+        var hi = Math.min(lo + 1, buffer.length - 1);
+        var frac = srcIdx - lo;
+        out[i] = buffer[lo] * (1 - frac) + buffer[hi] * frac;
+    }
+    return out;
+}
+
+// ── Monitor state ──
+var _monitorWs = null;
+var _monitorAudioCtx = null;
+var _monitorNextTime = 0;
+
+function toggleMonitor() {
+    if (!_monitorActive) {
+        // Activate
+        if (!_activeCallId || !_callServerUrl) return;
+        _monitorActive = true;
+        var btn = document.getElementById('btn-monitor');
+        btn.style.background = '#27ae60';
+        btn.innerHTML = '<i class="fa-solid fa-headphones"></i> Listening...';
+        document.getElementById('call-status').textContent = 'monitoring';
+
+        _monitorAudioCtx = new (window.AudioContext || window.webkitAudioContext)({sampleRate: 8000});
+        _monitorNextTime = 0;
+
+        var wsUrl = _callServerUrl.replace('http', 'ws') + '/ws/monitor/' + _activeCallId;
+        _monitorWs = new WebSocket(wsUrl);
+        _monitorWs.onmessage = function(e) {
+            var msg = JSON.parse(e.data);
+            if (msg.type !== 'audio' || !msg.payload) return;
+            if (!_monitorAudioCtx || _monitorAudioCtx.state === 'closed') return;
+
+            // Decode base64 mulaw → float32 PCM
+            var raw = atob(msg.payload);
+            var buf = _monitorAudioCtx.createBuffer(1, raw.length, 8000);
+            var channel = buf.getChannelData(0);
+            for (var i = 0; i < raw.length; i++) {
+                channel[i] = _MULAW_DECODE_TABLE[raw.charCodeAt(i) & 0xFF] / 32768.0;
+            }
+
+            // Schedule playback
+            var src = _monitorAudioCtx.createBufferSource();
+            src.buffer = buf;
+            src.connect(_monitorAudioCtx.destination);
+            var now = _monitorAudioCtx.currentTime;
+            if (_monitorNextTime < now) _monitorNextTime = now;
+            src.start(_monitorNextTime);
+            _monitorNextTime += buf.duration;
+        };
+        _monitorWs.onclose = function() {
+            if (_monitorActive) {
+                _monitorActive = false;
+                btn.style.background = '#e67e22';
+                btn.innerHTML = '<i class="fa-solid fa-headphones"></i> Monitor';
+            }
+        };
+    } else {
+        // Deactivate
+        _stopMonitor();
+    }
+}
+
+function _stopMonitor() {
+    _monitorActive = false;
+    var btn = document.getElementById('btn-monitor');
+    btn.style.background = '#e67e22';
+    btn.innerHTML = '<i class="fa-solid fa-headphones"></i> Monitor';
+    if (_monitorWs) { try { _monitorWs.close(); } catch(e){} _monitorWs = null; }
+    if (_monitorAudioCtx) { try { _monitorAudioCtx.close(); } catch(e){} _monitorAudioCtx = null; }
+    _monitorNextTime = 0;
+}
+
+// ── Barge In state ──
+var _bargeWs = null;
+var _bargeAudioCtx = null;
+var _bargeMicStream = null;
+var _bargeProcessor = null;
+
 function toggleBarge() {
-    _bargeActive = !_bargeActive;
+    if (!_bargeActive) {
+        // Activate
+        if (!_activeCallId || !_callServerUrl) return;
+
+        navigator.mediaDevices.getUserMedia({audio: true}).then(function(stream) {
+            _bargeActive = true;
+            _bargeMicStream = stream;
+            var btn = document.getElementById('btn-barge');
+            btn.style.background = '#e74c3c';
+            btn.innerHTML = '<i class="fa-solid fa-microphone-slash"></i> Release';
+            document.getElementById('call-status').textContent = 'BARGED IN — caller hears you';
+            document.getElementById('call-status').style.color = '#e74c3c';
+
+            // Auto-activate monitor so operator can hear the caller
+            if (!_monitorActive) toggleMonitor();
+
+            // Connect barge WebSocket
+            var wsUrl = _callServerUrl.replace('http', 'ws') + '/ws/barge/' + _activeCallId;
+            _bargeWs = new WebSocket(wsUrl);
+
+            // Set up mic capture and encoding
+            _bargeAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            var source = _bargeAudioCtx.createMediaStreamSource(stream);
+            // ScriptProcessorNode: 4096 samples buffer, 1 input channel, 1 output channel
+            _bargeProcessor = _bargeAudioCtx.createScriptProcessor(4096, 1, 1);
+
+            _bargeProcessor.onaudioprocess = function(e) {
+                if (!_bargeWs || _bargeWs.readyState !== WebSocket.OPEN) return;
+
+                var inputData = e.inputBuffer.getChannelData(0);
+                // Downsample from mic rate (usually 48kHz) to 8kHz
+                var pcm8k = _downsample(inputData, _bargeAudioCtx.sampleRate, 8000);
+
+                // Convert float32 → mulaw bytes
+                var mulaw = new Uint8Array(pcm8k.length);
+                for (var i = 0; i < pcm8k.length; i++) {
+                    var s = Math.max(-1, Math.min(1, pcm8k[i]));
+                    var int16 = Math.round(s * 32767);
+                    mulaw[i] = _mulawEncode(int16);
+                }
+
+                // Base64 encode
+                var binary = '';
+                for (var i = 0; i < mulaw.length; i++) binary += String.fromCharCode(mulaw[i]);
+                var b64 = btoa(binary);
+
+                // Send to server
+                _bargeWs.send(JSON.stringify({payload: b64}));
+            };
+
+            source.connect(_bargeProcessor);
+            _bargeProcessor.connect(_bargeAudioCtx.destination);
+
+            _bargeWs.onclose = function() {
+                if (_bargeActive) _stopBarge();
+            };
+
+        }).catch(function(err) {
+            showStatus('Microphone access required for Barge In: ' + err.message, 'error');
+        });
+    } else {
+        // Deactivate
+        _stopBarge();
+    }
+}
+
+function _stopBarge() {
+    _bargeActive = false;
     var btn = document.getElementById('btn-barge');
-    btn.style.background = _bargeActive ? '#e74c3c' : '#8e44ad';
-    btn.innerHTML = _bargeActive ? '<i class="fa-solid fa-microphone-slash"></i> Release' : '<i class="fa-solid fa-microphone"></i> Barge In';
-    // TODO: connect barge WebSocket + mic capture
+    btn.style.background = '#8e44ad';
+    btn.innerHTML = '<i class="fa-solid fa-microphone"></i> Barge In';
+    document.getElementById('call-status').style.color = '#888';
+    if (_bargeProcessor) { try { _bargeProcessor.disconnect(); } catch(e){} _bargeProcessor = null; }
+    if (_bargeAudioCtx) { try { _bargeAudioCtx.close(); } catch(e){} _bargeAudioCtx = null; }
+    if (_bargeMicStream) { _bargeMicStream.getTracks().forEach(function(t){ t.stop(); }); _bargeMicStream = null; }
+    if (_bargeWs) { try { _bargeWs.close(); } catch(e){} _bargeWs = null; }
 }
 
 // ── Call History ──

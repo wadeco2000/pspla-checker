@@ -54,6 +54,7 @@ app.add_middleware(
 # ── Active call state ────────────────────────────────────────────────────────
 _active_calls: Dict[str, dict] = {}
 _transcript_subscribers: Dict[str, Set[WebSocket]] = {}
+_monitor_subscribers: Dict[str, Set[WebSocket]] = {}
 
 
 def _verify_secret(request: Request):
@@ -258,6 +259,7 @@ async def media_stream(websocket: WebSocket, call_id: str):
 
     await websocket.accept()
     call = _active_calls[call_id]
+    call["twilio_ws"] = websocket
     stream_sid = None
     log.info(f"[{call_id}] Twilio WebSocket connected")
 
@@ -335,15 +337,21 @@ async def media_stream(websocket: WebSocket, call_id: str):
 
                         if data["event"] == "start":
                             stream_sid = data["start"]["streamSid"]
+                            call["stream_sid"] = stream_sid
                             log.info(f"[{call_id}] Stream started: {stream_sid}")
 
                         elif data["event"] == "media":
                             if call.get("barged_in"):
+                                # Still broadcast to monitors even when barged
+                                asyncio.create_task(_broadcast_monitor(call_id, "caller", data["media"]["payload"]))
                                 continue
 
                             # Track first audio received
                             if not _perf["first_audio_in"]:
                                 _perf["first_audio_in"] = datetime.now(timezone.utc).isoformat()
+
+                            # Broadcast caller audio to monitors (already base64 mulaw)
+                            asyncio.create_task(_broadcast_monitor(call_id, "caller", data["media"]["payload"]))
 
                             # Decode mulaw → PCM 16-bit
                             payload = base64.b64decode(data["media"]["payload"])
@@ -417,6 +425,8 @@ async def media_stream(websocket: WebSocket, call_id: str):
 
                                         if stream_sid and len(mulaw_8k) > 0:
                                             payload = base64.b64encode(mulaw_8k).decode("utf-8")
+                                            # Broadcast AI audio to monitors
+                                            asyncio.create_task(_broadcast_monitor(call_id, "ai", payload))
                                             try:
                                                 await websocket.send_text(json.dumps({
                                                     "event": "media",
@@ -503,8 +513,12 @@ async def media_stream(websocket: WebSocket, call_id: str):
         })
     finally:
         call["status"] = "ended"
+        call.pop("twilio_ws", None)
+        call.pop("stream_sid", None)
         log.info(f"[{call_id}] Call ended, saving history")
         await _save_call_history(call_id)
+        # Clean up monitor subscribers
+        _monitor_subscribers.pop(call_id, None)
         try:
             await websocket.close()
         except Exception:
@@ -542,6 +556,49 @@ async def transcript_ws(websocket: WebSocket, call_id: str):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  MONITOR WEBSOCKET (listen to call audio)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def _broadcast_monitor(call_id: str, speaker: str, mulaw_b64: str):
+    """Send audio chunk to all monitor subscribers (non-blocking)."""
+    subscribers = _monitor_subscribers.get(call_id, set())
+    if not subscribers:
+        return
+    msg = json.dumps({"type": "audio", "speaker": speaker, "payload": mulaw_b64})
+    dead = set()
+    for ws in subscribers:
+        try:
+            await ws.send_text(msg)
+        except Exception:
+            dead.add(ws)
+    subscribers -= dead
+
+
+@app.websocket("/ws/monitor/{call_id}")
+async def monitor_ws(websocket: WebSocket, call_id: str):
+    """WebSocket for live audio monitoring — browser listens to both sides."""
+    if call_id not in _active_calls:
+        await websocket.close(code=4004, reason="Unknown call")
+        return
+
+    await websocket.accept()
+
+    if call_id not in _monitor_subscribers:
+        _monitor_subscribers[call_id] = set()
+    _monitor_subscribers[call_id].add(websocket)
+    log.info(f"[{call_id}] Monitor subscriber connected ({len(_monitor_subscribers[call_id])} total)")
+
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _monitor_subscribers.get(call_id, set()).discard(websocket)
+        log.info(f"[{call_id}] Monitor subscriber disconnected")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  BARGE-IN WEBSOCKET
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -557,6 +614,15 @@ async def barge_ws(websocket: WebSocket, call_id: str):
     call["barged_in"] = True
     log.info(f"[{call_id}] Barge-in activated")
 
+    # Clear any AI audio still playing on the caller's end
+    twilio_ws = call.get("twilio_ws")
+    sid = call.get("stream_sid")
+    if twilio_ws and sid:
+        try:
+            await twilio_ws.send_text(json.dumps({"event": "clear", "streamSid": sid}))
+        except Exception:
+            pass
+
     await _broadcast_transcript(call_id, {
         "type": "status", "status": "barged_in",
         "timestamp": datetime.now(timezone.utc).isoformat()
@@ -564,11 +630,26 @@ async def barge_ws(websocket: WebSocket, call_id: str):
 
     try:
         while True:
-            # Receive audio from human operator's browser
-            data = await websocket.receive_bytes()
-            # TODO: Forward to Twilio media stream
-            # This requires access to the Twilio WebSocket from the media_stream handler
-            # For now, barge-in pauses AI but doesn't route human audio
+            # Receive base64 mulaw audio from human operator's browser
+            msg = await websocket.receive_text()
+            data = json.loads(msg)
+            mulaw_b64 = data.get("payload", "")
+            if not mulaw_b64:
+                continue
+
+            # Forward to Twilio media stream
+            twilio_ws = call.get("twilio_ws")
+            sid = call.get("stream_sid")
+            if twilio_ws and sid:
+                try:
+                    await twilio_ws.send_text(json.dumps({
+                        "event": "media",
+                        "streamSid": sid,
+                        "media": {"payload": mulaw_b64}
+                    }))
+                except Exception:
+                    _log_error(call_id, "Failed to forward barge audio to Twilio")
+                    break
     except WebSocketDisconnect:
         pass
     finally:
