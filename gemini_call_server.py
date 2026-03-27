@@ -271,7 +271,7 @@ async def media_stream(websocket: WebSocket, call_id: str):
         _log_error(call_id, f"Gemini client created, connecting to {GEMINI_MODEL}...")
 
         config = types.LiveConnectConfig(
-            response_modalities=["AUDIO"],
+            response_modalities=[types.Modality.AUDIO],
             system_instruction=types.Content(
                 parts=[types.Part(text=call.get("system_instruction", "You are a helpful AI assistant making a phone call."))]
             ),
@@ -284,6 +284,9 @@ async def media_stream(websocket: WebSocket, call_id: str):
             ),
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
+            realtime_input_config=types.RealtimeInputConfig(
+                turn_coverage="TURN_INCLUDES_ONLY_ACTIVITY",
+            ),
         )
 
         async with gemini_client.aio.live.connect(model=GEMINI_MODEL, config=config) as gemini_session:
@@ -341,86 +344,102 @@ async def media_stream(websocket: WebSocket, call_id: str):
                 """Read audio from Gemini, convert, send to Twilio."""
                 nonlocal _ratecv_state_down
                 try:
-                    async for response in gemini_session.receive():
-                        if not response.server_content:
-                            continue
+                    # Re-enter receive() in a loop — iterator ends after turn_complete
+                    # and must be re-entered to keep listening (per official Google example)
+                    while True:
+                        async for response in gemini_session.receive():
+                            # Handle go_away (server asking us to disconnect)
+                            if response.go_away:
+                                _log_error(call_id, f"Gemini GoAway: {response.go_away}")
+                                return
 
-                        sc = response.server_content
+                            if not response.server_content:
+                                continue
 
-                        # Handle audio output
-                        if sc.model_turn:
-                            for part in sc.model_turn.parts:
-                                if part.inline_data and part.inline_data.data:
-                                    if call.get("barged_in"):
-                                        continue  # Don't send AI audio during barge-in
+                            sc = response.server_content
 
-                                    # Convert PCM 24kHz → mulaw 8kHz
-                                    pcm_24k = part.inline_data.data
-                                    if len(pcm_24k) == 0:
-                                        continue
-                                    pcm_8k, _ratecv_state_down = audioop.ratecv(
-                                        pcm_24k, 2, 1, 24000, 8000, _ratecv_state_down
-                                    )
-                                    mulaw_8k = audioop.lin2ulaw(pcm_8k, 2)
+                            # Handle audio output
+                            if sc.model_turn:
+                                for part in sc.model_turn.parts:
+                                    if part.inline_data and part.inline_data.data:
+                                        if call.get("barged_in"):
+                                            continue
 
-                                    # Send as one payload — Twilio handles buffering
-                                    if stream_sid and len(mulaw_8k) > 0:
-                                        payload = base64.b64encode(mulaw_8k).decode("utf-8")
-                                        try:
-                                            await websocket.send_text(json.dumps({
-                                                "event": "media",
-                                                "streamSid": stream_sid,
-                                                "media": {"payload": payload}
-                                            }))
-                                        except Exception:
-                                            break  # Twilio disconnected
+                                        pcm_24k = part.inline_data.data
+                                        if len(pcm_24k) == 0:
+                                            continue
+                                        pcm_8k, _ratecv_state_down = audioop.ratecv(
+                                            pcm_24k, 2, 1, 24000, 8000, _ratecv_state_down
+                                        )
+                                        mulaw_8k = audioop.lin2ulaw(pcm_8k, 2)
 
-                        # Handle input transcription (what the caller says)
-                        if sc.input_transcription and sc.input_transcription.text:
-                            text = sc.input_transcription.text
-                            ts = datetime.now(timezone.utc).isoformat()
-                            call["transcript"].append({"speaker": "caller", "text": text, "timestamp": ts})
-                            await _broadcast_transcript(call_id, {
-                                "type": "transcript", "speaker": "caller", "text": text, "timestamp": ts
-                            })
+                                        if stream_sid and len(mulaw_8k) > 0:
+                                            payload = base64.b64encode(mulaw_8k).decode("utf-8")
+                                            try:
+                                                await websocket.send_text(json.dumps({
+                                                    "event": "media",
+                                                    "streamSid": stream_sid,
+                                                    "media": {"payload": payload}
+                                                }))
+                                            except Exception:
+                                                return  # Twilio disconnected
 
-                        # Handle output transcription (what the AI says)
-                        if sc.output_transcription and sc.output_transcription.text:
-                            text = sc.output_transcription.text
-                            ts = datetime.now(timezone.utc).isoformat()
-                            call["transcript"].append({"speaker": "ai", "text": text, "timestamp": ts})
-                            await _broadcast_transcript(call_id, {
-                                "type": "transcript", "speaker": "ai", "text": text, "timestamp": ts
-                            })
+                            # Handle input transcription (what the caller says)
+                            if sc.input_transcription and sc.input_transcription.text:
+                                text = sc.input_transcription.text
+                                ts = datetime.now(timezone.utc).isoformat()
+                                call["transcript"].append({"speaker": "caller", "text": text, "timestamp": ts})
+                                await _broadcast_transcript(call_id, {
+                                    "type": "transcript", "speaker": "caller", "text": text, "timestamp": ts
+                                })
 
-                        # Handle turn complete
-                        if sc.turn_complete:
-                            pass  # Normal turn boundary
+                            # Handle output transcription (what the AI says)
+                            if sc.output_transcription and sc.output_transcription.text:
+                                text = sc.output_transcription.text
+                                ts = datetime.now(timezone.utc).isoformat()
+                                call["transcript"].append({"speaker": "ai", "text": text, "timestamp": ts})
+                                await _broadcast_transcript(call_id, {
+                                    "type": "transcript", "speaker": "ai", "text": text, "timestamp": ts
+                                })
 
-                        # Handle interrupted (barge-in by caller)
-                        if sc.interrupted:
-                            if stream_sid:
-                                # Clear Twilio's audio buffer so the interruption is instant
-                                await websocket.send_text(json.dumps({
-                                    "event": "clear",
-                                    "streamSid": stream_sid
-                                }))
+                            # Handle turn complete — iterator will end, while loop re-enters
+                            if sc.turn_complete:
+                                _log_error(call_id, "Turn complete — re-entering receive loop")
+
+                            # Handle interrupted (barge-in by caller)
+                            if sc.interrupted:
+                                if stream_sid:
+                                    try:
+                                        await websocket.send_text(json.dumps({
+                                            "event": "clear",
+                                            "streamSid": stream_sid
+                                        }))
+                                    except Exception:
+                                        return
+
+                        # receive() iterator ended — re-enter
+                        _log_error(call_id, "Gemini receive iterator ended, re-entering...")
 
                 except Exception as e:
                     _log_error(call_id, f"Gemini→Twilio error: {e}")
                     import traceback
                     _log_error(call_id, traceback.format_exc())
 
-            # Run both directions concurrently
+            # Run both directions concurrently using create_task (per official example)
             _log_error(call_id, "Gemini Live session connected! Starting audio bridge tasks...")
-            results = await asyncio.gather(
-                twilio_to_gemini(),
-                gemini_to_twilio(),
-                return_exceptions=True
+            twilio_task = asyncio.create_task(twilio_to_gemini())
+            gemini_task = asyncio.create_task(gemini_to_twilio())
+
+            # Wait for either task to finish (usually twilio_to_gemini ends on disconnect)
+            done, pending = await asyncio.wait(
+                [twilio_task, gemini_task],
+                return_when=asyncio.FIRST_COMPLETED
             )
-            for i, r in enumerate(results):
-                if isinstance(r, Exception):
-                    _log_error(call_id, f"Task {i} exception: {r}")
+            for task in done:
+                if task.exception():
+                    _log_error(call_id, f"Task exception: {task.exception()}")
+            for task in pending:
+                task.cancel()
 
     except Exception as e:
         _log_error(call_id, f"Gemini connection error: {e}")
