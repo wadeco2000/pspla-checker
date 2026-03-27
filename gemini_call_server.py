@@ -165,10 +165,14 @@ async def make_call(request: Request):
         twiml_url = f"{SELF_URL}/twiml/{call_id}"
         status_url = f"{SELF_URL}/api/call-status"
 
+        recording_callback = f"{SELF_URL}/api/recording-status/{call_id}"
         call = client.calls.create(
             from_=from_number,
             to=to_number,
             url=twiml_url,
+            record=True,
+            recording_status_callback=recording_callback,
+            recording_status_callback_event=["completed"],
             status_callback=status_url,
             status_callback_event=["initiated", "ringing", "answered", "completed"],
         )
@@ -193,15 +197,11 @@ async def twiml(call_id: str):
         raise HTTPException(status_code=404, detail="Unknown call ID.")
 
     ws_url = SELF_URL.replace("http://", "wss://").replace("https://", "wss://")
-    recording_callback = f"{SELF_URL}/api/recording-status"
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Start>
+    <Connect>
         <Stream url="{ws_url}/media-stream/{call_id}" />
-    </Start>
-    <Record recordingStatusCallback="{recording_callback}/{call_id}"
-            recordingStatusCallbackEvent="completed"
-            maxLength="900" trim="trim-silence" />
+    </Connect>
 </Response>"""
     return Response(content=xml, media_type="application/xml")
 
