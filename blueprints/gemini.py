@@ -438,7 +438,7 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
             <span>{{ user_email }}</span>
             <a href="/auth/logout" class="btn btn-red" style="font-size:11px;padding:4px 10px;"><i class="fa-solid fa-right-from-bracket"></i> Sign out</a>
             <button class="btn" style="font-size:11px;padding:4px 10px;background:#6c757d;" onclick="openDebug()"><i class="fa-solid fa-bug"></i> Debug</button>
-            <span style="font-size:10px;color:#666;">&#9765; {{ git_version[0] }} {{ git_version[1] }}</span>
+            <span style="font-size:10px;color:#666;"><i class="fa-solid fa-code-branch"></i> {{ git_version }}</span>
         </div>
     </div>
 
