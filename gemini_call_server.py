@@ -273,7 +273,7 @@ async def media_stream(websocket: WebSocket, call_id: str):
         config = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
             system_instruction=types.Content(
-                parts=[types.Part(text=call.get("system_instruction", "You are a helpful AI assistant making a phone call."))]
+                parts=[types.Part(text=call.get("system_instruction", "You are a helpful AI assistant making a phone call.") + "\n\nIMPORTANT: You are on a live phone call. Start speaking immediately when the call connects — introduce yourself right away without waiting for the other person to speak first.")]
             ),
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
@@ -296,15 +296,6 @@ async def media_stream(websocket: WebSocket, call_id: str):
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
             log.info(f"[{call_id}] Gemini Live session connected")
-
-            # Send initial prompt so AI speaks first (don't wait for caller)
-            await gemini_session.send_client_content(
-                turns=types.Content(
-                    parts=[types.Part(text="The person has just answered the phone. Start the conversation now by introducing yourself.")]
-                ),
-                turn_complete=True
-            )
-            _log_error(call_id, "Sent initial greeting prompt to Gemini")
 
             # Rate conversion state
             _ratecv_state_up = None    # 8kHz → 16kHz
