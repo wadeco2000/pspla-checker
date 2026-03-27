@@ -60,6 +60,11 @@ def _has_pspla_access():
 #  PAGE ROUTE
 # ═══════════════════════════════════════════════════════════════════════════════
 
+@gemini_bp.before_request
+def _check_gemini_permission():
+    """Gate all Gemini routes behind the 'gemini' permission group."""
+    return _require_permission("gemini")
+
 @gemini_bp.route("/gemini")
 def gemini_page():
     git_ver = _get_git_version()
@@ -251,6 +256,44 @@ def gemini_call_detail(call_sid):
         if r.ok and data:
             return jsonify({"ok": True, "call": data[0]})
         return jsonify({"ok": False, "error": "Call not found."}), 404
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@gemini_bp.route("/api/gemini/recording/<call_sid>", methods=["GET"])
+def gemini_recording_proxy(call_sid):
+    """Proxy Twilio recording download (requires Twilio auth)."""
+    if not re.match(r"^CA[a-f0-9]{32}$", call_sid):
+        return jsonify({"ok": False, "error": "Invalid call SID."}), 400
+    # Get recording URL from Supabase
+    try:
+        r = _requests.get(f"{SUPABASE_URL}/rest/v1/gemini_call_history",
+            params={"select": "recording_url", "call_sid": f"eq.{call_sid}"},
+            headers=_sb_headers(), timeout=10)
+        data = r.json()
+        if not r.ok or not data or not data[0].get("recording_url"):
+            return jsonify({"ok": False, "error": "No recording found."}), 404
+        rec_url = data[0]["recording_url"]
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+    # Validate URL is from Twilio (prevent SSRF)
+    if not re.match(r"^https://api\.twilio\.com/", rec_url):
+        return jsonify({"ok": False, "error": "Invalid recording URL."}), 400
+
+    # Fetch from Twilio with auth
+    sid = os.getenv("TWILIO_ACCOUNT_SID", "")
+    token = os.getenv("TWILIO_AUTH_TOKEN", "")
+    try:
+        resp = _requests.get(rec_url, auth=(sid, token), timeout=30, stream=True)
+        if resp.status_code != 200:
+            return jsonify({"ok": False, "error": f"Twilio returned {resp.status_code}"}), 502
+        from flask import Response as FlaskResponse
+        return FlaskResponse(
+            resp.content,
+            content_type=resp.headers.get("Content-Type", "audio/mpeg"),
+            headers={"Content-Disposition": f"attachment; filename=call-{call_sid}.mp3"}
+        )
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
@@ -1039,16 +1082,21 @@ function loadHistory() {
     fetch('/api/gemini/call-history').then(r=>r.json()).then(d=>{
         if (!d.ok) { document.getElementById('history-container').innerHTML = '<div class="empty-state">Error loading history.</div>'; return; }
         if (!d.calls.length) { document.getElementById('history-container').innerHTML = '<div class="empty-state">No calls yet.</div>'; return; }
-        var html = '<table class="history-table"><thead><tr><th>Date</th><th>To</th><th>Duration</th><th>Status</th><th>Knowledge Base</th><th>User</th><th>Transcript</th></tr></thead><tbody>';
+        var html = '<table class="history-table"><thead><tr><th>Date</th><th>To</th><th>Duration</th><th>Status</th><th>Knowledge Base</th><th>User</th><th>Transcript</th><th>Recording</th></tr></thead><tbody>';
         d.calls.forEach(function(c){
             var date = c.started_at ? new Date(c.started_at).toLocaleString('en-NZ', {day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '-';
             var dur = c.duration_seconds ? Math.floor(c.duration_seconds/60) + 'm ' + (c.duration_seconds%60) + 's' : '-';
             var statusCls = c.status === 'completed' ? 'badge-green' : c.status === 'error' ? 'badge-red' : c.status === 'initiated' ? 'badge-blue' : 'badge-grey';
             var transcriptBtn = c.transcript ? '<button class="btn btn-grey" style="font-size:10px;padding:2px 8px;" onclick="showTranscript(\'' + esc(c.call_sid) + '\')"><i class="fa-solid fa-file-lines"></i></button>' : '-';
+            var recordingBtns = '-';
+            if (c.recording_url) {
+                recordingBtns = '<button class="btn" style="font-size:10px;padding:2px 8px;background:#27ae60;" onclick="playRecording(\'' + esc(c.call_sid) + '\', this)"><i class="fa-solid fa-play"></i></button> '
+                    + '<a href="/api/gemini/recording/' + esc(c.call_sid) + '" class="btn btn-grey" style="font-size:10px;padding:2px 8px;text-decoration:none;" download><i class="fa-solid fa-download"></i></a>';
+            }
             html += '<tr><td>' + date + '</td><td>' + esc(c.to_number||'') + '</td><td>' + dur + '</td>';
             html += '<td><span class="badge ' + statusCls + '">' + esc(c.status||'unknown') + '</span></td>';
             html += '<td>' + (c.knowledge_base_id || '-') + '</td><td>' + esc(c.triggered_by||'') + '</td>';
-            html += '<td>' + transcriptBtn + '</td></tr>';
+            html += '<td>' + transcriptBtn + '</td><td>' + recordingBtns + '</td></tr>';
         });
         html += '</tbody></table>';
         document.getElementById('history-container').innerHTML = html;
@@ -1155,6 +1203,46 @@ function _debugSection(title, icon, contentFn) {
 function _debugBadge(ok) {
     return ok ? '<span style="background:#27ae60;color:#fff;padding:1px 8px;border-radius:10px;font-size:11px;">OK</span>'
               : '<span style="background:#e74c3c;color:#fff;padding:1px 8px;border-radius:10px;font-size:11px;">ERROR</span>';
+}
+
+// ── Recording Playback ──
+var _playingAudio = null;
+
+function playRecording(callSid, btn) {
+    // If already playing this one, stop it
+    if (_playingAudio && btn.dataset.playing === 'true') {
+        _playingAudio.pause();
+        _playingAudio = null;
+        btn.innerHTML = '<i class="fa-solid fa-play"></i>';
+        btn.dataset.playing = 'false';
+        return;
+    }
+    // Stop any other playing audio
+    if (_playingAudio) {
+        _playingAudio.pause();
+        _playingAudio = null;
+        document.querySelectorAll('[data-playing="true"]').forEach(function(b) {
+            b.innerHTML = '<i class="fa-solid fa-play"></i>';
+            b.dataset.playing = 'false';
+        });
+    }
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    _playingAudio = new Audio('/api/gemini/recording/' + callSid);
+    _playingAudio.oncanplay = function() {
+        btn.innerHTML = '<i class="fa-solid fa-stop"></i>';
+        btn.dataset.playing = 'true';
+        _playingAudio.play();
+    };
+    _playingAudio.onended = function() {
+        btn.innerHTML = '<i class="fa-solid fa-play"></i>';
+        btn.dataset.playing = 'false';
+        _playingAudio = null;
+    };
+    _playingAudio.onerror = function() {
+        btn.innerHTML = '<i class="fa-solid fa-play"></i>';
+        showStatus('Failed to load recording.', 'error');
+        _playingAudio = null;
+    };
 }
 
 // ── Init ──

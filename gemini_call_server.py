@@ -86,20 +86,23 @@ async def health():
 
 
 @app.get("/debug/errors")
-async def debug_errors():
+async def debug_errors(request: Request):
+    _verify_secret(request)
     return {"errors": _error_log[-50:]}
 
 
 @app.get("/debug/active-calls")
-async def debug_active_calls():
+async def debug_active_calls(request: Request):
     """Show active call state for debugging."""
-    return {cid: {k: v for k, v in c.items() if k not in ("gemini_session", "transcript")}
+    _verify_secret(request)
+    return {cid: {k: v for k, v in c.items() if k not in ("gemini_session", "transcript", "twilio_ws")}
             for cid, c in _active_calls.items()}
 
 
 @app.get("/debug/test-gemini")
-async def test_gemini():
+async def test_gemini(request: Request):
     """Test if Gemini API key works and Live model is available."""
+    _verify_secret(request)
     if not GEMINI_API_KEY:
         return {"ok": False, "error": "GEMINI_API_KEY not set"}
     try:
@@ -107,7 +110,7 @@ async def test_gemini():
         client = genai.Client(api_key=GEMINI_API_KEY)
         # Test basic API
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model='gemini-2.5-flash',
             contents='Say hello in one word.'
         )
         # Check Live model
@@ -190,13 +193,61 @@ async def twiml(call_id: str):
         raise HTTPException(status_code=404, detail="Unknown call ID.")
 
     ws_url = SELF_URL.replace("http://", "wss://").replace("https://", "wss://")
+    recording_callback = f"{SELF_URL}/api/recording-status"
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Connect>
+    <Start>
         <Stream url="{ws_url}/media-stream/{call_id}" />
-    </Connect>
+    </Start>
+    <Record recordingStatusCallback="{recording_callback}/{call_id}"
+            recordingStatusCallbackEvent="completed"
+            maxLength="900" trim="trim-silence" />
 </Response>"""
     return Response(content=xml, media_type="application/xml")
+
+
+@app.post("/api/recording-status/{call_id}")
+async def recording_status(call_id: str, request: Request):
+    """Twilio recording status callback — saves recording URL."""
+    if not re.match(r"^[a-f0-9\-]{12}$", call_id):
+        return Response(content="Invalid call_id", status_code=400)
+    form = await request.form()
+    recording_url = form.get("RecordingUrl", "")
+    recording_sid = form.get("RecordingSid", "")
+    recording_duration = form.get("RecordingDuration", "")
+
+    log.info(f"[{call_id}] Recording ready: {recording_sid} ({recording_duration}s) URL: {recording_url}")
+
+    if recording_url and recording_url.startswith("https://api.twilio.com/"):
+        # Twilio recording URLs need .mp3 or .wav appended
+        mp3_url = f"{recording_url}.mp3"
+
+        # Update in active calls if still there
+        if call_id in _active_calls:
+            _active_calls[call_id]["recording_url"] = mp3_url
+
+        # Also update directly in Supabase (call may already be saved)
+        if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+            import requests as _req
+            try:
+                # Find by call_id
+                _req.patch(
+                    f"{SUPABASE_URL}/rest/v1/gemini_call_history",
+                    params={"call_id": f"eq.{call_id}"},
+                    json={"recording_url": mp3_url},
+                    headers={
+                        "apikey": SUPABASE_SERVICE_KEY,
+                        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                        "Content-Type": "application/json",
+                        "Prefer": "return=minimal",
+                    },
+                    timeout=10
+                )
+                log.info(f"[{call_id}] Recording URL saved to Supabase")
+            except Exception as e:
+                log.error(f"[{call_id}] Failed to save recording URL: {e}")
+
+    return Response(content="OK", status_code=200)
 
 
 @app.post("/api/end-call")
@@ -720,6 +771,15 @@ async def _save_call_history(call_id: str):
     if not call or not call.get("call_sid"):
         return
 
+    # Compute duration from started_at (don't rely on Twilio callback which may arrive after cleanup)
+    duration = call.get("duration_seconds")
+    if not duration and call.get("started_at"):
+        try:
+            started = datetime.fromisoformat(call["started_at"])
+            duration = int((datetime.now(timezone.utc) - started).total_seconds())
+        except Exception:
+            pass
+
     import requests as _req
     try:
         _req.patch(
@@ -727,8 +787,9 @@ async def _save_call_history(call_id: str):
             params={"call_sid": f"eq.{call['call_sid']}"},
             json={
                 "status": call.get("status", "unknown"),
-                "duration_seconds": call.get("duration_seconds"),
+                "duration_seconds": duration,
                 "transcript": call.get("transcript", []),
+                "recording_url": call.get("recording_url"),
                 "ended_at": datetime.now(timezone.utc).isoformat(),
             },
             headers={
