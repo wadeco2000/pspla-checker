@@ -426,7 +426,7 @@ def _set_security_headers(response):
         "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
         "font-src 'self' https://cdnjs.cloudflare.com https://fonts.gstatic.com; "
         "img-src 'self' data: https://*.supabase.co https://www.gstatic.com; "
-        "connect-src 'self' https://*.supabase.co https://cdn.jsdelivr.net; "
+        "connect-src 'self' https://*.supabase.co https://cdn.jsdelivr.net https://*.azurewebsites.net wss://*.azurewebsites.net; "
         "frame-src https://www.google.com; "
         "object-src 'none'; "
         "base-uri 'self'"
