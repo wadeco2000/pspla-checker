@@ -70,9 +70,9 @@ def gemini_page():
         user_email=session.get("email", ""),
         user_avatar=session.get("avatar_url", ""),
         git_version=git_ver,
-        twilio_number=TWILIO_PHONE_NUMBER,
-        call_server_url=GEMINI_CALL_SERVER_URL,
-        gemini_configured=bool(GEMINI_API_KEY and TWILIO_ACCOUNT_SID),
+        twilio_number=os.getenv("TWILIO_PHONE_NUMBER", TWILIO_PHONE_NUMBER),
+        call_server_url=os.getenv("GEMINI_CALL_SERVER_URL", GEMINI_CALL_SERVER_URL),
+        gemini_configured=bool(os.getenv("GEMINI_API_KEY", GEMINI_API_KEY) and os.getenv("TWILIO_ACCOUNT_SID", TWILIO_ACCOUNT_SID)),
     )
 
 
@@ -139,9 +139,12 @@ def gemini_delete_kb(kb_id):
 
 @gemini_bp.route("/api/gemini/make-call", methods=["POST"])
 def gemini_make_call():
-    if not GEMINI_CALL_SERVER_URL or not GEMINI_CALL_SERVER_SECRET:
+    _server_url = os.getenv("GEMINI_CALL_SERVER_URL", GEMINI_CALL_SERVER_URL)
+    _server_secret = os.getenv("GEMINI_CALL_SERVER_SECRET", GEMINI_CALL_SERVER_SECRET)
+    _twilio_number = os.getenv("TWILIO_PHONE_NUMBER", TWILIO_PHONE_NUMBER)
+    if not _server_url or not _server_secret:
         return jsonify({"ok": False, "error": "Call server not configured."}), 500
-    if not TWILIO_PHONE_NUMBER:
+    if not _twilio_number:
         return jsonify({"ok": False, "error": "Twilio phone number not configured."}), 500
 
     data = request.json or {}
@@ -167,11 +170,11 @@ def gemini_make_call():
 
     # Call the FastAPI server to initiate the call
     try:
-        r = _requests.post(f"{GEMINI_CALL_SERVER_URL}/api/make-call",
-            headers={"X-Server-Secret": GEMINI_CALL_SERVER_SECRET, "Content-Type": "application/json"},
+        r = _requests.post(f"{_server_url}/api/make-call",
+            headers={"X-Server-Secret": _server_secret, "Content-Type": "application/json"},
             json={
                 "to_number": to_number,
-                "from_number": TWILIO_PHONE_NUMBER,
+                "from_number": _twilio_number,
                 "system_instruction": system_instruction,
                 "voice_name": voice_name,
                 "triggered_by": session.get("email", "unknown"),
@@ -188,7 +191,7 @@ def gemini_make_call():
                     "call_sid": result.get("call_sid", ""),
                     "call_id": result.get("call_id", ""),
                     "to_number": to_number,
-                    "from_number": TWILIO_PHONE_NUMBER,
+                    "from_number": _twilio_number,
                     "knowledge_base_id": kb_id,
                     "status": "initiated",
                     "triggered_by": session.get("email", "unknown"),
@@ -210,8 +213,8 @@ def gemini_end_call():
         return jsonify({"ok": False, "error": "Invalid call SID."}), 400
 
     try:
-        r = _requests.post(f"{GEMINI_CALL_SERVER_URL}/api/end-call",
-            headers={"X-Server-Secret": GEMINI_CALL_SERVER_SECRET, "Content-Type": "application/json"},
+        r = _requests.post(f"{os.getenv('GEMINI_CALL_SERVER_URL', GEMINI_CALL_SERVER_URL)}/api/end-call",
+            headers={"X-Server-Secret": os.getenv('GEMINI_CALL_SERVER_SECRET', GEMINI_CALL_SERVER_SECRET), "Content-Type": "application/json"},
             json={"call_sid": call_sid},
             timeout=15)
         return jsonify(r.json() if r.ok else {"ok": False, "error": "Call server error"})

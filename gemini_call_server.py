@@ -297,6 +297,15 @@ async def media_stream(websocket: WebSocket, call_id: str):
             })
             log.info(f"[{call_id}] Gemini Live session connected")
 
+            # Send initial prompt so AI speaks first (don't wait for caller)
+            await gemini_session.send_client_content(
+                turns=types.Content(
+                    parts=[types.Part(text="The person has just answered the phone. Start the conversation now by introducing yourself.")]
+                ),
+                turn_complete=True
+            )
+            _log_error(call_id, "Sent initial greeting prompt to Gemini")
+
             # Rate conversion state
             _ratecv_state_up = None    # 8kHz → 16kHz
             _ratecv_state_down = None  # 24kHz → 8kHz
