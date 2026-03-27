@@ -416,7 +416,11 @@ def _set_security_headers(response):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
+    # Allow microphone on /gemini page (needed for Barge In), block everywhere else
+    if request.path.startswith('/gemini'):
+        response.headers['Permissions-Policy'] = 'camera=(), microphone=(self), geolocation=()'
+    else:
+        response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
     if request.is_secure:
         response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     # CSP: allow inline scripts/styles (needed for dashboard), plus CDNs used
