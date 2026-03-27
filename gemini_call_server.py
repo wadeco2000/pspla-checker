@@ -86,7 +86,14 @@ async def health():
 
 @app.get("/debug/errors")
 async def debug_errors():
-    return {"errors": _error_log[-20:]}
+    return {"errors": _error_log[-50:]}
+
+
+@app.get("/debug/active-calls")
+async def debug_active_calls():
+    """Show active call state for debugging."""
+    return {cid: {k: v for k, v in c.items() if k not in ("gemini_session", "transcript")}
+            for cid, c in _active_calls.items()}
 
 
 @app.get("/debug/test-gemini")
@@ -310,9 +317,17 @@ async def media_stream(websocket: WebSocket, call_id: str):
             _ratecv_state_up = None    # 8kHz → 16kHz
             _ratecv_state_down = None  # 24kHz → 8kHz
 
+            # 20ms chunk buffer for consistent input to Gemini
+            # 16kHz × 2 bytes × 0.020s = 640 bytes per 20ms chunk
+            _CHUNK_20MS = 640
+            _input_buffer = bytearray()
+
+            # Performance tracking
+            _perf = {"first_audio_in": None, "first_audio_out": None, "turns": 0}
+
             async def twilio_to_gemini():
-                """Read audio from Twilio, convert, send to Gemini."""
-                nonlocal stream_sid, _ratecv_state_up
+                """Read audio from Twilio, convert to 20ms PCM chunks, send to Gemini."""
+                nonlocal stream_sid, _ratecv_state_up, _input_buffer
                 try:
                     while True:
                         msg = await websocket.receive_text()
@@ -324,7 +339,11 @@ async def media_stream(websocket: WebSocket, call_id: str):
 
                         elif data["event"] == "media":
                             if call.get("barged_in"):
-                                continue  # Skip Twilio audio during barge-in (human is talking)
+                                continue
+
+                            # Track first audio received
+                            if not _perf["first_audio_in"]:
+                                _perf["first_audio_in"] = datetime.now(timezone.utc).isoformat()
 
                             # Decode mulaw → PCM 16-bit
                             payload = base64.b64decode(data["media"]["payload"])
@@ -333,12 +352,23 @@ async def media_stream(websocket: WebSocket, call_id: str):
                             pcm_16k, _ratecv_state_up = audioop.ratecv(
                                 pcm_8k, 2, 1, 8000, 16000, _ratecv_state_up
                             )
-                            # Send to Gemini
-                            await gemini_session.send_realtime_input(
-                                audio=types.Blob(data=pcm_16k, mime_type="audio/pcm;rate=16000")
-                            )
+
+                            # Buffer and send in 20ms chunks (640 bytes at 16kHz 16-bit mono)
+                            _input_buffer.extend(pcm_16k)
+                            while len(_input_buffer) >= _CHUNK_20MS:
+                                chunk = bytes(_input_buffer[:_CHUNK_20MS])
+                                del _input_buffer[:_CHUNK_20MS]
+                                await gemini_session.send_realtime_input(
+                                    audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")
+                                )
 
                         elif data["event"] == "stop":
+                            # Send remaining buffer
+                            if _input_buffer:
+                                await gemini_session.send_realtime_input(
+                                    audio=types.Blob(data=bytes(_input_buffer), mime_type="audio/pcm;rate=16000")
+                                )
+                                _input_buffer.clear()
                             log.info(f"[{call_id}] Stream stopped")
                             break
 
@@ -369,6 +399,9 @@ async def media_stream(websocket: WebSocket, call_id: str):
 
                             # Handle audio output
                             if sc.model_turn:
+                                if not _perf["first_audio_out"]:
+                                    _perf["first_audio_out"] = datetime.now(timezone.utc).isoformat()
+                                    _log_error(call_id, f"PERF: first audio out at {_perf['first_audio_out']}")
                                 for part in sc.model_turn.parts:
                                     if part.inline_data and part.inline_data.data:
                                         if call.get("barged_in"):
@@ -401,8 +434,10 @@ async def media_stream(websocket: WebSocket, call_id: str):
                             if sc.output_transcription and sc.output_transcription.text:
                                 _ai_transcript_buffer.append(sc.output_transcription.text)
 
-                            # Handle turn complete — flush transcript buffers, then re-enter receive loop
+                            # Handle turn complete — flush transcript buffers, log perf, re-enter receive loop
                             if sc.turn_complete:
+                                _perf["turns"] += 1
+                                _log_error(call_id, f"PERF: turn {_perf['turns']} complete")
                                 # Flush AI buffer
                                 if _ai_transcript_buffer:
                                     full_text = " ".join(_ai_transcript_buffer)
