@@ -153,6 +153,7 @@ def gemini_make_call():
         return jsonify({"ok": False, "error": "Invalid NZ phone number. Use format: 021 123 4567 or +6421 123 4567"}), 400
 
     kb_id = data.get("knowledge_base_id")
+    settings = data.get("settings", {})
     system_instruction = ""
     voice_name = "Kore"
 
@@ -178,6 +179,7 @@ def gemini_make_call():
                 "system_instruction": system_instruction,
                 "voice_name": voice_name,
                 "triggered_by": session.get("email", "unknown"),
+                "settings": settings,
             },
             timeout=30)
         result = r.json()
@@ -363,6 +365,73 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
             <button class="btn btn-green btn-lg" onclick="makeCall()" id="btn-call" {% if not gemini_configured %}disabled{% endif %}>
                 <i class="fa-solid fa-phone"></i> Call
             </button>
+            <button class="btn btn-grey" onclick="toggleSettings()" style="margin-left:8px;">
+                <i class="fa-solid fa-sliders"></i> Settings
+            </button>
+        </div>
+    </div>
+
+    <!-- Settings Panel (collapsible) -->
+    <div class="card" id="settings-panel" style="display:none;">
+        <h2><i class="fa-solid fa-sliders"></i> Call Settings</h2>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div>
+                <label class="form-label">Language</label>
+                <select id="set-language" style="width:100%;">
+                    <option value="en" selected>English</option>
+                    <option value="en-NZ">English (NZ)</option>
+                    <option value="en-AU">English (AU)</option>
+                    <option value="en-GB">English (UK)</option>
+                    <option value="en-US">English (US)</option>
+                    <option value="mi">Te Reo Māori</option>
+                    <option value="es">Spanish</option>
+                    <option value="fr">French</option>
+                    <option value="de">German</option>
+                    <option value="zh">Chinese</option>
+                    <option value="ja">Japanese</option>
+                    <option value="ko">Korean</option>
+                    <option value="hi">Hindi</option>
+                </select>
+            </div>
+            <div>
+                <label class="form-label">Thinking Level</label>
+                <select id="set-thinking" style="width:100%;">
+                    <option value="minimal" selected>Minimal (fastest)</option>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High (most thoughtful)</option>
+                </select>
+            </div>
+            <div>
+                <label class="form-label">Start of Speech Sensitivity</label>
+                <select id="set-start-sensitivity" style="width:100%;">
+                    <option value="low">Low — less likely to trigger on noise</option>
+                    <option value="default" selected>Default</option>
+                    <option value="high">High — more responsive</option>
+                </select>
+            </div>
+            <div>
+                <label class="form-label">End of Speech Sensitivity</label>
+                <select id="set-end-sensitivity" style="width:100%;">
+                    <option value="low">Low — waits longer before responding</option>
+                    <option value="default" selected>Default</option>
+                    <option value="high">High — responds faster after silence</option>
+                </select>
+            </div>
+            <div>
+                <label class="form-label">Silence Duration (ms)</label>
+                <input type="number" id="set-silence-ms" value="500" min="100" max="5000" step="100" style="width:100%;">
+                <span style="font-size:10px;color:#888;">How long to wait after speech stops (default 500ms)</span>
+            </div>
+            <div>
+                <label class="form-label">Include AI Thoughts</label>
+                <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;">
+                    <input type="checkbox" id="set-include-thoughts"> Show AI reasoning in transcript
+                </label>
+            </div>
+        </div>
+        <div style="margin-top:12px;padding:8px;background:#fff3cd;border-radius:6px;font-size:11px;color:#856404;">
+            <i class="fa-solid fa-info-circle"></i> <strong>Affective Dialog</strong> and <strong>Proactive Audio</strong> require Gemini 2.5 Flash Live (not available on 3.1). These features will be added when model support is confirmed.
         </div>
     </div>
 
@@ -554,6 +623,22 @@ function deleteKb() {
 }
 
 // ── Call Management ──
+function toggleSettings() {
+    var panel = document.getElementById('settings-panel');
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+function getCallSettings() {
+    return {
+        language: document.getElementById('set-language').value,
+        thinking_level: document.getElementById('set-thinking').value,
+        include_thoughts: document.getElementById('set-include-thoughts').checked,
+        start_sensitivity: document.getElementById('set-start-sensitivity').value,
+        end_sensitivity: document.getElementById('set-end-sensitivity').value,
+        silence_duration_ms: parseInt(document.getElementById('set-silence-ms').value) || 500,
+    };
+}
+
 function makeCall() {
     var number = document.getElementById('call-number').value.trim();
     if (!number) { alert('Enter a phone number.'); return; }
@@ -562,8 +647,9 @@ function makeCall() {
     if (!confirm('Call ' + number + '?')) return;
 
     showStatus('Initiating call...', '');
+    var payload = {to_number: number, knowledge_base_id: kbId ? parseInt(kbId) : null, settings: getCallSettings()};
     fetch('/api/gemini/make-call', {method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({to_number: number, knowledge_base_id: kbId ? parseInt(kbId) : null})
+        body:JSON.stringify(payload)
     }).then(r=>r.json()).then(d=>{
         if (!d.ok) { showStatus('Error: ' + (d.error||'Unknown'), 'error'); return; }
         _activeCallSid = d.call_sid;

@@ -118,6 +118,7 @@ async def make_call(request: Request):
     system_instruction = data.get("system_instruction", "")
     voice_name = data.get("voice_name", "Kore")
     triggered_by = data.get("triggered_by", "unknown")
+    settings = data.get("settings", {})
 
     if not to_number or not re.match(r"^\+64[2-9]\d{7,9}$", to_number):
         raise HTTPException(status_code=400, detail="Invalid NZ phone number.")
@@ -136,6 +137,7 @@ async def make_call(request: Request):
         "system_instruction": system_instruction,
         "voice_name": voice_name,
         "triggered_by": triggered_by,
+        "settings": settings,
         "call_sid": None,
         "status": "initiating",
         "transcript": [],
@@ -272,6 +274,30 @@ async def media_stream(websocket: WebSocket, call_id: str):
         gemini_client = genai.Client(api_key=GEMINI_API_KEY)
         _log_error(call_id, f"Connecting to {GEMINI_MODEL}...")
 
+        # Build config from call settings
+        _settings = call.get("settings", {})
+        _lang = _settings.get("language", "en")
+        _thinking = _settings.get("thinking_level", "minimal")
+        _include_thoughts = _settings.get("include_thoughts", False)
+        _start_sens = _settings.get("start_sensitivity", "default")
+        _end_sens = _settings.get("end_sensitivity", "default")
+        _silence_ms = _settings.get("silence_duration_ms", 500)
+
+        # Map sensitivity strings to SDK enums
+        _start_sens_map = {"low": types.StartSensitivity.START_SENSITIVITY_LOW,
+                           "high": types.StartSensitivity.START_SENSITIVITY_HIGH}
+        _end_sens_map = {"low": types.EndSensitivity.END_SENSITIVITY_LOW,
+                         "high": types.EndSensitivity.END_SENSITIVITY_HIGH}
+
+        # Build VAD config
+        _vad_kwargs = {"disabled": False}
+        if _start_sens in _start_sens_map:
+            _vad_kwargs["start_of_speech_sensitivity"] = _start_sens_map[_start_sens]
+        if _end_sens in _end_sens_map:
+            _vad_kwargs["end_of_speech_sensitivity"] = _end_sens_map[_end_sens]
+        if _silence_ms != 500:
+            _vad_kwargs["silence_duration_ms"] = _silence_ms
+
         config = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
             system_instruction=types.Content(
@@ -282,12 +308,18 @@ async def media_stream(websocket: WebSocket, call_id: str):
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
                         voice_name=call.get("voice_name", "Kore")
                     )
-                )
+                ),
+                language_code=_lang,
             ),
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
             realtime_input_config=types.RealtimeInputConfig(
                 turn_coverage="TURN_INCLUDES_ONLY_ACTIVITY",
+                automatic_activity_detection=types.AutomaticActivityDetection(**_vad_kwargs),
+            ),
+            thinking_config=types.ThinkingConfig(
+                thinking_level=_thinking,
+                include_thoughts=_include_thoughts,
             ),
         )
 
