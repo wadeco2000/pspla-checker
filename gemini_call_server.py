@@ -69,9 +69,43 @@ def _verify_secret(request: Request):
 #  API ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+_error_log = []  # In-memory error log for debugging
+
+def _log_error(call_id, msg):
+    entry = f"[{datetime.now(timezone.utc).isoformat()[:19]}] [{call_id}] {msg}"
+    _error_log.append(entry)
+    if len(_error_log) > 100:
+        _error_log.pop(0)
+    log.error(f"[{call_id}] {msg}")
+
+
 @app.get("/health")
 async def health():
     return {"ok": True, "active_calls": len(_active_calls)}
+
+
+@app.get("/debug/errors")
+async def debug_errors():
+    return {"errors": _error_log[-20:]}
+
+
+@app.get("/debug/test-gemini")
+async def test_gemini():
+    """Test if Gemini API key works and Live model is available."""
+    if not GEMINI_API_KEY:
+        return {"ok": False, "error": "GEMINI_API_KEY not set"}
+    try:
+        from google import genai
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        # Test basic API
+        response = client.models.generate_content(
+            model='gemini-2.0-flash',
+            contents='Say hello in one word.'
+        )
+        # Check Live model
+        return {"ok": True, "text_test": response.text, "live_model": GEMINI_MODEL}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.post("/api/make-call")
@@ -234,20 +268,23 @@ async def media_stream(websocket: WebSocket, call_id: str):
         from google.genai import types
 
         gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+        _log_error(call_id, f"Gemini client created, connecting to {GEMINI_MODEL}...")
 
-        config = {
-            "response_modalities": ["AUDIO"],
-            "system_instruction": call.get("system_instruction", "You are a helpful AI assistant making a phone call."),
-            "speech_config": {
-                "voice_config": {
-                    "prebuilt_voice_config": {
-                        "voice_name": call.get("voice_name", "Kore")
-                    }
-                }
-            },
-            "input_audio_transcription": {},
-            "output_audio_transcription": {},
-        }
+        config = types.LiveConnectConfig(
+            response_modalities=["AUDIO"],
+            system_instruction=types.Content(
+                parts=[types.Part(text=call.get("system_instruction", "You are a helpful AI assistant making a phone call."))]
+            ),
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name=call.get("voice_name", "Kore")
+                    )
+                )
+            ),
+            input_audio_transcription=types.AudioTranscriptionConfig(),
+            output_audio_transcription=types.AudioTranscriptionConfig(),
+        )
 
         async with gemini_client.aio.live.connect(model=GEMINI_MODEL, config=config) as gemini_session:
             call["status"] = "connected"
@@ -296,7 +333,9 @@ async def media_stream(websocket: WebSocket, call_id: str):
                 except WebSocketDisconnect:
                     log.info(f"[{call_id}] Twilio WebSocket disconnected")
                 except Exception as e:
-                    log.error(f"[{call_id}] Twilio→Gemini error: {e}")
+                    _log_error(call_id, f"Twilio→Gemini error: {e}")
+                    import traceback
+                    _log_error(call_id, traceback.format_exc())
 
             async def gemini_to_twilio():
                 """Read audio from Gemini, convert, send to Twilio."""
@@ -362,17 +401,25 @@ async def media_stream(websocket: WebSocket, call_id: str):
                                 }))
 
                 except Exception as e:
-                    log.error(f"[{call_id}] Gemini→Twilio error: {e}")
+                    _log_error(call_id, f"Gemini→Twilio error: {e}")
+                    import traceback
+                    _log_error(call_id, traceback.format_exc())
 
             # Run both directions concurrently
-            await asyncio.gather(
+            _log_error(call_id, "Starting audio bridge tasks...")
+            results = await asyncio.gather(
                 twilio_to_gemini(),
                 gemini_to_twilio(),
                 return_exceptions=True
             )
+            for i, r in enumerate(results):
+                if isinstance(r, Exception):
+                    _log_error(call_id, f"Task {i} exception: {r}")
 
     except Exception as e:
-        log.error(f"[{call_id}] Gemini connection error: {e}")
+        _log_error(call_id, f"Gemini connection error: {e}")
+        import traceback
+        _log_error(call_id, traceback.format_exc())
         await _broadcast_transcript(call_id, {
             "type": "status", "status": "error",
             "error": str(e),
