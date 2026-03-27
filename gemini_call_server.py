@@ -36,7 +36,7 @@ SELF_URL = os.getenv("GEMINI_CALL_SERVER_SELF_URL", "http://localhost:8001")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 
-GEMINI_MODEL = "gemini-2.0-flash-live-001"  # Latest stable Live model
+GEMINI_MODEL = "gemini-3.1-flash-live-preview"  # Gemini 3.1 Flash Live
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("gemini-call")
