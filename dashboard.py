@@ -530,6 +530,7 @@ _RATE_LIMITS = {
     'club_fitness_campaign_send_test': (5, 60),
     'club_fitness_campaign_send': (2, 300),     # 2 campaign sends per 5 min
     'club_fitness_campaign_clear': (2, 300),
+    'club_fitness_guess_gender': (3, 300),
 }
 
 @app.before_request
@@ -759,6 +760,7 @@ _ROUTE_PERMISSIONS = {
     'club_fitness_campaign_clear': 'club_fitness',
     'club_fitness_campaign_status': 'club_fitness',
     'club_fitness_campaign_template': 'club_fitness',
+    'club_fitness_guess_gender': 'club_fitness',
     'club_fitness_campaign_stop': 'club_fitness',
     'club_fitness_campaign_pause': 'club_fitness',
 }
@@ -16390,6 +16392,73 @@ def club_fitness_campaign_clear():
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
+@app.route("/api/club-fitness/guess-gender", methods=["POST"])
+def club_fitness_guess_gender():
+    """Batch guess gender from first names using Haiku, store in Supabase."""
+    import anthropic, json as _json
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return jsonify({"ok": False, "error": "ANTHROPIC_API_KEY not set."}), 500
+    _SB = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+           "Content-Type": "application/json", "Prefer": "return=minimal"}
+    # Get entries without gender
+    try:
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/challenge_signups",
+            params={"select": "stripe_session_id,custom_field_1", "guessed_gender": "is.null", "limit": "500"},
+            headers=_SB, timeout=15)
+        entries = r.json() if r.ok else []
+    except Exception:
+        entries = []
+    if not entries:
+        return jsonify({"ok": True, "guessed": 0, "message": "All entries already have gender."})
+    # Extract first names
+    names = {}
+    for e in entries:
+        full = (e.get("custom_field_1") or "").strip()
+        first = full.split()[0].title() if full else ""
+        if first:
+            names[e["stripe_session_id"]] = first
+    # Batch to Haiku in groups of 50
+    client = anthropic.Anthropic(api_key=api_key)
+    unique_names = list(set(names.values()))
+    gender_map = {}
+    for i in range(0, len(unique_names), 50):
+        batch = unique_names[i:i+50]
+        try:
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=2000,
+                messages=[{"role": "user", "content":
+                    f"For each name below, guess the likely gender. Return ONLY a JSON object mapping each name to 'male', 'female', or 'unknown'. "
+                    f"Use New Zealand/Pacific naming conventions. Be practical — most names are clearly one or the other.\n\n"
+                    f"Names: {_json.dumps(batch)}"
+                }]
+            )
+            text = resp.content[0].text.strip()
+            if text.startswith("```"):
+                text = text.split("```")[1]
+                if text.startswith("json"):
+                    text = text[4:]
+            result = _json.loads(text)
+            gender_map.update(result)
+        except Exception as e:
+            print(f"[gender] AI batch {i}-{i+len(batch)} error: {e}")
+    # Update Supabase
+    updated = 0
+    for sid, first in names.items():
+        gender = gender_map.get(first, "unknown").lower()
+        if gender not in ("male", "female"):
+            gender = "unknown"
+        try:
+            requests.patch(f"{SUPABASE_URL}/rest/v1/challenge_signups",
+                params={"stripe_session_id": f"eq.{sid}"},
+                json={"guessed_gender": gender}, headers=_SB, timeout=10)
+            updated += 1
+        except Exception:
+            pass
+    return jsonify({"ok": True, "guessed": updated, "total": len(entries)})
+
+
 @app.route("/api/club-fitness/campaign-template", methods=["GET", "POST"])
 def club_fitness_campaign_template():
     """Save/load campaign template, subject, and AI prompt."""
@@ -16593,9 +16662,23 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         <button class="btn btn-export" onclick="exportCSV()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
         <button class="btn btn-clean" onclick="showCleanModal()"><i class="fa-solid fa-broom"></i> Clean Data</button>
         <button class="btn btn-booking" onclick="checkBookings()"><i class="fa-solid fa-calendar-check"></i> Check Bookings</button>
+        <button class="btn" style="background:#9b59b6;color:white;" onclick="guessGender()"><i class="fa-solid fa-venus-mars"></i> Guess Gender</button>
         <button class="btn btn-campaign" onclick="toggleCampaign()"><i class="fa-solid fa-envelope"></i> Email Campaign</button>
         <span class="count-badge" id="count-badge" style="display:none">0</span>
         <span class="status-msg" id="status-msg"></span>
+    </div>
+
+    <!-- Stats Bar -->
+    <div id="stats-bar" style="display:none;background:#f8f9fa;border:1px solid #e2e8f0;border-radius:8px;padding:10px 16px;margin-bottom:10px;display:none;">
+        <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;font-size:13px;">
+            <span id="stat-club-fitness" style="font-weight:600;color:#27ae60;"></span>
+            <span style="color:#ddd;">|</span>
+            <span id="stat-top-goals" style="color:#555;"></span>
+            <span style="color:#ddd;">|</span>
+            <span id="stat-gender" style="color:#555;"></span>
+            <span style="color:#ddd;">|</span>
+            <span id="stat-returning" style="color:#555;"></span>
+        </div>
     </div>
 
     <!-- Controls Row 2: Search + Filters + Status -->
@@ -16667,6 +16750,14 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
                 <label>To:</label> <input type="date" id="chart-to2" onchange="updateCharts()">
             </div>
             <canvas id="goal-chart" height="280"></canvas>
+        </div>
+        <div class="chart-card">
+            <h3><i class="fa-solid fa-venus-mars" style="color:#9b59b6"></i> Gender <span id="gender-chart-total" style="font-weight:normal;font-size:12px;color:#888;"></span></h3>
+            <canvas id="gender-chart" height="280"></canvas>
+        </div>
+        <div class="chart-card">
+            <h3><i class="fa-solid fa-user-plus" style="color:#1abc9c"></i> New vs Returning <span id="returning-chart-total" style="font-weight:normal;font-size:12px;color:#888;"></span></h3>
+            <canvas id="returning-chart" height="280"></canvas>
         </div>
     </div>
 </div>
@@ -17427,6 +17518,7 @@ function applyFiltersAndRender() {
         fc.textContent = '';
     }
     updateCharts();
+    updateStats();
 }
 
 function onFilterChange() {
@@ -17883,24 +17975,76 @@ function applyMappings() {
 }
 
 /* ── Charts ── */
-var _gymChart = null, _goalChart = null;
+var _gymChart = null, _goalChart = null, _genderChart = null, _returningChart = null;
 var _chartColors = ['#3498db','#e67e22','#27ae60','#e74c3c','#9b59b6','#1abc9c','#f39c12','#2c3e50','#d35400','#8e44ad','#16a085','#c0392b','#2980b9','#7f8c8d'];
+
+function _getFilteredRows() {
+    var use6w = document.getElementById('date-filter').checked;
+    if (!use6w) return _allRows;
+    var cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 42);
+    var cutoffStr = cutoff.toISOString();
+    return _allRows.filter(function(r){ return r.created_at >= cutoffStr; });
+}
+
+function updateStats() {
+    var rows = _getFilteredRows();
+    var bar = document.getElementById('stats-bar');
+    if (!rows.length) { bar.style.display = 'none'; return; }
+    bar.style.display = '';
+    // Club Fitness %
+    var cfCount = 0;
+    rows.forEach(function(r){ if ((r.custom_field_3||'').toLowerCase().replace(/\s/g,'') === 'clubfitness') cfCount++; });
+    var cfPct = Math.round(cfCount / rows.length * 100);
+    document.getElementById('stat-club-fitness').innerHTML = '<i class="fa-solid fa-dumbbell"></i> ' + cfPct + '% Club Fitness members (' + cfCount + '/' + rows.length + ')';
+    // Top goals
+    var goalCounts = {};
+    rows.forEach(function(r){ var g = (r.custom_field_2||'').trim(); if (g) goalCounts[g] = (goalCounts[g]||0) + 1; });
+    var sorted = Object.entries(goalCounts).sort(function(a,b){ return b[1]-a[1]; });
+    var topGoals = sorted.slice(0,3).map(function(e){ return Math.round(e[1]/rows.length*100) + '% want to lose ' + e[0]; }).join(' · ');
+    document.getElementById('stat-top-goals').innerHTML = '<i class="fa-solid fa-weight-scale"></i> ' + topGoals;
+    // Gender
+    var male = 0, female = 0;
+    rows.forEach(function(r){ var g = (r.guessed_gender||'').toLowerCase(); if (g === 'male') male++; else if (g === 'female') female++; });
+    if (male + female > 0) {
+        document.getElementById('stat-gender').innerHTML = '<i class="fa-solid fa-mars"></i> ' + Math.round(male/(male+female)*100) + '% male · <i class="fa-solid fa-venus"></i> ' + Math.round(female/(male+female)*100) + '% female';
+    } else {
+        document.getElementById('stat-gender').innerHTML = '<i class="fa-solid fa-venus-mars"></i> Gender not yet guessed';
+    }
+    // New vs Returning
+    var cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 42);
+    var cutoffStr = cutoff.toISOString();
+    var recentEmails = new Set();
+    var oldEmails = new Set();
+    _allRows.forEach(function(r) {
+        var em = (r.customer_email||'').toLowerCase().trim();
+        if (!em) return;
+        if (r.created_at >= cutoffStr) recentEmails.add(em);
+        else oldEmails.add(em);
+    });
+    var returning = 0;
+    recentEmails.forEach(function(em){ if (oldEmails.has(em)) returning++; });
+    var newCount = recentEmails.size - returning;
+    if (recentEmails.size > 0) {
+        document.getElementById('stat-returning').innerHTML = '<i class="fa-solid fa-user-plus"></i> ' + newCount + ' new · <i class="fa-solid fa-rotate"></i> ' + returning + ' returning';
+    }
+}
 
 function updateCharts() {
     var showCharts = document.getElementById('show-charts').checked;
     if (!_allRows.length || !showCharts) { document.getElementById('charts-section').style.display = 'none'; return; }
     document.getElementById('charts-section').style.display = '';
+    var rows = _getFilteredRows();
     var from1 = document.getElementById('chart-from').value;
     var to1 = document.getElementById('chart-to').value;
     var from2 = document.getElementById('chart-from2').value;
     var to2 = document.getElementById('chart-to2').value;
-    // Filter rows by date for each chart
-    var gymRows = _allRows.filter(function(r){
+    // Filter rows by date for gym/goal charts (additional date pickers)
+    var gymRows = rows.filter(function(r){
         if (from1 && r.created_at < from1) return false;
         if (to1 && r.created_at > to1 + 'T23:59:59') return false;
         return true;
     });
-    var goalRows = _allRows.filter(function(r){
+    var goalRows = rows.filter(function(r){
         if (from2 && r.created_at < from2) return false;
         if (to2 && r.created_at > to2 + 'T23:59:59') return false;
         return true;
@@ -17923,6 +18067,53 @@ function updateCharts() {
     document.getElementById('goal-chart-total').textContent = '(' + goalTotal + ' total)';
     renderPie('gym-chart', gymCounts, '_gymChart');
     renderPie('goal-chart', goalCounts, '_goalChart');
+    // Gender bar chart
+    var male = 0, female = 0, unknown = 0;
+    rows.forEach(function(r){ var g = (r.guessed_gender||'').toLowerCase(); if (g === 'male') male++; else if (g === 'female') female++; else unknown++; });
+    var genderTotal = male + female + unknown;
+    document.getElementById('gender-chart-total').textContent = '(' + genderTotal + ' total)';
+    renderGenderBar(male, female, unknown);
+    // New vs Returning pie
+    var cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 42);
+    var cutoffStr = cutoff.toISOString();
+    var recentEmails = new Set();
+    var oldEmails = new Set();
+    _allRows.forEach(function(r) {
+        var em = (r.customer_email||'').toLowerCase().trim();
+        if (!em) return;
+        if (r.created_at >= cutoffStr) recentEmails.add(em);
+        else oldEmails.add(em);
+    });
+    var returning = 0;
+    recentEmails.forEach(function(em){ if (oldEmails.has(em)) returning++; });
+    var newCount = recentEmails.size - returning;
+    document.getElementById('returning-chart-total').textContent = '(' + (newCount + returning) + ' total)';
+    renderPie('returning-chart', {'New': newCount, 'Returning': returning}, '_returningChart');
+}
+
+function renderGenderBar(male, female, unknown) {
+    var ctx = document.getElementById('gender-chart').getContext('2d');
+    if (_genderChart) _genderChart.destroy();
+    _genderChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['\u2642 Male', '\u2640 Female', '? Unknown'],
+            datasets: [{
+                data: [male, female, unknown],
+                backgroundColor: ['#3498db', '#e91e8b', '#bdc3c7'],
+                borderRadius: 6
+            }]
+        },
+        options: {
+            responsive: true,
+            indexAxis: 'y',
+            plugins: {
+                legend: {display: false},
+                tooltip: {callbacks: {label: function(c){ var tot = male+female+unknown; return c.raw + ' (' + Math.round(c.raw/tot*100) + '%)'; }}}
+            },
+            scales: {x: {beginAtZero: true, ticks: {stepSize: 1}}}
+        }
+    });
 }
 
 function renderPie(canvasId, counts, chartVar) {
@@ -17943,6 +18134,15 @@ function renderPie(canvasId, counts, chartVar) {
                 tooltip: {callbacks: {label: function(c){ return c.label + ': ' + c.raw + ' (' + Math.round(c.raw/data.reduce(function(a,b){return a+b;},0)*100) + '%)'; }}}
             }
         }
+    });
+}
+
+function guessGender() {
+    msg('Guessing gender from names...');
+    fetch('/api/club-fitness/guess-gender', {method:'POST'}).then(function(r){return r.json();}).then(function(d){
+        if (!d.ok) { msg('Error: ' + (d.error||'Unknown')); return; }
+        msg('Gender guessed for ' + d.guessed + ' entries.');
+        if (d.guessed > 0) fetchSignups();
     });
 }
 
