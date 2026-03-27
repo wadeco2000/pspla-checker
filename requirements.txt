@@ -13,5 +13,6 @@ stripe
 twilio
 google-genai
 fastapi
+python-multipart
 uvicorn[standard]
 websockets
