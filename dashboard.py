@@ -15768,7 +15768,7 @@ def club_fitness_check_bookings():
             raw = [raw]  # Single appointment
         if not isinstance(raw, list):
             raw = []
-        appointments = [a for a in raw if isinstance(a, dict) and a.get("is_active", True)]
+        appointments = [a for a in raw if isinstance(a, dict) and a.get("is_active", True) and not a.get("is_blocker", False)]
     except Exception as e:
         return jsonify({"ok": False, "error": f"Bookafy error: {e}"}), 502
     _debug = {
