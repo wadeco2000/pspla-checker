@@ -15371,21 +15371,26 @@ def club_fitness_export():
 def club_fitness_stored():
     """Fetch signups stored in Supabase."""
     pl = _validate_payment_link(request.args.get("payment_link", "").strip())
-    params = {"select": "*", "order": "created_at.asc", "limit": "5000"}
+    base_params = {"select": "*", "order": "created_at.asc", "limit": "1000"}
     if pl:
-        params["payment_link"] = f"eq.{pl}"
+        base_params["payment_link"] = f"eq.{pl}"
+    _sb_h = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
     try:
-        r = requests.get(
-            f"{SUPABASE_URL}/rest/v1/challenge_signups",
-            params=params,
-            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                     "Range": "0-4999"},
-            timeout=30
-        )
-        if r.ok:
-            data = r.json()
-            return jsonify({"ok": True, "signups": data, "count": len(data)})
-        return jsonify({"ok": False, "error": f"Supabase error: {r.status_code}"}), 502
+        # Auto-paginate: fetch 1000 at a time until no more
+        all_data = []
+        offset = 0
+        while True:
+            p = dict(base_params)
+            p["offset"] = str(offset)
+            r = requests.get(f"{SUPABASE_URL}/rest/v1/challenge_signups", params=p, headers=_sb_h, timeout=30)
+            if not r.ok:
+                return jsonify({"ok": False, "error": f"Supabase error: {r.status_code}"}), 502
+            page = r.json()
+            all_data.extend(page)
+            if len(page) < 1000:
+                break
+            offset += 1000
+        return jsonify({"ok": True, "signups": all_data, "count": len(all_data)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
