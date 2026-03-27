@@ -15501,7 +15501,17 @@ def club_fitness_session_detail():
     if not STRIPE_SECRET_KEY:
         return jsonify({"ok": False, "error": "STRIPE_SECRET_KEY not configured."}), 500
     sid = request.args.get("session_id", "").strip()
-    if not sid or not _CS_RE.match(sid):
+    if not sid:
+        return jsonify({"ok": False, "error": "Missing session_id."}), 400
+    if sid.startswith("cash_"):
+        try:
+            _sb = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+            cr = requests.get(f"{SUPABASE_URL}/rest/v1/challenge_signups", params={"select": "*", "stripe_session_id": f"eq.{sid}"}, headers=_sb, timeout=10)
+            e = cr.json()[0] if cr.ok and cr.json() else {}
+            return jsonify({"ok": True, "detail": {"id": sid, "payment_type": "CASH", "amount_total": 0, "currency": "NZD", "payment_status": "cash", "status": "complete", "customer_email": e.get("customer_email", ""), "customer_name": e.get("custom_field_1", ""), "customer_phone": e.get("customer_phone", ""), "line_items": "Cash payment", "billing_address": "", "created": e.get("created_at", "")}})
+        except Exception as ex:
+            return jsonify({"ok": False, "error": str(ex)}), 502
+    if not _CS_RE.match(sid):
         return jsonify({"ok": False, "error": "Invalid session_id format."}), 400
     try:
         import stripe
