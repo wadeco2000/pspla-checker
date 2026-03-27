@@ -516,6 +516,11 @@ async def media_stream(websocket: WebSocket, call_id: str):
         call.pop("twilio_ws", None)
         call.pop("stream_sid", None)
         log.info(f"[{call_id}] Call ended, saving history")
+        # Broadcast ended to transcript subscribers (don't rely on Twilio callback alone)
+        await _broadcast_transcript(call_id, {
+            "type": "status", "status": "ended",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
         await _save_call_history(call_id)
         # Clean up monitor subscribers
         _monitor_subscribers.pop(call_id, None)
