@@ -129,34 +129,6 @@ async def make_call(request: Request):
     call_id = str(uuid.uuid4())[:12]
     log.info(f"[{call_id}] Making call to {to_number} from {from_number}")
 
-    # Pre-connect Gemini Live session while the phone rings
-    gemini_session = None
-    try:
-        from google import genai
-        from google.genai import types as _types
-        _gc = genai.Client(api_key=GEMINI_API_KEY)
-        _cfg = _types.LiveConnectConfig(
-            response_modalities=[_types.Modality.AUDIO],
-            system_instruction=_types.Content(
-                parts=[_types.Part(text=(system_instruction or "You are a helpful AI assistant.") + "\n\nIMPORTANT: You are on a live phone call. Start speaking immediately when you hear the caller — introduce yourself right away.")]
-            ),
-            speech_config=_types.SpeechConfig(
-                voice_config=_types.VoiceConfig(
-                    prebuilt_voice_config=_types.PrebuiltVoiceConfig(voice_name=voice_name)
-                )
-            ),
-            input_audio_transcription=_types.AudioTranscriptionConfig(),
-            output_audio_transcription=_types.AudioTranscriptionConfig(),
-            realtime_input_config=_types.RealtimeInputConfig(
-                turn_coverage="TURN_INCLUDES_ONLY_ACTIVITY",
-            ),
-        )
-        gemini_session = await _gc.aio.live.connect(model=GEMINI_MODEL, config=_cfg).__aenter__()
-        log.info(f"[{call_id}] Gemini pre-connected while phone rings")
-    except Exception as e:
-        log.error(f"[{call_id}] Failed to pre-connect Gemini: {e}")
-        gemini_session = None
-
     # Store call state
     _active_calls[call_id] = {
         "to_number": to_number,
@@ -165,7 +137,6 @@ async def make_call(request: Request):
         "voice_name": voice_name,
         "triggered_by": triggered_by,
         "call_sid": None,
-        "gemini_session": gemini_session,
         "status": "initiating",
         "transcript": [],
         "started_at": datetime.now(timezone.utc).isoformat(),
@@ -211,6 +182,8 @@ async def twiml(call_id: str):
     ws_url = SELF_URL.replace("http://", "wss://").replace("https://", "wss://")
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
+    <Say voice="Polly.Amy">Please hold for just a moment.</Say>
+    <Pause length="1"/>
     <Connect>
         <Stream url="{ws_url}/media-stream/{call_id}" />
     </Connect>
@@ -291,41 +264,34 @@ async def media_stream(websocket: WebSocket, call_id: str):
             await websocket.close()
             return
 
-    # Use pre-connected Gemini session or create new one
+    # Connect to Gemini Live API
     try:
         from google import genai
         from google.genai import types
 
-        gemini_session = call.pop("gemini_session", None)
-        _created_session = False
+        gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+        _log_error(call_id, f"Connecting to {GEMINI_MODEL}...")
 
-        if gemini_session:
-            _log_error(call_id, "Using pre-connected Gemini session (fast path)")
-        else:
-            _log_error(call_id, f"No pre-connected session, connecting to {GEMINI_MODEL}...")
-            _gc = genai.Client(api_key=GEMINI_API_KEY)
-            _cfg = types.LiveConnectConfig(
-                response_modalities=[types.Modality.AUDIO],
-                system_instruction=types.Content(
-                    parts=[types.Part(text=call.get("system_instruction", "You are a helpful AI assistant.") + "\n\nIMPORTANT: You are on a live phone call. Start speaking immediately — introduce yourself right away.")]
-                ),
-                speech_config=types.SpeechConfig(
-                    voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                            voice_name=call.get("voice_name", "Kore")
-                        )
+        config = types.LiveConnectConfig(
+            response_modalities=[types.Modality.AUDIO],
+            system_instruction=types.Content(
+                parts=[types.Part(text=call.get("system_instruction", "You are a helpful AI assistant.") + "\n\nIMPORTANT: You are on a live phone call. Start speaking immediately — introduce yourself right away without waiting for the other person to speak first.")]
+            ),
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name=call.get("voice_name", "Kore")
                     )
-                ),
-                input_audio_transcription=types.AudioTranscriptionConfig(),
-                output_audio_transcription=types.AudioTranscriptionConfig(),
-                realtime_input_config=types.RealtimeInputConfig(
-                    turn_coverage="TURN_INCLUDES_ONLY_ACTIVITY",
-                ),
-            )
-            gemini_session = await _gc.aio.live.connect(model=GEMINI_MODEL, config=_cfg).__aenter__()
-            _created_session = True
+                )
+            ),
+            input_audio_transcription=types.AudioTranscriptionConfig(),
+            output_audio_transcription=types.AudioTranscriptionConfig(),
+            realtime_input_config=types.RealtimeInputConfig(
+                turn_coverage="TURN_INCLUDES_ONLY_ACTIVITY",
+            ),
+        )
 
-        if True:  # replaces the old 'async with' block — session managed manually now
+        async with gemini_client.aio.live.connect(model=GEMINI_MODEL, config=config) as gemini_session:
             call["status"] = "connected"
             await _broadcast_transcript(call_id, {
                 "type": "status", "status": "connected",
@@ -489,12 +455,6 @@ async def media_stream(websocket: WebSocket, call_id: str):
     finally:
         call["status"] = "ended"
         log.info(f"[{call_id}] Call ended, saving history")
-        # Close Gemini session
-        try:
-            if gemini_session:
-                await gemini_session.__aexit__(None, None, None)
-        except Exception:
-            pass
         await _save_call_history(call_id)
         try:
             await websocket.close()
