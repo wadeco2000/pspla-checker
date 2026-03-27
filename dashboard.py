@@ -531,6 +531,11 @@ _RATE_LIMITS = {
     'club_fitness_campaign_send': (2, 300),     # 2 campaign sends per 5 min
     'club_fitness_campaign_clear': (2, 300),
     'club_fitness_guess_gender': (3, 300),
+    # gemini
+    'gemini_make_call': (5, 300),        # 5 calls per 5 min
+    'gemini_end_call': (10, 60),         # 10 per minute
+    'gemini_knowledge_bases': (20, 60),  # 20 per minute
+    'gemini_call_history': (20, 60),     # 20 per minute
 }
 
 @app.before_request
@@ -675,9 +680,9 @@ def _is_admin():
     return bool(email and NOTIFY_EMAIL and email == NOTIFY_EMAIL.lower().strip())
 
 # ── Per-user permissions ────────────────────────────────────────────────────
-_PERMISSION_GROUPS = ['searches', 'database', 'history', 'utilities', 'actuate', 'shelly', 'club_fitness']
-_PERMISSION_LABELS = {'searches': 'Searches', 'database': 'Database', 'history': 'History', 'utilities': 'Utilities', 'actuate': 'Actuate', 'shelly': 'Shelly', 'club_fitness': 'Club Fitness'}
-_DEFAULT_PERMISSIONS = {'searches': True, 'database': True, 'history': True, 'utilities': True, 'actuate': False, 'shelly': False, 'club_fitness': False}
+_PERMISSION_GROUPS = ['searches', 'database', 'history', 'utilities', 'actuate', 'shelly', 'club_fitness', 'gemini']
+_PERMISSION_LABELS = {'searches': 'Searches', 'database': 'Database', 'history': 'History', 'utilities': 'Utilities', 'actuate': 'Actuate', 'shelly': 'Shelly', 'club_fitness': 'Club Fitness', 'gemini': 'Gemini'}
+_DEFAULT_PERMISSIONS = {'searches': True, 'database': True, 'history': True, 'utilities': True, 'actuate': False, 'shelly': False, 'club_fitness': False, 'gemini': False}
 
 def _has_permission(group):
     """Check if current user has access to a permission group."""
@@ -769,6 +774,14 @@ _ROUTE_PERMISSIONS = {
     'club_fitness_guess_gender': 'club_fitness',
     'club_fitness_campaign_stop': 'club_fitness',
     'club_fitness_campaign_pause': 'club_fitness',
+    # gemini
+    'gemini_page': 'gemini',
+    'gemini_knowledge_bases': 'gemini',
+    'gemini_delete_kb': 'gemini',
+    'gemini_make_call': 'gemini',
+    'gemini_end_call': 'gemini',
+    'gemini_call_history': 'gemini',
+    'gemini_call_detail': 'gemini',
 }
 
 # ── TOTP 2FA helpers ──────────────────────────────────────────────────────────
@@ -2097,7 +2110,7 @@ HTML_TEMPLATE = """
     {% endif %}
 
     <!-- Partners -->
-    {% if user_perms.actuate or user_perms.shelly or user_perms.club_fitness %}
+    {% if user_perms.actuate or user_perms.shelly or user_perms.club_fitness or user_perms.gemini %}
     <div class="nav-item" id="menu-partners">
       <button class="nav-btn" onclick="toggleMenu('menu-partners')">
         <i class="fa-solid fa-handshake"></i> Partners
@@ -2107,6 +2120,7 @@ HTML_TEMPLATE = """
         {% if user_perms.actuate %}<a href="/actuate" class="dd-item"><i class="fa-solid fa-tower-broadcast"></i> Actuate</a>{% endif %}
         {% if user_perms.shelly %}<a href="/shelly" class="dd-item"><i class="fa-solid fa-tower-cell"></i> Shelly</a>{% endif %}
         {% if user_perms.club_fitness %}<a href="/club-fitness" class="dd-item"><i class="fa-solid fa-dumbbell"></i> Club Fitness</a>{% endif %}
+        {% if user_perms.gemini %}<a href="/gemini" class="dd-item"><i class="fa-solid fa-phone"></i> Gemini Calls</a>{% endif %}
       </div>
     </div>
     {% endif %}
@@ -5084,6 +5098,21 @@ def get_companies():
         return []
 
 
+# ── Register Blueprints ──────────────────────────────────────────────────────
+try:
+    from blueprints.gemini import gemini_bp
+    app.register_blueprint(gemini_bp)
+    import blueprints.gemini as _gemini_mod
+    _gemini_mod._is_admin = _is_admin
+    _gemini_mod._has_permission = _has_permission
+    _gemini_mod._require_permission = _require_permission
+    _gemini_mod.SUPABASE_URL = SUPABASE_URL
+    _gemini_mod.SUPABASE_SERVICE_KEY = SUPABASE_SERVICE_KEY
+    _gemini_mod._get_git_version = _get_git_version
+except ImportError:
+    pass  # blueprints/gemini.py not yet created
+
+
 @app.route("/")
 def index():
     # Redirect users who only have partner integrations (no PSPLA access)
@@ -5093,12 +5122,16 @@ def index():
         if not _pspla_access:
             _has_shelly = _perms.get('shelly', False)
             _has_actuate = _perms.get('actuate', False)
-            if _has_shelly and not _has_actuate:
-                return redirect('/shelly')
-            if _has_actuate and not _has_shelly:
-                return redirect('/actuate')
-            if _has_shelly and _has_actuate:
-                return redirect('/shelly')
+            _has_cf = _perms.get('club_fitness', False)
+            _has_gemini = _perms.get('gemini', False)
+            # Find first available partner page
+            _partner_pages = []
+            if _has_actuate: _partner_pages.append('/actuate')
+            if _has_shelly: _partner_pages.append('/shelly')
+            if _has_cf: _partner_pages.append('/club-fitness')
+            if _has_gemini: _partner_pages.append('/gemini')
+            if _partner_pages:
+                return redirect(_partner_pages[0])
     message = request.args.get("message", "")
     message_type = request.args.get("type", "success")
 

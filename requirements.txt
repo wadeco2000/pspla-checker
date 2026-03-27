@@ -10,3 +10,9 @@ qrcode[pil]
 cryptography
 paho-mqtt
 stripe
+twilio
+google-genai
+audioop-lts
+fastapi
+uvicorn[standard]
+websockets
