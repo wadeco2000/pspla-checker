@@ -285,27 +285,28 @@ async def media_stream(websocket: WebSocket, call_id: str):
         _settings = call.get("settings", {})
 
         # Map sensitivity strings to Gemini enum values
+        # Only LOW and HIGH exist — DEFAULT maps to UNSPECIFIED (lets Gemini decide)
         _START_SENS_MAP = {
-            "LOW": "START_SENSITIVITY_LOW",
-            "DEFAULT": "START_SENSITIVITY_DEFAULT",
-            "HIGH": "START_SENSITIVITY_HIGH",
+            "LOW": types.StartSensitivity.START_SENSITIVITY_LOW,
+            "DEFAULT": types.StartSensitivity.START_SENSITIVITY_UNSPECIFIED,
+            "HIGH": types.StartSensitivity.START_SENSITIVITY_HIGH,
         }
         _END_SENS_MAP = {
-            "LOW": "END_SENSITIVITY_LOW",
-            "DEFAULT": "END_SENSITIVITY_DEFAULT",
-            "HIGH": "END_SENSITIVITY_HIGH",
+            "LOW": types.EndSensitivity.END_SENSITIVITY_LOW,
+            "DEFAULT": types.EndSensitivity.END_SENSITIVITY_UNSPECIFIED,
+            "HIGH": types.EndSensitivity.END_SENSITIVITY_HIGH,
         }
 
         # Default to LOW start sensitivity to avoid coughs/hums triggering interruptions
         start_sens = _START_SENS_MAP.get(
-            _settings.get("start_sensitivity", "LOW").upper(), "START_SENSITIVITY_LOW"
+            _settings.get("start_sensitivity", "LOW").upper(),
+            types.StartSensitivity.START_SENSITIVITY_LOW
         )
         end_sens = _END_SENS_MAP.get(
-            _settings.get("end_sensitivity", "DEFAULT").upper(), "END_SENSITIVITY_DEFAULT"
+            _settings.get("end_sensitivity", "DEFAULT").upper(),
+            types.EndSensitivity.END_SENSITIVITY_UNSPECIFIED
         )
         silence_ms = int(_settings.get("silence_duration_ms", 500))
-        silence_secs = silence_ms // 1000
-        silence_nanos = (silence_ms % 1000) * 1_000_000
 
         config = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
@@ -324,11 +325,9 @@ async def media_stream(websocket: WebSocket, call_id: str):
             realtime_input_config=types.RealtimeInputConfig(
                 turn_coverage="TURN_INCLUDES_ONLY_ACTIVITY",
                 automatic_activity_detection=types.AutomaticActivityDetection(
-                    start_of_speech_sensitivity=start_sens,
-                    end_of_speech_sensitivity=end_sens,
-                    silence_duration=types.Duration(
-                        seconds=silence_secs, nanos=silence_nanos
-                    ),
+                    startOfSpeechSensitivity=start_sens,
+                    endOfSpeechSensitivity=end_sens,
+                    silenceDurationMs=silence_ms,
                 ),
             ),
         )

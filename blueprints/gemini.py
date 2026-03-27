@@ -255,6 +255,72 @@ def gemini_call_detail(call_sid):
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
+@gemini_bp.route("/api/gemini/debug", methods=["GET"])
+def gemini_debug():
+    """Fetch debug info from all components."""
+    server_url = os.getenv("GEMINI_CALL_SERVER_URL", "http://localhost:8001")
+    secret = os.getenv("GEMINI_CALL_SERVER_SECRET", "")
+    headers = {"X-Server-Secret": secret}
+    result = {"call_server": {}, "twilio": {}, "gemini": {}, "supabase": {}}
+
+    # 1. Call server health + errors + active calls
+    try:
+        h = _requests.get(f"{server_url}/health", headers=headers, timeout=5)
+        result["call_server"]["health"] = h.json() if h.ok else {"status": h.status_code}
+    except Exception as e:
+        result["call_server"]["health"] = {"error": str(e)}
+    try:
+        e = _requests.get(f"{server_url}/debug/errors", headers=headers, timeout=5)
+        result["call_server"]["errors"] = e.json().get("errors", []) if e.ok else []
+    except Exception as e:
+        result["call_server"]["errors"] = [str(e)]
+    try:
+        a = _requests.get(f"{server_url}/debug/active-calls", headers=headers, timeout=5)
+        result["call_server"]["active_calls"] = a.json() if a.ok else {}
+    except Exception as e:
+        result["call_server"]["active_calls"] = {"error": str(e)}
+
+    # 2. Gemini API test
+    try:
+        g = _requests.get(f"{server_url}/debug/test-gemini", headers=headers, timeout=15)
+        result["gemini"] = g.json() if g.ok else {"error": f"HTTP {g.status_code}"}
+    except Exception as e:
+        result["gemini"] = {"error": str(e)}
+
+    # 3. Twilio — check credentials by fetching account info
+    try:
+        from twilio.rest import Client as TwilioClient
+        tc = TwilioClient(
+            os.getenv("TWILIO_ACCOUNT_SID", ""),
+            os.getenv("TWILIO_AUTH_TOKEN", "")
+        )
+        acct = tc.api.accounts(os.getenv("TWILIO_ACCOUNT_SID", "")).fetch()
+        result["twilio"] = {
+            "ok": True,
+            "friendly_name": acct.friendly_name,
+            "status": acct.status,
+            "phone": os.getenv("TWILIO_PHONE_NUMBER", ""),
+        }
+    except ImportError:
+        result["twilio"] = {"ok": True, "note": "twilio SDK not installed on dashboard, call server handles it"}
+    except Exception as e:
+        result["twilio"] = {"ok": False, "error": str(e)}
+
+    # 4. Supabase — check tables exist
+    try:
+        r = _requests.get(f"{SUPABASE_URL}/rest/v1/gemini_knowledge_bases",
+            params={"select": "id", "limit": "1"}, headers=_sb_headers(), timeout=5)
+        kb_ok = r.ok
+        r2 = _requests.get(f"{SUPABASE_URL}/rest/v1/gemini_call_history",
+            params={"select": "id", "limit": "1"}, headers=_sb_headers(), timeout=5)
+        ch_ok = r2.ok
+        result["supabase"] = {"ok": kb_ok and ch_ok, "knowledge_bases": "OK" if kb_ok else "ERROR", "call_history": "OK" if ch_ok else "ERROR"}
+    except Exception as e:
+        result["supabase"] = {"ok": False, "error": str(e)}
+
+    return jsonify(result)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  PAGE TEMPLATE
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -298,6 +364,8 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
         .transcript-line.ai{color:#64B5F6;} .transcript-line.caller{color:#E0E0E0;}
         .transcript-line .speaker{font-weight:bold;margin-right:8px;}
         .transcript-line .time{color:#666;font-size:10px;margin-right:8px;}
+        .debug-row{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;}
+        .debug-label{font-weight:600;min-width:120px;color:#555;}
         /* Call controls */
         .call-controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px;}
         .call-timer{font-size:20px;font-weight:bold;color:#333;font-family:'Courier New',monospace;}
@@ -326,6 +394,7 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
             <a href="/my-account"><i class="fa-solid fa-user"></i> My Account</a>
             <span>{{ user_email }}</span>
             <a href="/auth/logout" class="btn btn-red" style="font-size:11px;padding:4px 10px;"><i class="fa-solid fa-right-from-bracket"></i> Sign out</a>
+            <button class="btn" style="font-size:11px;padding:4px 10px;background:#6c757d;" onclick="openDebug()"><i class="fa-solid fa-bug"></i> Debug</button>
             <span style="font-size:10px;color:#666;">&#9765; {{ git_version[0] }} {{ git_version[1] }}</span>
         </div>
     </div>
@@ -517,6 +586,20 @@ CALL PROCEDURE:
             <div id="transcript-modal-content" class="transcript-panel" style="max-height:60vh;"></div>
             <div style="margin-top:12px;text-align:right;">
                 <button class="btn btn-grey" onclick="document.getElementById('transcript-modal').classList.remove('active')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Debug Modal -->
+    <div class="modal-overlay" id="debug-modal">
+        <div class="modal" style="max-width:900px;">
+            <h3><i class="fa-solid fa-bug"></i> System Debug</h3>
+            <div id="debug-content" style="max-height:65vh;overflow-y:auto;">
+                <div class="empty-state" style="color:#666;">Loading...</div>
+            </div>
+            <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;">
+                <button class="btn" style="background:#6c757d;" onclick="openDebug()"><i class="fa-solid fa-refresh"></i> Refresh</button>
+                <button class="btn btn-grey" onclick="document.getElementById('debug-modal').classList.remove('active')">Close</button>
             </div>
         </div>
     </div>
@@ -723,7 +806,8 @@ function connectTranscriptWs() {
                 document.getElementById('call-status').textContent = msg.status;
                 if (msg.status === 'ended' || msg.status === 'error') {
                     endCall();
-                    showStatus('Call ' + msg.status + '.', msg.status === 'error' ? 'error' : 'success');
+                    var detail = msg.error ? ': ' + msg.error : '.';
+                    showStatus('Call ' + msg.status + detail, msg.status === 'error' ? 'error' : 'success');
                 }
             }
         };
@@ -989,6 +1073,88 @@ function showTranscript(callSid) {
         document.getElementById('transcript-modal-content').innerHTML = html;
         document.getElementById('transcript-modal').classList.add('active');
     });
+}
+
+// ── Debug ──
+function openDebug() {
+    document.getElementById('debug-modal').classList.add('active');
+    document.getElementById('debug-content').innerHTML = '<div class="empty-state" style="color:#666;">Loading debug info...</div>';
+    fetch('/api/gemini/debug').then(r=>r.json()).then(function(d) {
+        var html = '';
+
+        // Call Server
+        html += _debugSection('Call Server', 'fa-server', function() {
+            var h = d.call_server.health || {};
+            var s = '<div class="debug-row"><span class="debug-label">Status:</span>' + _debugBadge(h.ok !== undefined ? h.ok : !h.error) + '</div>';
+            if (h.active_calls !== undefined) s += '<div class="debug-row"><span class="debug-label">Active calls:</span>' + h.active_calls + '</div>';
+            if (h.error) s += '<div class="debug-row"><span class="debug-label">Error:</span><span style="color:#e74c3c;">' + esc(h.error) + '</span></div>';
+            // Active calls detail
+            var ac = d.call_server.active_calls || {};
+            var acKeys = Object.keys(ac);
+            if (acKeys.length) {
+                s += '<div class="debug-row"><span class="debug-label">Active call IDs:</span>' + acKeys.map(esc).join(', ') + '</div>';
+            }
+            return s;
+        });
+
+        // Gemini
+        html += _debugSection('Gemini API', 'fa-robot', function() {
+            var g = d.gemini || {};
+            var s = '<div class="debug-row"><span class="debug-label">API Key:</span>' + _debugBadge(g.ok) + '</div>';
+            if (g.live_model) s += '<div class="debug-row"><span class="debug-label">Live Model:</span>' + esc(g.live_model) + '</div>';
+            if (g.text_test) s += '<div class="debug-row"><span class="debug-label">Text test:</span>' + esc(g.text_test) + '</div>';
+            if (g.error) s += '<div class="debug-row"><span class="debug-label">Error:</span><span style="color:#e74c3c;">' + esc(g.error) + '</span></div>';
+            return s;
+        });
+
+        // Twilio
+        html += _debugSection('Twilio', 'fa-phone', function() {
+            var t = d.twilio || {};
+            var s = '<div class="debug-row"><span class="debug-label">Status:</span>' + _debugBadge(t.ok) + '</div>';
+            if (t.friendly_name) s += '<div class="debug-row"><span class="debug-label">Account:</span>' + esc(t.friendly_name) + '</div>';
+            if (t.status) s += '<div class="debug-row"><span class="debug-label">Account status:</span>' + esc(t.status) + '</div>';
+            if (t.phone) s += '<div class="debug-row"><span class="debug-label">Phone:</span>' + esc(t.phone) + '</div>';
+            if (t.note) s += '<div class="debug-row"><span class="debug-label">Note:</span>' + esc(t.note) + '</div>';
+            if (t.error) s += '<div class="debug-row"><span class="debug-label">Error:</span><span style="color:#e74c3c;">' + esc(t.error) + '</span></div>';
+            return s;
+        });
+
+        // Supabase
+        html += _debugSection('Supabase', 'fa-database', function() {
+            var sb = d.supabase || {};
+            var s = '<div class="debug-row"><span class="debug-label">Connection:</span>' + _debugBadge(sb.ok) + '</div>';
+            if (sb.knowledge_bases) s += '<div class="debug-row"><span class="debug-label">Knowledge Bases table:</span>' + esc(sb.knowledge_bases) + '</div>';
+            if (sb.call_history) s += '<div class="debug-row"><span class="debug-label">Call History table:</span>' + esc(sb.call_history) + '</div>';
+            if (sb.error) s += '<div class="debug-row"><span class="debug-label">Error:</span><span style="color:#e74c3c;">' + esc(sb.error) + '</span></div>';
+            return s;
+        });
+
+        // Error Log
+        var errors = d.call_server.errors || [];
+        html += _debugSection('Recent Errors (' + errors.length + ')', 'fa-triangle-exclamation', function() {
+            if (!errors.length) return '<div style="color:#27ae60;font-size:12px;">No recent errors</div>';
+            var s = '';
+            errors.slice().reverse().forEach(function(e) {
+                s += '<div style="font-family:monospace;font-size:11px;padding:4px 0;border-bottom:1px solid #eee;white-space:pre-wrap;word-break:break-all;">' + esc(e) + '</div>';
+            });
+            return s;
+        });
+
+        document.getElementById('debug-content').innerHTML = html;
+    }).catch(function(e) {
+        document.getElementById('debug-content').innerHTML = '<div style="color:#e74c3c;">Failed to load debug info: ' + esc(String(e)) + '</div>';
+    });
+}
+
+function _debugSection(title, icon, contentFn) {
+    return '<div style="margin-bottom:16px;border:1px solid #dee2e6;border-radius:8px;overflow:hidden;">' +
+        '<div style="background:#f8f9fa;padding:8px 12px;font-weight:600;font-size:13px;border-bottom:1px solid #dee2e6;"><i class="fa-solid ' + icon + '" style="margin-right:6px;"></i>' + title + '</div>' +
+        '<div style="padding:10px 12px;">' + contentFn() + '</div></div>';
+}
+
+function _debugBadge(ok) {
+    return ok ? '<span style="background:#27ae60;color:#fff;padding:1px 8px;border-radius:10px;font-size:11px;">OK</span>'
+              : '<span style="background:#e74c3c;color:#fff;padding:1px 8px;border-radius:10px;font-size:11px;">ERROR</span>';
 }
 
 // ── Init ──
