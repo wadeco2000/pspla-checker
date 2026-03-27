@@ -907,18 +907,29 @@ Dashboard (blueprints/gemini.py) → POST /api/gemini/make-call
 **Audio Bridge (critical path):**
 - Twilio sends: mulaw 8kHz mono, base64-encoded via WebSocket `media` events
 - Convert to Gemini: `audioop.ulaw2lin()` → `audioop.ratecv(8kHz→16kHz)` → send as PCM
+- **Input audio buffered into 20ms chunks** (640 bytes at 16kHz 16-bit mono) before sending to Gemini — recommended 20-40ms
 - Gemini responds: PCM 24kHz
-- Convert to Twilio: `audioop.ratecv(24kHz→8kHz)` → `audioop.lin2ulaw()` → base64 → WebSocket
+- Convert to Twilio: `audioop.ratecv(24kHz→8kHz)` → `audioop.lin2ulaw()` → base64 → WebSocket — sent as single payload per response
 - `audioop` is built-in on Python 3.11 (Azure), use `audioop-lts` on Python 3.13+
+- Long-lived WebSocket session (no reconnect per turn)
+- Ordered ingest/serialized dispatch (single async task per direction)
 
 **Gemini Live API specifics:**
 - Model: `gemini-3.1-flash-live-preview` (only Live model available)
 - Config uses typed objects: `types.LiveConnectConfig`, `types.SpeechConfig`, etc.
-- `session.receive()` iterator ends after `turn_complete` — MUST re-enter in `while True` loop (per official Google example)
+- `session.receive()` iterator ends after `turn_complete` — MUST re-enter in `while True` loop (per official Google example from github.com/google-gemini/gemini-live-api-examples)
 - `send_client_content()` crashes with "invalid argument" — do NOT use for initial greeting
 - Pre-connecting Gemini session times out during phone ring — session must be created in WebSocket handler
-- Known 5-10 second cold start on first response (Google issue, not ours) — mitigated with Twilio `<Say>` hold message
+- Known 5-10 second cold start on first response (Google issue, not ours, see ai.google.dev forums)
+- Twilio `<Say>` hold message was tried but user didn't want it — removed
 - Transcription: `input_audio_transcription` and `output_audio_transcription` in config
+- Transcription arrives word-by-word — buffered and flushed as complete sentences on `turn_complete`
+- Interruptions: when `sc.interrupted` is true, send Twilio `clear` event to stop audio playback
+
+**Performance tracking:**
+- First audio in/out timestamps logged per call
+- Turn count logged per call
+- Debug endpoints: `/debug/errors` (last 50), `/debug/active-calls` (live state), `/debug/test-gemini` (API key test)
 
 **Settings (configurable from dashboard):**
 - Language (BCP-47 code, default: en)
