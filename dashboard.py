@@ -641,7 +641,7 @@ def _safe_error(e, fallback="An error occurred"):
 
 _AUTH_SKIP = {
     'login_page', 'login_password', 'auth_callback', 'auth_verify', 'auth_logout',
-    'service_worker', 'health_check', 'auth_2fa_page', 'auth_2fa_verify',
+    'service_worker', 'health_check', 'favicon', 'auth_2fa_page', 'auth_2fa_verify',
     'auth_request_access_page', 'auth_request_access_submit',
     'club_fitness_webhook'
 }
@@ -650,6 +650,12 @@ _AUTH_SKIP = {
 def health_check():
     """Health check endpoint for Azure App Service monitoring."""
     return 'ok', 200
+
+
+@app.route('/favicon.ico')
+def favicon():
+    """Serve favicon from static icons."""
+    return app.send_static_file('icons/icon-192.png')
 
 @app.route('/sw.js')
 def service_worker():
@@ -1569,6 +1575,7 @@ HTML_TEMPLATE = """
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="manifest" href="/static/manifest.json">
     <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
     <title>PSPLA Security Camera Checker</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer" />
     <style>
@@ -12378,6 +12385,7 @@ ACTUATE_TEMPLATE = r"""
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script>(function(){var _f=window.fetch;window.fetch=function(u,o){o=o||{};var m=(o.method||'GET').toUpperCase();if(m!=='GET'&&m!=='HEAD'){o.headers=o.headers||{};o.headers['X-CSRF-Token']=document.querySelector('meta[name="csrf-token"]').content;}return _f.call(this,u,o);};})();</script>
     <title>Actuate AI Control — PSPLA Checker</title>
+    <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer" />
     <style>
         *{box-sizing:border-box;}
@@ -15363,14 +15371,15 @@ def club_fitness_export():
 def club_fitness_stored():
     """Fetch signups stored in Supabase."""
     pl = _validate_payment_link(request.args.get("payment_link", "").strip())
-    params = {"select": "*", "order": "created_at.asc"}
+    params = {"select": "*", "order": "created_at.asc", "limit": "5000"}
     if pl:
         params["payment_link"] = f"eq.{pl}"
     try:
         r = requests.get(
             f"{SUPABASE_URL}/rest/v1/challenge_signups",
             params=params,
-            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                     "Range": "0-4999"},
             timeout=30
         )
         if r.ok:
@@ -16507,6 +16516,7 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script>(function(){var _f=window.fetch;window.fetch=function(u,o){o=o||{};var m=(o.method||'GET').toUpperCase();if(m!=='GET'&&m!=='HEAD'){o.headers=o.headers||{};o.headers['X-CSRF-Token']=document.querySelector('meta[name="csrf-token"]').content;}return _f.call(this,u,o);};})();</script>
     <title>Club Fitness Challenges</title>
+    <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" referrerpolicy="no-referrer" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
