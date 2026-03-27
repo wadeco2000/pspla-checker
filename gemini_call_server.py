@@ -154,8 +154,15 @@ async def make_call(request: Request):
         "transcript": [],
         "started_at": datetime.now(timezone.utc).isoformat(),
         "barged_in": False,
+        "gemini_session": None,
+        "gemini_ready": asyncio.Event(),
+        "gemini_error": None,
+        "gemini_cancel": asyncio.Event(),
     }
     _transcript_subscribers[call_id] = set()
+
+    # Pre-connect to Gemini while the phone is ringing
+    asyncio.create_task(_preconnect_gemini(call_id))
 
     # Create Twilio call
     try:
@@ -287,6 +294,9 @@ async def call_status(request: Request):
             if duration:
                 call["duration_seconds"] = int(duration)
             if status in ("completed", "failed", "busy", "no-answer", "canceled"):
+                # Release pre-connected Gemini session if still waiting
+                if "gemini_cancel" in call:
+                    call["gemini_cancel"].set()
                 # Broadcast end to subscribers
                 await _broadcast_transcript(cid, {"type": "status", "status": "ended",
                                                    "timestamp": datetime.now(timezone.utc).isoformat()})
@@ -298,45 +308,29 @@ async def call_status(request: Request):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  TWILIO MEDIA STREAM ↔ GEMINI LIVE API BRIDGE
+#  GEMINI PRE-CONNECT (starts during ring phase)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@app.websocket("/media-stream/{call_id}")
-async def media_stream(websocket: WebSocket, call_id: str):
-    """Handle Twilio media stream and bridge to Gemini Live API."""
-    if call_id not in _active_calls:
-        await websocket.close(code=4004, reason="Unknown call ID")
+async def _preconnect_gemini(call_id: str):
+    """Connect to Gemini Live API while the phone is still ringing.
+
+    Stores the session in _active_calls so media_stream can use it immediately.
+    Keeps the session alive until gemini_cancel is set (call ends or media_stream takes over).
+    """
+    call = _active_calls.get(call_id)
+    if not call:
         return
 
-    await websocket.accept()
-    call = _active_calls[call_id]
-    call["twilio_ws"] = websocket
-    stream_sid = None
-    log.info(f"[{call_id}] Twilio WebSocket connected")
-
-    try:
-        import audioop_lts as audioop
-    except ImportError:
-        try:
-            import audioop
-        except ImportError:
-            log.error("audioop not available — cannot convert audio")
-            await websocket.close()
-            return
-
-    # Connect to Gemini Live API
     try:
         from google import genai
         from google.genai import types
 
         gemini_client = genai.Client(api_key=GEMINI_API_KEY)
-        _log_error(call_id, f"Connecting to {GEMINI_MODEL}...")
+        _log_error(call_id, f"Pre-connecting to {GEMINI_MODEL} (during ring)...")
 
         # Build config from call settings
         _settings = call.get("settings", {})
 
-        # Map sensitivity strings to Gemini enum values
-        # Only LOW and HIGH exist — DEFAULT maps to UNSPECIFIED (lets Gemini decide)
         _START_SENS_MAP = {
             "LOW": types.StartSensitivity.START_SENSITIVITY_LOW,
             "DEFAULT": types.StartSensitivity.START_SENSITIVITY_UNSPECIFIED,
@@ -348,13 +342,10 @@ async def media_stream(websocket: WebSocket, call_id: str):
             "HIGH": types.EndSensitivity.END_SENSITIVITY_HIGH,
         }
 
-        # Default to LOW start sensitivity to avoid coughs/hums triggering interruptions
         start_sens = _START_SENS_MAP.get(
             _settings.get("start_sensitivity", "LOW").upper(),
             types.StartSensitivity.START_SENSITIVITY_LOW
         )
-        # Default to HIGH end sensitivity — 8kHz telephony line static can be
-        # misinterpreted as whispering on LOW/UNSPECIFIED, causing long pauses
         end_sens = _END_SENS_MAP.get(
             _settings.get("end_sensitivity", "HIGH").upper(),
             types.EndSensitivity.END_SENSITIVITY_HIGH
@@ -387,24 +378,93 @@ async def media_stream(websocket: WebSocket, call_id: str):
         log.info(f"[{call_id}] VAD config: start={start_sens}, end={end_sens}, silence={silence_ms}ms")
 
         async with gemini_client.aio.live.connect(model=GEMINI_MODEL, config=config) as gemini_session:
-            call["status"] = "connected"
-            await _broadcast_transcript(call_id, {
-                "type": "status", "status": "connected",
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
-            log.info(f"[{call_id}] Gemini Live session connected")
+            _log_error(call_id, f"Gemini pre-connected! Waiting for Twilio media stream...")
+            call["gemini_session"] = gemini_session
+            call["gemini_ready"].set()  # Signal that session is ready
 
-            # Send text trigger to make Gemini start speaking immediately
-            # (bypasses VAD waiting — Gemini responds to text instantly)
-            # NOTE: send_client_content() crashes on 3.1 Flash Live with 1007 error.
-            # send_realtime_input(text=...) is the correct method for audio sessions.
-            try:
-                await gemini_session.send_realtime_input(
-                    text="The phone call has been answered. Start speaking now — greet the caller."
-                )
-                log.info(f"[{call_id}] Text trigger sent to Gemini")
-            except Exception as e:
-                _log_error(call_id, f"send_realtime_input text trigger failed (non-fatal): {e}")
+            # Keep the context manager alive until the call ends
+            await call["gemini_cancel"].wait()
+            log.info(f"[{call_id}] Gemini pre-connect released")
+
+    except Exception as e:
+        _log_error(call_id, f"Gemini pre-connect error: {e}")
+        import traceback
+        _log_error(call_id, traceback.format_exc())
+        call["gemini_error"] = str(e)
+        call["gemini_ready"].set()  # Unblock media_stream so it can see the error
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  TWILIO MEDIA STREAM ↔ GEMINI LIVE API BRIDGE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.websocket("/media-stream/{call_id}")
+async def media_stream(websocket: WebSocket, call_id: str):
+    """Handle Twilio media stream and bridge to Gemini Live API."""
+    if call_id not in _active_calls:
+        await websocket.close(code=4004, reason="Unknown call ID")
+        return
+
+    await websocket.accept()
+    call = _active_calls[call_id]
+    call["twilio_ws"] = websocket
+    stream_sid = None
+    log.info(f"[{call_id}] Twilio WebSocket connected")
+
+    try:
+        import audioop_lts as audioop
+    except ImportError:
+        try:
+            import audioop
+        except ImportError:
+            log.error("audioop not available — cannot convert audio")
+            await websocket.close()
+            return
+
+    # Wait for pre-connected Gemini session (should already be ready)
+    try:
+        _log_error(call_id, "Waiting for pre-connected Gemini session...")
+        await asyncio.wait_for(call["gemini_ready"].wait(), timeout=15)
+    except asyncio.TimeoutError:
+        _log_error(call_id, "Gemini pre-connect timed out (15s)")
+        await _broadcast_transcript(call_id, {
+            "type": "status", "status": "error", "error": "Gemini connection timed out",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+        call["gemini_cancel"].set()
+        await websocket.close()
+        return
+
+    if call.get("gemini_error"):
+        _log_error(call_id, f"Gemini pre-connect failed: {call['gemini_error']}")
+        await _broadcast_transcript(call_id, {
+            "type": "status", "status": "error", "error": call["gemini_error"],
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+        call["gemini_cancel"].set()
+        await websocket.close()
+        return
+
+    gemini_session = call["gemini_session"]
+    log.info(f"[{call_id}] Using pre-connected Gemini session")
+
+    try:
+        from google.genai import types
+
+        call["status"] = "connected"
+        await _broadcast_transcript(call_id, {
+            "type": "status", "status": "connected",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+
+        # Send text trigger to make Gemini start speaking immediately
+        try:
+            await gemini_session.send_realtime_input(
+                text="The phone call has been answered. Start speaking now — greet the caller."
+            )
+            log.info(f"[{call_id}] Text trigger sent to Gemini")
+        except Exception as e:
+            _log_error(call_id, f"send_realtime_input text trigger failed (non-fatal): {e}")
 
             # Transcript accumulation buffers — collect fragments into sentences
             _ai_transcript_buffer = []
@@ -598,7 +658,7 @@ async def media_stream(websocket: WebSocket, call_id: str):
                 task.cancel()
 
     except Exception as e:
-        _log_error(call_id, f"Gemini connection error: {e}")
+        _log_error(call_id, f"Audio bridge error: {e}")
         import traceback
         _log_error(call_id, traceback.format_exc())
         await _broadcast_transcript(call_id, {
@@ -610,6 +670,8 @@ async def media_stream(websocket: WebSocket, call_id: str):
         call["status"] = "ended"
         call.pop("twilio_ws", None)
         call.pop("stream_sid", None)
+        # Release the pre-connected Gemini session
+        call["gemini_cancel"].set()
         log.info(f"[{call_id}] Call ended, saving history")
         # Broadcast ended to transcript subscribers (don't rely on Twilio callback alone)
         await _broadcast_transcript(call_id, {
