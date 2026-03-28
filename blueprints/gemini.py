@@ -1814,6 +1814,7 @@ function loadKnowledgeBases() {
         });
         if (current) sel.value = current;
         loadKbContent();
+        if (typeof _populateInboundKbDropdown === 'function') _populateInboundKbDropdown();
     });
 }
 
