@@ -466,196 +466,196 @@ async def media_stream(websocket: WebSocket, call_id: str):
         except Exception as e:
             _log_error(call_id, f"send_realtime_input text trigger failed (non-fatal): {e}")
 
-            # Transcript accumulation buffers — collect fragments into sentences
-            _ai_transcript_buffer = []
-            _caller_transcript_buffer = []
+        # Transcript accumulation buffers — collect fragments into sentences
+        _ai_transcript_buffer = []
+        _caller_transcript_buffer = []
 
-            # Rate conversion state
-            _ratecv_state_up = None    # 8kHz → 16kHz
-            _ratecv_state_down = None  # 24kHz → 8kHz
+        # Rate conversion state
+        _ratecv_state_up = None    # 8kHz → 16kHz
+        _ratecv_state_down = None  # 24kHz → 8kHz
 
-            # 20ms chunk buffer for consistent input to Gemini
-            # 16kHz × 2 bytes × 0.020s = 640 bytes per 20ms chunk
-            _CHUNK_20MS = 640
-            _input_buffer = bytearray()
+        # 20ms chunk buffer for consistent input to Gemini
+        # 16kHz × 2 bytes × 0.020s = 640 bytes per 20ms chunk
+        _CHUNK_20MS = 640
+        _input_buffer = bytearray()
 
-            # Performance tracking
-            _perf = {"first_audio_in": None, "first_audio_out": None, "turns": 0}
+        # Performance tracking
+        _perf = {"first_audio_in": None, "first_audio_out": None, "turns": 0}
 
-            async def twilio_to_gemini():
-                """Read audio from Twilio, convert to 20ms PCM chunks, send to Gemini."""
-                nonlocal stream_sid, _ratecv_state_up, _input_buffer
-                try:
-                    while True:
-                        msg = await websocket.receive_text()
-                        data = json.loads(msg)
+        async def twilio_to_gemini():
+            """Read audio from Twilio, convert to 20ms PCM chunks, send to Gemini."""
+            nonlocal stream_sid, _ratecv_state_up, _input_buffer
+            try:
+                while True:
+                    msg = await websocket.receive_text()
+                    data = json.loads(msg)
 
-                        if data["event"] == "start":
-                            stream_sid = data["start"]["streamSid"]
-                            call["stream_sid"] = stream_sid
-                            log.info(f"[{call_id}] Stream started: {stream_sid}")
+                    if data["event"] == "start":
+                        stream_sid = data["start"]["streamSid"]
+                        call["stream_sid"] = stream_sid
+                        log.info(f"[{call_id}] Stream started: {stream_sid}")
 
-                        elif data["event"] == "media":
-                            if call.get("barged_in"):
-                                # Still broadcast to monitors even when barged
-                                asyncio.create_task(_broadcast_monitor(call_id, "caller", data["media"]["payload"]))
-                                continue
-
-                            # Track first audio received
-                            if not _perf["first_audio_in"]:
-                                _perf["first_audio_in"] = datetime.now(timezone.utc).isoformat()
-
-                            # Broadcast caller audio to monitors (already base64 mulaw)
+                    elif data["event"] == "media":
+                        if call.get("barged_in"):
+                            # Still broadcast to monitors even when barged
                             asyncio.create_task(_broadcast_monitor(call_id, "caller", data["media"]["payload"]))
+                            continue
 
-                            # Decode mulaw → PCM 16-bit
-                            payload = base64.b64decode(data["media"]["payload"])
-                            pcm_8k = audioop.ulaw2lin(payload, 2)
-                            # Resample 8kHz → 16kHz
-                            pcm_16k, _ratecv_state_up = audioop.ratecv(
-                                pcm_8k, 2, 1, 8000, 16000, _ratecv_state_up
+                        # Track first audio received
+                        if not _perf["first_audio_in"]:
+                            _perf["first_audio_in"] = datetime.now(timezone.utc).isoformat()
+
+                        # Broadcast caller audio to monitors (already base64 mulaw)
+                        asyncio.create_task(_broadcast_monitor(call_id, "caller", data["media"]["payload"]))
+
+                        # Decode mulaw → PCM 16-bit
+                        payload = base64.b64decode(data["media"]["payload"])
+                        pcm_8k = audioop.ulaw2lin(payload, 2)
+                        # Resample 8kHz → 16kHz
+                        pcm_16k, _ratecv_state_up = audioop.ratecv(
+                            pcm_8k, 2, 1, 8000, 16000, _ratecv_state_up
+                        )
+
+                        # Buffer and send in 20ms chunks (640 bytes at 16kHz 16-bit mono)
+                        _input_buffer.extend(pcm_16k)
+                        while len(_input_buffer) >= _CHUNK_20MS:
+                            chunk = bytes(_input_buffer[:_CHUNK_20MS])
+                            del _input_buffer[:_CHUNK_20MS]
+                            await gemini_session.send_realtime_input(
+                                audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")
                             )
 
-                            # Buffer and send in 20ms chunks (640 bytes at 16kHz 16-bit mono)
-                            _input_buffer.extend(pcm_16k)
-                            while len(_input_buffer) >= _CHUNK_20MS:
-                                chunk = bytes(_input_buffer[:_CHUNK_20MS])
-                                del _input_buffer[:_CHUNK_20MS]
-                                await gemini_session.send_realtime_input(
-                                    audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")
-                                )
+                    elif data["event"] == "stop":
+                        # Send remaining buffer
+                        if _input_buffer:
+                            await gemini_session.send_realtime_input(
+                                audio=types.Blob(data=bytes(_input_buffer), mime_type="audio/pcm;rate=16000")
+                            )
+                            _input_buffer.clear()
+                        log.info(f"[{call_id}] Stream stopped")
+                        break
 
-                        elif data["event"] == "stop":
-                            # Send remaining buffer
-                            if _input_buffer:
-                                await gemini_session.send_realtime_input(
-                                    audio=types.Blob(data=bytes(_input_buffer), mime_type="audio/pcm;rate=16000")
-                                )
-                                _input_buffer.clear()
-                            log.info(f"[{call_id}] Stream stopped")
-                            break
+            except WebSocketDisconnect:
+                log.info(f"[{call_id}] Twilio WebSocket disconnected")
+            except Exception as e:
+                _log_error(call_id, f"Twilio→Gemini error: {e}")
+                import traceback
+                _log_error(call_id, traceback.format_exc())
 
-                except WebSocketDisconnect:
-                    log.info(f"[{call_id}] Twilio WebSocket disconnected")
-                except Exception as e:
-                    _log_error(call_id, f"Twilio→Gemini error: {e}")
-                    import traceback
-                    _log_error(call_id, traceback.format_exc())
+        async def gemini_to_twilio():
+            """Read audio from Gemini, convert, send to Twilio."""
+            nonlocal _ratecv_state_down
+            try:
+                # Re-enter receive() in a loop — iterator ends after turn_complete
+                # and must be re-entered to keep listening (per official Google example)
+                while True:
+                    async for response in gemini_session.receive():
+                        # Handle go_away (server asking us to disconnect)
+                        if response.go_away:
+                            _log_error(call_id, f"Gemini GoAway: {response.go_away}")
+                            return
 
-            async def gemini_to_twilio():
-                """Read audio from Gemini, convert, send to Twilio."""
-                nonlocal _ratecv_state_down
-                try:
-                    # Re-enter receive() in a loop — iterator ends after turn_complete
-                    # and must be re-entered to keep listening (per official Google example)
-                    while True:
-                        async for response in gemini_session.receive():
-                            # Handle go_away (server asking us to disconnect)
-                            if response.go_away:
-                                _log_error(call_id, f"Gemini GoAway: {response.go_away}")
-                                return
+                        if not response.server_content:
+                            continue
 
-                            if not response.server_content:
-                                continue
+                        sc = response.server_content
 
-                            sc = response.server_content
+                        # Handle audio output
+                        if sc.model_turn:
+                            if not _perf["first_audio_out"]:
+                                _perf["first_audio_out"] = datetime.now(timezone.utc).isoformat()
+                                _log_error(call_id, f"PERF: first audio out at {_perf['first_audio_out']}")
+                            for part in sc.model_turn.parts:
+                                if part.inline_data and part.inline_data.data:
+                                    if call.get("barged_in"):
+                                        continue
 
-                            # Handle audio output
-                            if sc.model_turn:
-                                if not _perf["first_audio_out"]:
-                                    _perf["first_audio_out"] = datetime.now(timezone.utc).isoformat()
-                                    _log_error(call_id, f"PERF: first audio out at {_perf['first_audio_out']}")
-                                for part in sc.model_turn.parts:
-                                    if part.inline_data and part.inline_data.data:
-                                        if call.get("barged_in"):
-                                            continue
+                                    pcm_24k = part.inline_data.data
+                                    if len(pcm_24k) == 0:
+                                        continue
+                                    pcm_8k, _ratecv_state_down = audioop.ratecv(
+                                        pcm_24k, 2, 1, 24000, 8000, _ratecv_state_down
+                                    )
+                                    mulaw_8k = audioop.lin2ulaw(pcm_8k, 2)
 
-                                        pcm_24k = part.inline_data.data
-                                        if len(pcm_24k) == 0:
-                                            continue
-                                        pcm_8k, _ratecv_state_down = audioop.ratecv(
-                                            pcm_24k, 2, 1, 24000, 8000, _ratecv_state_down
-                                        )
-                                        mulaw_8k = audioop.lin2ulaw(pcm_8k, 2)
+                                    if stream_sid and len(mulaw_8k) > 0:
+                                        payload = base64.b64encode(mulaw_8k).decode("utf-8")
+                                        # Broadcast AI audio to monitors
+                                        asyncio.create_task(_broadcast_monitor(call_id, "ai", payload))
+                                        try:
+                                            await websocket.send_text(json.dumps({
+                                                "event": "media",
+                                                "streamSid": stream_sid,
+                                                "media": {"payload": payload}
+                                            }))
+                                        except Exception:
+                                            return  # Twilio disconnected
 
-                                        if stream_sid and len(mulaw_8k) > 0:
-                                            payload = base64.b64encode(mulaw_8k).decode("utf-8")
-                                            # Broadcast AI audio to monitors
-                                            asyncio.create_task(_broadcast_monitor(call_id, "ai", payload))
-                                            try:
-                                                await websocket.send_text(json.dumps({
-                                                    "event": "media",
-                                                    "streamSid": stream_sid,
-                                                    "media": {"payload": payload}
-                                                }))
-                                            except Exception:
-                                                return  # Twilio disconnected
+                        # Handle input transcription (what the caller says) — accumulate
+                        if sc.input_transcription and sc.input_transcription.text:
+                            _caller_transcript_buffer.append(sc.input_transcription.text)
 
-                            # Handle input transcription (what the caller says) — accumulate
-                            if sc.input_transcription and sc.input_transcription.text:
-                                _caller_transcript_buffer.append(sc.input_transcription.text)
+                        # Handle output transcription (what the AI says) — accumulate
+                        if sc.output_transcription and sc.output_transcription.text:
+                            _ai_transcript_buffer.append(sc.output_transcription.text)
 
-                            # Handle output transcription (what the AI says) — accumulate
-                            if sc.output_transcription and sc.output_transcription.text:
-                                _ai_transcript_buffer.append(sc.output_transcription.text)
+                        # Handle turn complete — flush transcript buffers, log perf, re-enter receive loop
+                        if sc.turn_complete:
+                            _perf["turns"] += 1
+                            _log_error(call_id, f"PERF: turn {_perf['turns']} complete")
+                            # Flush AI buffer
+                            if _ai_transcript_buffer:
+                                full_text = " ".join(_ai_transcript_buffer)
+                                ts = datetime.now(timezone.utc).isoformat()
+                                call["transcript"].append({"speaker": "ai", "text": full_text, "timestamp": ts})
+                                await _broadcast_transcript(call_id, {
+                                    "type": "transcript", "speaker": "ai", "text": full_text, "timestamp": ts
+                                })
+                                _ai_transcript_buffer.clear()
+                            # Flush caller buffer
+                            if _caller_transcript_buffer:
+                                full_text = " ".join(_caller_transcript_buffer)
+                                ts = datetime.now(timezone.utc).isoformat()
+                                call["transcript"].append({"speaker": "caller", "text": full_text, "timestamp": ts})
+                                await _broadcast_transcript(call_id, {
+                                    "type": "transcript", "speaker": "caller", "text": full_text, "timestamp": ts
+                                })
+                                _caller_transcript_buffer.clear()
 
-                            # Handle turn complete — flush transcript buffers, log perf, re-enter receive loop
-                            if sc.turn_complete:
-                                _perf["turns"] += 1
-                                _log_error(call_id, f"PERF: turn {_perf['turns']} complete")
-                                # Flush AI buffer
-                                if _ai_transcript_buffer:
-                                    full_text = " ".join(_ai_transcript_buffer)
-                                    ts = datetime.now(timezone.utc).isoformat()
-                                    call["transcript"].append({"speaker": "ai", "text": full_text, "timestamp": ts})
-                                    await _broadcast_transcript(call_id, {
-                                        "type": "transcript", "speaker": "ai", "text": full_text, "timestamp": ts
-                                    })
-                                    _ai_transcript_buffer.clear()
-                                # Flush caller buffer
-                                if _caller_transcript_buffer:
-                                    full_text = " ".join(_caller_transcript_buffer)
-                                    ts = datetime.now(timezone.utc).isoformat()
-                                    call["transcript"].append({"speaker": "caller", "text": full_text, "timestamp": ts})
-                                    await _broadcast_transcript(call_id, {
-                                        "type": "transcript", "speaker": "caller", "text": full_text, "timestamp": ts
-                                    })
-                                    _caller_transcript_buffer.clear()
+                        # Handle interrupted (barge-in by caller)
+                        if sc.interrupted:
+                            if stream_sid:
+                                try:
+                                    await websocket.send_text(json.dumps({
+                                        "event": "clear",
+                                        "streamSid": stream_sid
+                                    }))
+                                except Exception:
+                                    return
 
-                            # Handle interrupted (barge-in by caller)
-                            if sc.interrupted:
-                                if stream_sid:
-                                    try:
-                                        await websocket.send_text(json.dumps({
-                                            "event": "clear",
-                                            "streamSid": stream_sid
-                                        }))
-                                    except Exception:
-                                        return
+                    # receive() iterator ended — re-enter
+                    _log_error(call_id, "Gemini receive iterator ended, re-entering...")
 
-                        # receive() iterator ended — re-enter
-                        _log_error(call_id, "Gemini receive iterator ended, re-entering...")
+            except Exception as e:
+                _log_error(call_id, f"Gemini→Twilio error: {e}")
+                import traceback
+                _log_error(call_id, traceback.format_exc())
 
-                except Exception as e:
-                    _log_error(call_id, f"Gemini→Twilio error: {e}")
-                    import traceback
-                    _log_error(call_id, traceback.format_exc())
+        # Run both directions concurrently using create_task (per official example)
+        _log_error(call_id, "Gemini Live session connected! Starting audio bridge tasks...")
+        twilio_task = asyncio.create_task(twilio_to_gemini())
+        gemini_task = asyncio.create_task(gemini_to_twilio())
 
-            # Run both directions concurrently using create_task (per official example)
-            _log_error(call_id, "Gemini Live session connected! Starting audio bridge tasks...")
-            twilio_task = asyncio.create_task(twilio_to_gemini())
-            gemini_task = asyncio.create_task(gemini_to_twilio())
-
-            # Wait for either task to finish (usually twilio_to_gemini ends on disconnect)
-            done, pending = await asyncio.wait(
-                [twilio_task, gemini_task],
-                return_when=asyncio.FIRST_COMPLETED
-            )
-            for task in done:
-                if task.exception():
-                    _log_error(call_id, f"Task exception: {task.exception()}")
-            for task in pending:
-                task.cancel()
+        # Wait for either task to finish (usually twilio_to_gemini ends on disconnect)
+        done, pending = await asyncio.wait(
+            [twilio_task, gemini_task],
+            return_when=asyncio.FIRST_COMPLETED
+        )
+        for task in done:
+            if task.exception():
+                _log_error(call_id, f"Task exception: {task.exception()}")
+        for task in pending:
+            task.cancel()
 
     except Exception as e:
         _log_error(call_id, f"Audio bridge error: {e}")
