@@ -967,19 +967,11 @@ async def handle_inbound_call(request: Request):
     if not system_instruction:
         system_instruction = "You are a helpful AI assistant answering phone calls."
 
-    # Pre-compute RAG context
-    if kb and kb.get("rag_enabled") and system_instruction:
-        try:
-            rag_context = _rag_search_sync(kb_id, system_instruction, top_k=5)
-            if rag_context:
-                system_instruction += (
-                    "\n\n--- REFERENCE DOCUMENTS ---\n"
-                    "The following are relevant excerpts from reference documents. "
-                    "Use this information to answer questions accurately.\n\n"
-                    + rag_context
-                )
-        except Exception as e:
-            log.error(f"Inbound RAG error: {e}")
+    # For inbound, skip pre-computed RAG — rely on mid-call RAG instead.
+    # Pre-computed RAG needs a specific query but we don't know what the caller will ask yet.
+    # Mid-call RAG searches based on each caller utterance which is much more relevant.
+    if kb and kb.get("rag_enabled"):
+        _log_error("inbound", f"RAG enabled for kb {kb_id} — mid-call search will handle document lookups")
 
     # Build settings
     settings = {
@@ -1011,7 +1003,7 @@ async def handle_inbound_call(request: Request):
 
     call_id = str(uuid.uuid4())[:12]
     ws_token = str(uuid.uuid4())
-    _log_error(call_id, f"Inbound call from {caller} — provider: {settings['ai_provider']}, kb: {kb_id}, rag_enabled: {kb.get('rag_enabled') if kb else False}, greeting: {greeting[:50] if greeting else 'none'}, prompt_len: {len(system_instruction)}")
+    _log_error(call_id, f"Inbound call from {caller} — provider: {settings['ai_provider']}, kb: {kb_id}, rag_enabled: {kb.get('rag_enabled') if kb else False}, rag_kb_id: {settings.get('rag_kb_id')}, greeting: {greeting[:50] if greeting else 'none'}, prompt_len: {len(system_instruction)}")
 
     # Create call state (same structure as outbound)
     _active_calls[call_id] = {
