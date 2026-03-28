@@ -438,27 +438,30 @@ class ElevenLabsProvider:
         self._ws = await websockets.connect(signed_url)
         log.info(f"[{self._call_id}] ElevenLabs WebSocket connected")
 
-        # Send conversation config override
+        # Send conversation config — only override fields the agent allows
+        # Voice and prompt are configured in the ElevenLabs dashboard per agent
         settings = self._call.get("settings", {})
         language = settings.get("language", "en")
+        system_instruction = self._call.get("system_instruction", "")
 
         config = {
             "type": "conversation_initiation_client_data",
-            "conversation_config_override": {
-                "agent": {
-                    "prompt": {
-                        "prompt": self._call.get("system_instruction", "You are a helpful AI assistant.")
-                            + f"\n\nIMPORTANT: You are on a live phone call. You MUST speak in English only. Start speaking immediately — introduce yourself right away."
-                            + "\n\nWhen the conversation is naturally over, say goodbye clearly."
-                    },
-                    "first_message": "",  # We use the system prompt to drive the greeting
-                    "language": language,
-                },
-                "tts": {
-                    "voice_id": self._call.get("voice_name", "IKne3meq5aSn9XLyUdCD"),  # Charlie (Australian) default
-                }
-            }
         }
+
+        # Only send overrides if we have a knowledge base prompt to inject
+        overrides = {}
+        if system_instruction:
+            overrides["agent"] = {
+                "prompt": {
+                    "prompt": system_instruction
+                        + "\n\nIMPORTANT: You are on a live phone call. Start speaking immediately."
+                        + "\n\nWhen the conversation is naturally over, say goodbye clearly."
+                },
+                "language": language,
+            }
+        if overrides:
+            config["conversation_config_override"] = overrides
+
         await self._ws.send(json.dumps(config))
 
         # Wait for conversation_initiation_metadata
