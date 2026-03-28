@@ -855,6 +855,65 @@ def rag_delete_document(doc_id):
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
+@gemini_bp.route("/api/gemini/rag/documents/<int:doc_id>/chunks", methods=["GET"])
+def rag_document_chunks(doc_id):
+    """Return all chunks for a document."""
+    try:
+        r = _requests.get(f"{SUPABASE_URL}/rest/v1/rag_chunks",
+            params={"select": "chunk_index,content,token_count", "document_id": f"eq.{doc_id}", "order": "chunk_index.asc"},
+            headers=_sb_headers(), timeout=10)
+        if not r.ok:
+            return jsonify({"ok": False, "error": f"HTTP {r.status_code}"}), 502
+        return jsonify({"ok": True, "chunks": r.json()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@gemini_bp.route("/api/gemini/rag/test-search", methods=["POST"])
+def rag_test_search():
+    """Test RAG search — returns matching chunks with similarity scores."""
+    data = request.json or {}
+    query = data.get("query", "").strip()
+    kb_id = data.get("kb_id")
+    if not query:
+        return jsonify({"ok": False, "error": "Query is required"}), 400
+
+    api_key = os.getenv("OPENAI_API_KEY", "")
+    if not api_key:
+        return jsonify({"ok": False, "error": "OPENAI_API_KEY not configured"}), 500
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+        resp = client.embeddings.create(model="text-embedding-3-small", input=[query[:8000]])
+        query_embedding = resp.data[0].embedding
+
+        payload = {
+            "query_embedding": query_embedding,
+            "match_threshold": 0.2,
+            "match_count": 5,
+        }
+        if kb_id:
+            payload["match_kb_id"] = kb_id
+
+        r = _requests.post(f"{SUPABASE_URL}/rest/v1/rpc/match_rag_chunks",
+            json=payload, headers=_sb_headers(), timeout=10)
+        if not r.ok:
+            return jsonify({"ok": False, "error": f"Search failed: HTTP {r.status_code}"}), 502
+
+        results = []
+        for chunk in r.json():
+            results.append({
+                "content": chunk.get("content", ""),
+                "similarity": round(chunk.get("similarity", 0), 3),
+                "chunk_index": chunk.get("chunk_index"),
+                "document_id": chunk.get("document_id"),
+            })
+        return jsonify({"ok": True, "results": results, "query": query})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 @gemini_bp.route("/api/gemini/rag/kb-documents/<int:kb_id>", methods=["GET"])
 def rag_kb_documents(kb_id):
     """List documents attached to a knowledge base."""
@@ -1272,6 +1331,34 @@ CALL PROCEDURE:
     </div>
 
     <!-- Debug Modal -->
+    <div class="modal-overlay" id="chunks-modal">
+        <div class="modal" style="max-width:800px;">
+            <h3><i class="fa-solid fa-file-lines"></i> Extracted Text — <span id="chunks-doc-title"></span></h3>
+            <div id="chunks-content" style="max-height:65vh;overflow-y:auto;">
+                <div class="empty-state" style="color:#666;">Loading...</div>
+            </div>
+            <div style="margin-top:12px;text-align:right;">
+                <button class="btn btn-grey" onclick="document.getElementById('chunks-modal').classList.remove('active')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="test-search-modal">
+        <div class="modal" style="max-width:800px;">
+            <h3><i class="fa-solid fa-magnifying-glass"></i> Test RAG Search</h3>
+            <div style="display:flex;gap:8px;margin-bottom:12px;">
+                <input type="text" id="test-search-query" placeholder="Ask a question about this document..." style="flex:1;" onkeydown="if(event.key==='Enter')runTestSearch()">
+                <button class="btn" style="background:#3498db;" onclick="runTestSearch()"><i class="fa-solid fa-search"></i> Search</button>
+            </div>
+            <div id="test-search-results" style="max-height:55vh;overflow-y:auto;">
+                <div style="font-size:12px;color:#888;">Enter a question and click Search to find matching chunks.</div>
+            </div>
+            <div style="margin-top:12px;text-align:right;">
+                <button class="btn btn-grey" onclick="document.getElementById('test-search-modal').classList.remove('active')">Close</button>
+            </div>
+        </div>
+    </div>
+
     <div class="modal-overlay" id="debug-modal">
         <div class="modal" style="max-width:900px;">
             <h3><i class="fa-solid fa-bug"></i> System Debug</h3>
@@ -2126,7 +2213,13 @@ function loadDocuments() {
             if (doc.status === 'ready') html += '<br><span style="font-size:9px;color:#27ae60;">' + (doc.char_count ? doc.char_count.toLocaleString() + ' chars' : '') + '</span>';
             if (doc.error_message) html += '<br><span style="font-size:10px;color:#e74c3c;">' + esc(doc.error_message).substring(0,100) + '</span>';
             html += '</td>';
-            html += '<td><button class="btn btn-red" style="font-size:10px;padding:2px 8px;" onclick="deleteDocument(' + doc.id + ')"><i class="fa-solid fa-trash"></i></button></td></tr>';
+            html += '<td style="white-space:nowrap;">';
+            if (doc.status === 'ready') {
+                html += '<button class="btn" style="font-size:10px;padding:2px 8px;background:#6c757d;margin-right:4px;" onclick="viewChunks(' + doc.id + ',\'' + esc(doc.title).replace(/'/g, "\\'") + '\')" title="View extracted text"><i class="fa-solid fa-eye"></i></button>';
+                html += '<button class="btn" style="font-size:10px;padding:2px 8px;background:#3498db;margin-right:4px;" onclick="openTestSearch(' + doc.id + ')" title="Test RAG search"><i class="fa-solid fa-magnifying-glass"></i></button>';
+            }
+            html += '<button class="btn btn-red" style="font-size:10px;padding:2px 8px;" onclick="deleteDocument(' + doc.id + ')"><i class="fa-solid fa-trash"></i></button>';
+            html += '</td></tr>';
         });
         html += '</tbody></table>';
         container.innerHTML = html;
@@ -2136,6 +2229,67 @@ function loadDocuments() {
         if (d.documents.some(function(doc) { return _processing.indexOf(doc.status) >= 0; })) {
             setTimeout(loadDocuments, 2000);
         }
+    });
+}
+
+function viewChunks(docId, title) {
+    document.getElementById('chunks-doc-title').textContent = title;
+    document.getElementById('chunks-content').innerHTML = '<div class="empty-state" style="color:#666;">Loading chunks...</div>';
+    document.getElementById('chunks-modal').classList.add('active');
+    fetch('/api/gemini/rag/documents/' + docId + '/chunks').then(r=>r.json()).then(function(d) {
+        if (!d.ok || !d.chunks.length) {
+            document.getElementById('chunks-content').innerHTML = '<div style="color:#888;">No chunks found.</div>';
+            return;
+        }
+        var html = '';
+        d.chunks.forEach(function(c) {
+            html += '<div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:8px;">'
+                + '<div style="font-size:11px;color:#888;margin-bottom:6px;"><strong>Chunk ' + c.chunk_index + '</strong> — ' + (c.token_count || '?') + ' tokens</div>'
+                + '<div style="font-size:12px;white-space:pre-wrap;font-family:monospace;max-height:200px;overflow-y:auto;">' + esc(c.content) + '</div>'
+                + '</div>';
+        });
+        document.getElementById('chunks-content').innerHTML = html;
+    });
+}
+
+var _testSearchDocId = null;
+function openTestSearch(docId) {
+    _testSearchDocId = docId;
+    document.getElementById('test-search-query').value = '';
+    document.getElementById('test-search-results').innerHTML = '<div style="font-size:12px;color:#888;">Enter a question and click Search to find matching chunks.</div>';
+    document.getElementById('test-search-modal').classList.add('active');
+    document.getElementById('test-search-query').focus();
+}
+
+function runTestSearch() {
+    var query = document.getElementById('test-search-query').value.trim();
+    if (!query) return;
+    var kbId = document.getElementById('kb-select').value;
+    document.getElementById('test-search-results').innerHTML = '<div style="color:#666;"><i class="fa-solid fa-spinner fa-spin"></i> Searching...</div>';
+    fetch('/api/gemini/rag/test-search', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({query: query, kb_id: kbId ? parseInt(kbId) : null})
+    }).then(r=>r.json()).then(function(d) {
+        if (!d.ok) {
+            document.getElementById('test-search-results').innerHTML = '<div style="color:#e74c3c;">Error: ' + esc(d.error) + '</div>';
+            return;
+        }
+        if (!d.results.length) {
+            document.getElementById('test-search-results').innerHTML = '<div style="color:#f39c12;">No matching chunks found for: "' + esc(query) + '"</div>';
+            return;
+        }
+        var html = '<div style="font-size:11px;color:#888;margin-bottom:8px;">' + d.results.length + ' result(s) for "' + esc(query) + '"</div>';
+        d.results.forEach(function(r) {
+            var pct = Math.round(r.similarity * 100);
+            var color = pct >= 50 ? '#27ae60' : pct >= 30 ? '#f39c12' : '#e74c3c';
+            html += '<div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:8px;">'
+                + '<div style="font-size:11px;margin-bottom:6px;"><span style="color:' + color + ';font-weight:bold;">' + pct + '% match</span>'
+                + (r.chunk_index !== null ? ' — Chunk ' + r.chunk_index : '') + '</div>'
+                + '<div style="font-size:12px;white-space:pre-wrap;font-family:monospace;max-height:200px;overflow-y:auto;">' + esc(r.content) + '</div>'
+                + '</div>';
+        });
+        document.getElementById('test-search-results').innerHTML = html;
     });
 }
 
