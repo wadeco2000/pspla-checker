@@ -440,21 +440,36 @@ class ElevenLabsProvider:
         self._ws = await websockets.connect(signed_url)
         log.info(f"[{self._call_id}] ElevenLabs WebSocket connected")
 
-        # Send initiation — don't override agent config (voice, prompt, language
-        # are all set in the ElevenLabs dashboard per agent). Overrides cause
-        # policy violations unless explicitly enabled in agent settings.
-        # We can pass dynamic_variables to inject context without overriding.
+        # Send initiation with overrides (now enabled in agent dashboard)
         system_instruction = self._call.get("system_instruction", "")
+        settings = self._call.get("settings", {})
+        language = settings.get("language", "en")
 
         config = {"type": "conversation_initiation_client_data"}
+        overrides = {}
 
-        # Use dynamic_variables to pass context (doesn't require override permission)
+        # Override prompt if knowledge base selected
         if system_instruction:
-            config["dynamic_variables"] = {
-                "context": system_instruction
+            overrides["agent"] = {
+                "prompt": {"prompt": system_instruction},
+                "language": language,
             }
 
+        # Override voice if explicitly selected in our dashboard dropdown
+        # Don't override if it's a non-ElevenLabs voice ID (Gemini/OpenAI voice names)
+        voice_id = self._call.get("voice_name", "")
+        if voice_id and len(voice_id) > 15:  # ElevenLabs voice IDs are long strings
+            overrides["tts"] = {"voice_id": voice_id}
+
+        if overrides:
+            config["conversation_config_override"] = overrides
+
+        # Pass context as dynamic variables too
+        if system_instruction:
+            config["dynamic_variables"] = {"context": system_instruction}
+
         await self._ws.send(json.dumps(config))
+        _log_error(self._call_id, f"ElevenLabs init sent: voice_id={voice_id}, has_prompt={bool(system_instruction)}")
 
         # Wait for conversation_initiation_metadata
         msg = json.loads(await self._ws.recv())
