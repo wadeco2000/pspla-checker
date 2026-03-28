@@ -915,6 +915,52 @@ def rag_test_search():
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
+@gemini_bp.route("/api/gemini/rag/test-ask", methods=["POST"])
+def rag_test_ask():
+    """Ask AI a question using RAG chunks as context — simulates what the phone agent would say."""
+    data = request.json or {}
+    query = data.get("query", "").strip()
+    chunks = data.get("chunks", [])
+    kb_id = data.get("kb_id")
+    strict = data.get("strict", False)
+    if not query:
+        return jsonify({"ok": False, "error": "Query is required"}), 400
+
+    # Get the KB system prompt if available
+    system_instruction = ""
+    if kb_id:
+        try:
+            r = _requests.get(f"{SUPABASE_URL}/rest/v1/gemini_knowledge_bases",
+                params={"select": "content", "id": f"eq.{kb_id}"}, headers=_sb_headers(), timeout=5)
+            if r.ok and r.json():
+                system_instruction = r.json()[0].get("content", "")
+        except Exception:
+            pass
+
+    # Build context from chunks
+    rag_context = "\n\n---\n\n".join(c.get("content", "") for c in chunks if c.get("content"))
+
+    prompt = system_instruction or "You are a helpful AI assistant on a phone call."
+    prompt += "\n\n--- REFERENCE DOCUMENTS ---\n" + rag_context if rag_context else ""
+    if strict:
+        prompt += "\n\nSTRICT MODE: You must ONLY use information from the reference documents above. If the answer is not in the documents, say 'I don't have that information in my reference materials.'"
+    prompt += "\n\nRespond as if you are speaking on a phone call — be concise and conversational."
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=500,
+            system=prompt,
+            messages=[{"role": "user", "content": query}],
+        )
+        answer = msg.content[0].text
+        return jsonify({"ok": True, "answer": answer})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 @gemini_bp.route("/api/gemini/rag/kb-documents/<int:kb_id>", methods=["GET"])
 def rag_kb_documents(kb_id):
     """List documents attached to a knowledge base."""
@@ -2262,10 +2308,12 @@ function openTestSearch(docId) {
     document.getElementById('test-search-query').focus();
 }
 
+var _lastSearchResults = [];
 function runTestSearch() {
     var query = document.getElementById('test-search-query').value.trim();
     if (!query) return;
     var kbId = document.getElementById('kb-select').value;
+    _lastSearchResults = [];
     document.getElementById('test-search-results').innerHTML = '<div style="color:#666;"><i class="fa-solid fa-spinner fa-spin"></i> Searching...</div>';
     fetch('/api/gemini/rag/test-search', {
         method: 'POST',
@@ -2280,6 +2328,7 @@ function runTestSearch() {
             document.getElementById('test-search-results').innerHTML = '<div style="color:#f39c12;">No matching chunks found for: "' + esc(query) + '"</div>';
             return;
         }
+        _lastSearchResults = d.results;
         var html = '<div style="font-size:11px;color:#888;margin-bottom:8px;">' + d.results.length + ' result(s) for "' + esc(query) + '"</div>';
         d.results.forEach(function(r) {
             var pct = Math.round(r.similarity * 100);
@@ -2290,7 +2339,32 @@ function runTestSearch() {
                 + '<div style="font-size:12px;white-space:pre-wrap;font-family:monospace;max-height:200px;overflow-y:auto;">' + esc(r.content) + '</div>'
                 + '</div>';
         });
+        html += '<div style="margin-top:12px;border-top:1px solid #e2e8f0;padding-top:12px;">'
+            + '<button class="btn" style="background:#8e44ad;width:100%;" onclick="askAI()"><i class="fa-solid fa-robot"></i> Ask AI — what would the agent say?</button>'
+            + '</div>';
+        html += '<div id="ai-response"></div>';
         document.getElementById('test-search-results').innerHTML = html;
+    });
+}
+
+function askAI() {
+    var query = document.getElementById('test-search-query').value.trim();
+    var kbId = document.getElementById('kb-select').value;
+    if (!query || !_lastSearchResults.length) return;
+    document.getElementById('ai-response').innerHTML = '<div style="color:#666;margin-top:8px;"><i class="fa-solid fa-spinner fa-spin"></i> Asking AI...</div>';
+    fetch('/api/gemini/rag/test-ask', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({query: query, chunks: _lastSearchResults, kb_id: kbId ? parseInt(kbId) : null, strict: true})
+    }).then(r=>r.json()).then(function(d) {
+        if (!d.ok) {
+            document.getElementById('ai-response').innerHTML = '<div style="color:#e74c3c;margin-top:8px;">Error: ' + esc(d.error) + '</div>';
+            return;
+        }
+        document.getElementById('ai-response').innerHTML = '<div style="margin-top:12px;background:#f0e6ff;border:1px solid #d4b5ff;border-radius:8px;padding:12px;">'
+            + '<div style="font-size:11px;color:#8e44ad;font-weight:bold;margin-bottom:6px;"><i class="fa-solid fa-robot"></i> AI would say:</div>'
+            + '<div style="font-size:13px;">' + esc(d.answer) + '</div>'
+            + '</div>';
     });
 }
 
