@@ -466,25 +466,28 @@ class ElevenLabsProvider:
             has_agent = bool(settings.get("elevenlabs_agent_id"))
 
             config = {"type": "conversation_initiation_client_data"}
+            prompt_source = settings.get("elevenlabs_prompt_source", "agent")
+            language = settings.get("language", "en")
 
             # Override first_message to empty — wait for caller to speak first
             overrides = {"agent": {"first_message": ""}}
 
+            # Use knowledge base prompt if selected, otherwise agent's own prompt
+            if prompt_source == "knowledgebase" and system_instruction:
+                overrides["agent"]["prompt"] = {"prompt": system_instruction}
+                overrides["agent"]["language"] = language
+
             if not has_agent:
-                language = settings.get("language", "en")
                 voice_id = self._call.get("voice_name", "")
                 if voice_id and len(voice_id) > 15:
                     overrides["tts"] = {"voice_id": voice_id}
-                if system_instruction:
-                    overrides["agent"]["prompt"] = {"prompt": system_instruction}
-                    overrides["agent"]["language"] = language
 
             config["conversation_config_override"] = overrides
 
             if system_instruction:
                 config["dynamic_variables"] = {"context": system_instruction}
 
-            _log_error(self._call_id, f"ElevenLabs init NOW (media stream ready): has_agent={has_agent}")
+            _log_error(self._call_id, f"ElevenLabs init: agent={has_agent}, prompt_source={prompt_source}")
             await self._ws.send(json.dumps(config))
 
     async def receive_loop(self, on_audio, on_ai_transcript, on_caller_transcript, on_turn_complete, on_interrupted):

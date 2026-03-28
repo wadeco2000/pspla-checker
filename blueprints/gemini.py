@@ -542,6 +542,18 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                 </div>
                 <span style="font-size:10px;color:#888;">Select which ElevenLabs agent handles the call. Agents are configured in the ElevenLabs dashboard with their own voice, prompt, and tools. The voice dropdown above is ignored when an agent is selected (agent has its own voice).</span>
             </div>
+            <div data-provider="elevenlabs" style="grid-column:1/-1;">
+                <label class="form-label">Prompt Source</label>
+                <div style="display:flex;align-items:center;gap:12px;margin-top:4px;">
+                    <label style="font-weight:normal;display:flex;align-items:center;gap:6px;cursor:pointer;">
+                        <input type="radio" name="el-prompt-source" value="agent" checked onchange="onElPromptSourceChange()"> Use agent's prompt (from ElevenLabs dashboard)
+                    </label>
+                    <label style="font-weight:normal;display:flex;align-items:center;gap:6px;cursor:pointer;">
+                        <input type="radio" name="el-prompt-source" value="knowledgebase" onchange="onElPromptSourceChange()"> Use knowledge base prompt (from this page)
+                    </label>
+                </div>
+                <span style="font-size:10px;color:#888;">Choose whether the AI uses the prompt configured on the ElevenLabs agent, or the knowledge base content selected above.</span>
+            </div>
             <div>
                 <label class="form-label">Language</label>
                 <select id="set-language" style="width:100%;">
@@ -824,10 +836,12 @@ function getCallSettings() {
         end_sensitivity: document.getElementById('set-end-sensitivity').value,
         silence_duration_ms: parseInt(document.getElementById('set-silence-ms').value) || 500,
     };
-    // Add ElevenLabs agent ID if selected
+    // Add ElevenLabs agent ID and prompt source if selected
     if (settings.ai_provider === 'elevenlabs') {
         var agentId = document.getElementById('set-elevenlabs-agent').value;
         if (agentId) settings.elevenlabs_agent_id = agentId;
+        var promptSource = document.querySelector('input[name="el-prompt-source"]:checked');
+        settings.elevenlabs_prompt_source = promptSource ? promptSource.value : 'agent';
     }
     return settings;
 }
@@ -883,6 +897,11 @@ function onProviderChange() {
     localStorage.setItem('gemini_ai_provider', provider);
 }
 
+function onElPromptSourceChange() {
+    var source = document.querySelector('input[name="el-prompt-source"]:checked').value;
+    localStorage.setItem('gemini_el_prompt_source', source);
+}
+
 function loadElevenLabsAgents() {
     var select = document.getElementById('set-elevenlabs-agent');
     select.innerHTML = '<option value="">Loading...</option>';
@@ -918,6 +937,12 @@ function _restorePrefs() {
     var savedProvider = localStorage.getItem('gemini_ai_provider');
     if (savedProvider) document.getElementById('set-ai-provider').value = savedProvider;
     onProviderChange();
+    // Restore ElevenLabs prompt source
+    var savedPromptSource = localStorage.getItem('gemini_el_prompt_source');
+    if (savedPromptSource) {
+        var radio = document.querySelector('input[name="el-prompt-source"][value="' + savedPromptSource + '"]');
+        if (radio) radio.checked = true;
+    }
 }
 _restorePrefs();
 
