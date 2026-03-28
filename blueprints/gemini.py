@@ -1088,13 +1088,10 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
             </div>
             <div data-provider="gemini">
                 <label class="form-label">Thinking Level</label>
-                <select id="set-thinking" style="width:100%;">
+                <select id="set-thinking" style="width:100%;opacity:0.5;" disabled>
                     <option value="minimal" selected>Minimal (fastest)</option>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High (most thoughtful)</option>
                 </select>
-                <span style="font-size:10px;color:#888;">Controls how much the AI "thinks" before responding. Higher levels give more considered answers but add latency. Minimal is best for natural phone conversations.</span>
+                <span style="font-size:10px;color:#f39c12;">Not available for real-time voice calls. Thinking modes require the Gemini batch API, not the Live streaming API used for phone calls.</span>
             </div>
             <div data-provider="gemini">
                 <label class="form-label">Start of Speech Sensitivity</label>
@@ -1121,10 +1118,10 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
             </div>
             <div data-provider="gemini">
                 <label class="form-label">Include AI Thoughts</label>
-                <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;">
-                    <input type="checkbox" id="set-include-thoughts"> Show AI reasoning in transcript
+                <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;opacity:0.5;">
+                    <input type="checkbox" id="set-include-thoughts" disabled> Show AI reasoning in transcript
                 </label>
-                <span style="font-size:10px;color:#888;">When enabled, the AI's internal reasoning is included in the live transcript. Useful for debugging knowledge base prompts but adds noise to the transcript.</span>
+                <span style="font-size:10px;color:#f39c12;">Not available. Gemini Live responses don't include internal reasoning in real-time voice mode.</span>
             </div>
             <div>
                 <label class="form-label">Strict Mode</label>
@@ -1247,6 +1244,7 @@ CALL PROCEDURE:
             <!-- RAG Document Attachment -->
             <div style="margin-top:16px;border-top:1px solid #e2e8f0;padding-top:12px;">
                 <label class="form-label"><i class="fa-solid fa-book"></i> Attached Documents (RAG)</label>
+                <span style="font-size:10px;color:#888;">Check the documents the AI should reference during calls. Unchecked documents will not be searched.</span>
                 <div id="kb-doc-checklist" style="max-height:150px;overflow-y:auto;font-size:12px;margin:8px 0;">
                     <span style="color:#888;">Loading documents...</span>
                 </div>
@@ -1435,8 +1433,6 @@ function getCallSettings() {
     var settings = {
         ai_provider: document.getElementById('set-ai-provider').value,
         language: document.getElementById('set-language').value,
-        thinking_level: document.getElementById('set-thinking').value,
-        include_thoughts: document.getElementById('set-include-thoughts').checked,
         start_sensitivity: document.getElementById('set-start-sensitivity').value,
         end_sensitivity: document.getElementById('set-end-sensitivity').value,
         silence_duration_ms: parseInt(document.getElementById('set-silence-ms').value) || 500,
@@ -1540,10 +1536,8 @@ function _savePrefs() {
     // Persist all settings
     localStorage.setItem('gemini_language', document.getElementById('set-language').value);
     localStorage.setItem('gemini_end_sensitivity', document.getElementById('set-end-sensitivity').value);
-    localStorage.setItem('gemini_thinking', document.getElementById('set-thinking').value);
     localStorage.setItem('gemini_start_sensitivity', document.getElementById('set-start-sensitivity').value);
     localStorage.setItem('gemini_silence_ms', document.getElementById('set-silence-ms').value);
-    localStorage.setItem('gemini_include_thoughts', document.getElementById('set-include-thoughts').checked);
     localStorage.setItem('gemini_strict_mode', document.getElementById('set-strict-mode').checked);
     var ragSource = document.querySelector('input[name="el-rag-source"]:checked');
     if (ragSource) localStorage.setItem('gemini_el_rag_source', ragSource.value);
@@ -1572,14 +1566,10 @@ function _restorePrefs() {
     if (savedLang) document.getElementById('set-language').value = savedLang;
     var savedEndSens = localStorage.getItem('gemini_end_sensitivity');
     if (savedEndSens) document.getElementById('set-end-sensitivity').value = savedEndSens;
-    var savedThinking = localStorage.getItem('gemini_thinking');
-    if (savedThinking) document.getElementById('set-thinking').value = savedThinking;
     var savedStartSens = localStorage.getItem('gemini_start_sensitivity');
     if (savedStartSens) document.getElementById('set-start-sensitivity').value = savedStartSens;
     var savedSilence = localStorage.getItem('gemini_silence_ms');
     if (savedSilence) document.getElementById('set-silence-ms').value = savedSilence;
-    var savedThoughts = localStorage.getItem('gemini_include_thoughts');
-    if (savedThoughts === 'true') document.getElementById('set-include-thoughts').checked = true;
     var savedStrict = localStorage.getItem('gemini_strict_mode');
     if (savedStrict === 'true') document.getElementById('set-strict-mode').checked = true;
 }
