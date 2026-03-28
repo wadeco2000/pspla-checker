@@ -7354,9 +7354,27 @@ def _send_welcome_email(to_email, to_name, added_by, permissions=None):
     _has_pspla = any(perms.get(g) for g in _pspla_groups)
     actuate_only = perms.get('actuate', False) and not _has_pspla and not perms.get('shelly', False) and not perms.get('club_fitness', False)
     shelly_only = perms.get('shelly', False) and not _has_pspla and not perms.get('actuate', False) and not perms.get('club_fitness', False)
-    club_fitness_only = perms.get('club_fitness', False) and not _has_pspla and not perms.get('actuate', False) and not perms.get('shelly', False)
+    club_fitness_only = perms.get('club_fitness', False) and not _has_pspla and not perms.get('actuate', False) and not perms.get('shelly', False) and not perms.get('gemini', False)
+    gemini_only = perms.get('gemini', False) and not _has_pspla and not perms.get('actuate', False) and not perms.get('shelly', False) and not perms.get('club_fitness', False)
 
-    if club_fitness_only:
+    if gemini_only:
+        subject = "You've been granted access \u2014 Alarm Watch AI Phone System"
+        site_url = "https://www.psplachecker.co.nz/gemini"
+        intro_text = ("You've been granted access to the <strong>Alarm Watch AI Phone System</strong> \u2014 "
+                      "manage AI-powered phone calls, knowledge bases, and live call supervision.")
+        features_html = (
+            '<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f4de &nbsp;Make and receive AI-powered phone calls</td></tr>'
+            '<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f4da &nbsp;Knowledge base and document management</td></tr>'
+            '<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f3a7 &nbsp;Live call monitoring and barge-in</td></tr>'
+            '<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f4ca &nbsp;Call history, transcripts, and recordings</td></tr>'
+        )
+        features_plain = ("- Make and receive AI-powered phone calls\n"
+                          "- Knowledge base and document management\n"
+                          "- Live call monitoring and barge-in\n"
+                          "- Call history, transcripts, and recordings")
+        header_subtitle = "Alarm Watch AI Phone System \u2014 Access Granted"
+        footer_text = "Alarm Watch AI Phone System &nbsp;\u00b7&nbsp; New Zealand &nbsp;\u00b7&nbsp; For authorised users only"
+    elif club_fitness_only:
         subject = "You've been granted access \u2014 Club Fitness Challenges"
         site_url = "https://www.psplachecker.co.nz/club-fitness"
         intro_text = ("You've been granted access to the <strong>Club Fitness Challenges</strong> portal \u2014 "
@@ -7444,6 +7462,9 @@ def _send_welcome_email(to_email, to_name, added_by, permissions=None):
         if perms.get('club_fitness'):
             _feat_rows.append('<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f3cb\ufe0f &nbsp;Club Fitness challenge signups</td></tr>')
             _feat_plain.append("- Club Fitness challenge signups")
+        if perms.get('gemini'):
+            _feat_rows.append('<tr><td style="padding:4px 0;font-size:14px;color:#4a5568">\U0001f4de &nbsp;AI phone calls, knowledge bases, and call supervision</td></tr>')
+            _feat_plain.append("- AI phone calls, knowledge bases, and call supervision")
         features_html = "".join(_feat_rows)
         features_plain = "\n".join(_feat_plain)
         header_subtitle = "PSPLA Licence Checker \u2014 Access Granted"
