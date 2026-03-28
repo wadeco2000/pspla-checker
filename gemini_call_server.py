@@ -414,6 +414,7 @@ class ElevenLabsProvider:
         self._call = call
         self._call_id = call_id
         self._ws = None
+        self._initiated = False
 
     async def connect(self):
         import websockets
@@ -436,49 +437,7 @@ class ElevenLabsProvider:
             signed_url = resp.json()["signed_url"]
 
         self._ws = await websockets.connect(signed_url)
-        log.info(f"[{self._call_id}] ElevenLabs WebSocket connected")
-
-        # Send initiation — when agent is selected, send NO overrides
-        # (let the agent use its own voice, prompt, language from dashboard).
-        # Only override when no agent or when knowledge base provides a prompt.
-        system_instruction = self._call.get("system_instruction", "")
-        settings = self._call.get("settings", {})
-        has_agent = bool(settings.get("elevenlabs_agent_id"))
-
-        # Minimal init — no overrides = agent uses its own config
-        config = {"type": "conversation_initiation_client_data"}
-
-        if not has_agent:
-            # No agent selected — override voice and prompt from our UI
-            language = settings.get("language", "en")
-            overrides = {}
-            voice_id = self._call.get("voice_name", "")
-            if voice_id and len(voice_id) > 15:
-                overrides["tts"] = {"voice_id": voice_id}
-            if system_instruction:
-                overrides["agent"] = {
-                    "prompt": {"prompt": system_instruction},
-                    "language": language,
-                }
-            if overrides:
-                config["conversation_config_override"] = overrides
-
-        # Dynamic variables work without triggering override issues
-        if system_instruction:
-            config["dynamic_variables"] = {"context": system_instruction}
-
-        _log_error(self._call_id, f"ElevenLabs init: has_agent={has_agent}, has_overrides={'conversation_config_override' in config}")
-        await self._ws.send(json.dumps(config))
-
-        # Wait for conversation_initiation_metadata
-        msg = json.loads(await self._ws.recv())
-        if msg.get("type") == "conversation_initiation_metadata":
-            meta = msg.get("conversation_initiation_metadata_event", {})
-            conv_id = meta.get("conversation_id", "?")
-            out_fmt = meta.get("agent_output_audio_format", "?")
-            _log_error(self._call_id, f"ElevenLabs conversation started: agent={agent_id}, conv={conv_id}, format={out_fmt}")
-        else:
-            _log_error(self._call_id, f"ElevenLabs unexpected first message: {json.dumps(msg)[:200]}")
+        log.info(f"[{self._call_id}] ElevenLabs WebSocket connected (init deferred until media stream ready)")
 
     async def send_audio(self, mulaw_bytes: bytes):
         """Send mulaw 8kHz audio directly — agent configured for ulaw_8000."""
@@ -489,15 +448,42 @@ class ElevenLabsProvider:
         pass
 
     async def send_text(self, text: str):
-        """Send contextual update — ElevenLabs doesn't have a direct text trigger like OpenAI."""
-        # Use contextual_update to inject context, then the agent's first_message handles greeting
-        try:
-            await self._ws.send(json.dumps({
-                "type": "contextual_update",
-                "text": text
-            }))
-        except Exception:
-            pass
+        """Initialize the conversation — sends the init message to start the agent talking."""
+        if not self._initiated:
+            self._initiated = True
+            system_instruction = self._call.get("system_instruction", "")
+            settings = self._call.get("settings", {})
+            has_agent = bool(settings.get("elevenlabs_agent_id"))
+
+            config = {"type": "conversation_initiation_client_data"}
+
+            if not has_agent:
+                language = settings.get("language", "en")
+                overrides = {}
+                voice_id = self._call.get("voice_name", "")
+                if voice_id and len(voice_id) > 15:
+                    overrides["tts"] = {"voice_id": voice_id}
+                if system_instruction:
+                    overrides["agent"] = {
+                        "prompt": {"prompt": system_instruction},
+                        "language": language,
+                    }
+                if overrides:
+                    config["conversation_config_override"] = overrides
+
+            if system_instruction:
+                config["dynamic_variables"] = {"context": system_instruction}
+
+            _log_error(self._call_id, f"ElevenLabs init NOW (media stream ready): has_agent={has_agent}")
+            await self._ws.send(json.dumps(config))
+
+            # Wait for conversation_initiation_metadata
+            msg = json.loads(await self._ws.recv())
+            if msg.get("type") == "conversation_initiation_metadata":
+                meta = msg.get("conversation_initiation_metadata_event", {})
+                _log_error(self._call_id, f"ElevenLabs conversation started: conv={meta.get('conversation_id','?')}, format={meta.get('agent_output_audio_format','?')}")
+            else:
+                _log_error(self._call_id, f"ElevenLabs unexpected first message: {json.dumps(msg)[:200]}")
 
     async def receive_loop(self, on_audio, on_ai_transcript, on_caller_transcript, on_turn_complete, on_interrupted):
         """Main receive loop. Parses ElevenLabs Conversational AI events."""
