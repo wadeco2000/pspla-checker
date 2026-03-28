@@ -501,6 +501,77 @@ def _is_safe_url(url):
         return False
 
 
+def _get_drive_service():
+    """Create an authenticated Google Drive API client from service account JSON env var."""
+    sa_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+    if not sa_json:
+        raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON not configured")
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    creds = service_account.Credentials.from_service_account_info(
+        json.loads(sa_json), scopes=["https://www.googleapis.com/auth/drive.readonly"]
+    )
+    return build("drive", "v3", credentials=creds)
+
+
+def _extract_gdrive_file_id(url):
+    """Extract Google Drive/Docs file ID from a URL."""
+    import re as _re
+    # Google Docs: /document/d/FILE_ID/
+    m = _re.search(r'/document/d/([a-zA-Z0-9_-]+)', url)
+    if m:
+        return m.group(1)
+    # Google Sheets: /spreadsheets/d/FILE_ID/
+    m = _re.search(r'/spreadsheets/d/([a-zA-Z0-9_-]+)', url)
+    if m:
+        return m.group(1)
+    # Google Drive file: /file/d/FILE_ID/
+    m = _re.search(r'/file/d/([a-zA-Z0-9_-]+)', url)
+    if m:
+        return m.group(1)
+    # Drive folder: /folders/FOLDER_ID
+    m = _re.search(r'/folders/([a-zA-Z0-9_-]+)', url)
+    if m:
+        return m.group(1)
+    # Open?id=FILE_ID
+    m = _re.search(r'[?&]id=([a-zA-Z0-9_-]+)', url)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _gdrive_export_text(service, file_id):
+    """Export a Google Doc/Sheet as plain text via the Drive API."""
+    # Get file metadata to determine type
+    meta = service.files().get(fileId=file_id, fields="name,mimeType").execute()
+    mime = meta.get("mimeType", "")
+    name = meta.get("name", "Untitled")
+
+    if mime == "application/vnd.google-apps.document":
+        # Google Doc — export as plain text
+        content = service.files().export(fileId=file_id, mimeType="text/plain").execute()
+        return name, content.decode("utf-8", errors="replace") if isinstance(content, bytes) else content
+    elif mime == "application/vnd.google-apps.spreadsheet":
+        # Google Sheet — export as CSV
+        content = service.files().export(fileId=file_id, mimeType="text/csv").execute()
+        return name, content.decode("utf-8", errors="replace") if isinstance(content, bytes) else content
+    elif mime in ("application/pdf", "text/plain", "text/markdown"):
+        # Binary/text file — download content
+        content = service.files().get_media(fileId=file_id).execute()
+        if mime == "application/pdf":
+            import pdfplumber, io
+            text_parts = []
+            with pdfplumber.open(io.BytesIO(content)) as pdf:
+                for page in pdf.pages:
+                    t = page.extract_text()
+                    if t:
+                        text_parts.append(t)
+            return name, "\n\n".join(text_parts)
+        return name, content.decode("utf-8", errors="replace") if isinstance(content, bytes) else content
+    else:
+        raise ValueError(f"Unsupported Google Drive file type: {mime}")
+
+
 def _extract_text(file_bytes, source_type, source_url=None):
     """Extract text from document. Returns raw text string."""
     if source_type == "url":
@@ -617,23 +688,28 @@ def _update_doc_status(doc_id, status, **extra):
         pass
 
 
-def _process_document_bg(doc_id, source_type, source_url=None, file_bytes_b64=None):
+def _process_document_bg(doc_id, source_type, source_url=None, file_bytes_b64=None, raw_text_override=None):
     """Background thread: extract text, chunk, embed, store in Supabase.
-    Updates status at each stage so the UI can show progress."""
+    Updates status at each stage so the UI can show progress.
+    If raw_text_override is provided (e.g. from Google Drive), skip extraction."""
     import base64 as _b64
 
     try:
-        # Stage 1: Extracting text
-        _update_doc_status(doc_id, "extracting")
-
-        if source_type == "url":
-            raw_text = _extract_text(None, "url", source_url)
-        elif file_bytes_b64:
-            file_bytes = _b64.b64decode(file_bytes_b64)
-            raw_text = _extract_text(file_bytes, source_type)
+        # Stage 1: Extracting text (skip if pre-extracted)
+        if raw_text_override:
+            raw_text = raw_text_override
+            _update_doc_status(doc_id, "extracting")
         else:
-            _update_doc_status(doc_id, "error", error_message="No file data or URL provided")
-            return
+            _update_doc_status(doc_id, "extracting")
+
+            if source_type == "url":
+                raw_text = _extract_text(None, "url", source_url)
+            elif file_bytes_b64:
+                file_bytes = _b64.b64decode(file_bytes_b64)
+                raw_text = _extract_text(file_bytes, source_type)
+            else:
+                _update_doc_status(doc_id, "error", error_message="No file data or URL provided")
+                return
 
         if not raw_text or len(raw_text.strip()) < 10:
             _update_doc_status(doc_id, "error", error_message="No text could be extracted")
@@ -961,6 +1037,131 @@ def rag_test_ask():
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
+@gemini_bp.route("/api/gemini/rag/import-gdrive", methods=["POST"])
+def rag_import_gdrive():
+    """Import document(s) from Google Drive. Supports single doc URL or folder URL."""
+    data = request.json or {}
+    url = data.get("url", "").strip()
+    if not url:
+        return jsonify({"ok": False, "error": "Google Drive URL required"}), 400
+
+    try:
+        service = _get_drive_service()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    # Determine if folder or single doc
+    is_folder = "/folders/" in url
+    file_id = _extract_gdrive_file_id(url)
+    if not file_id:
+        return jsonify({"ok": False, "error": "Could not extract file/folder ID from URL"}), 400
+
+    imported = []
+    try:
+        if is_folder:
+            # List all Google Docs/Sheets in folder
+            results = service.files().list(
+                q=f"'{file_id}' in parents and trashed=false and (mimeType='application/vnd.google-apps.document' or mimeType='application/vnd.google-apps.spreadsheet')",
+                fields="files(id,name,mimeType)", pageSize=100
+            ).execute()
+            files = results.get("files", [])
+            if not files:
+                return jsonify({"ok": False, "error": "No Google Docs found in folder"}), 404
+            for f in files:
+                doc_url = f"https://docs.google.com/document/d/{f['id']}/edit"
+                doc = _import_single_gdrive_doc(service, f["id"], f["name"], doc_url)
+                imported.append(doc)
+        else:
+            meta = service.files().get(fileId=file_id, fields="name").execute()
+            name = meta.get("name", "Untitled")
+            doc = _import_single_gdrive_doc(service, file_id, name, url)
+            imported.append(doc)
+
+        return jsonify({"ok": True, "imported": imported})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+def _import_single_gdrive_doc(service, file_id, name, source_url):
+    """Import a single Google Drive document into the RAG system."""
+    # Export text from Google Drive
+    name, raw_text = _gdrive_export_text(service, file_id)
+
+    if not raw_text or len(raw_text.strip()) < 10:
+        return {"title": name, "status": "error", "error": "No text extracted"}
+
+    # Create document record
+    r = _requests.post(f"{SUPABASE_URL}/rest/v1/rag_documents",
+        json={
+            "title": name[:200],
+            "source_type": "gdrive",
+            "source_url": source_url,
+            "gdrive_file_id": file_id,
+            "char_count": len(raw_text),
+            "status": "pending",
+        },
+        headers={**_sb_headers(), "Prefer": "return=representation"}, timeout=10)
+
+    if not r.ok:
+        return {"title": name, "status": "error", "error": "Failed to save document"}
+
+    doc = r.json()[0]
+    doc_id = doc["id"]
+
+    # Process in background — pass raw text directly
+    thread = threading.Thread(
+        target=_process_document_bg,
+        args=(doc_id, "gdrive", None, None, raw_text),
+        daemon=True
+    )
+    thread.start()
+
+    return {"id": doc_id, "title": name, "status": "pending"}
+
+
+@gemini_bp.route("/api/gemini/rag/sync-gdrive/<int:doc_id>", methods=["POST"])
+def rag_sync_gdrive(doc_id):
+    """Re-fetch and reprocess a Google Drive document."""
+    try:
+        # Get document record
+        r = _requests.get(f"{SUPABASE_URL}/rest/v1/rag_documents",
+            params={"select": "id,gdrive_file_id,source_url", "id": f"eq.{doc_id}"},
+            headers=_sb_headers(), timeout=10)
+        if not r.ok or not r.json():
+            return jsonify({"ok": False, "error": "Document not found"}), 404
+
+        doc = r.json()[0]
+        file_id = doc.get("gdrive_file_id")
+        if not file_id:
+            return jsonify({"ok": False, "error": "Not a Google Drive document"}), 400
+
+        service = _get_drive_service()
+        name, raw_text = _gdrive_export_text(service, file_id)
+
+        if not raw_text or len(raw_text.strip()) < 10:
+            return jsonify({"ok": False, "error": "No text extracted from document"}), 502
+
+        # Delete old chunks
+        _requests.delete(f"{SUPABASE_URL}/rest/v1/rag_chunks",
+            params={"document_id": f"eq.{doc_id}"},
+            headers={**_sb_headers(), "Prefer": "return=minimal"}, timeout=10)
+
+        # Reset status
+        _update_doc_status(doc_id, "pending")
+
+        # Reprocess in background
+        thread = threading.Thread(
+            target=_process_document_bg,
+            args=(doc_id, "gdrive", None, None, raw_text),
+            daemon=True
+        )
+        thread.start()
+
+        return jsonify({"ok": True, "message": f"Syncing '{name}'..."})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 @gemini_bp.route("/api/gemini/rag/kb-documents/<int:kb_id>", methods=["GET"])
 def rag_kb_documents(kb_id):
     """List documents attached to a knowledge base."""
@@ -1062,6 +1263,22 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
         .modal h3{margin-bottom:16px;font-size:16px;}
         .empty-state{text-align:center;padding:40px;color:#aaa;font-size:14px;}
         .config-warning{background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:16px;margin:16px 24px;color:#856404;}
+        /* Mobile responsive */
+        @media (max-width: 768px) {
+            .header{flex-direction:column;gap:8px;padding:10px 16px;}
+            .header-right{flex-wrap:wrap;justify-content:center;gap:8px;font-size:11px;}
+            .card{margin:10px 10px;padding:14px;}
+            .form-row{flex-direction:column;gap:6px;}
+            .form-label{min-width:auto;}
+            select{min-width:auto;width:100%;}
+            .history-table{display:block;overflow-x:auto;white-space:nowrap;}
+            .modal{width:95%;padding:16px;max-height:90vh;}
+            .call-controls{flex-direction:column;align-items:stretch;}
+            .call-timer{font-size:16px;}
+        }
+        @media (max-width: 768px) {
+            [style*="grid-template-columns"]{grid-template-columns:1fr !important;}
+        }
     </style>
 </head>
 <body>
@@ -1283,6 +1500,7 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                 <select id="upload-type" onchange="toggleUploadType()" style="width:100%;">
                     <option value="file">File (PDF, DOCX, TXT, MD)</option>
                     <option value="url">URL (web page)</option>
+                    <option value="gdrive">Google Drive (Doc or Folder)</option>
                 </select>
             </div>
             <div id="upload-file-section">
@@ -1292,6 +1510,11 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
             <div id="upload-url-section" style="display:none;">
                 <label class="form-label">URL (HTTPS only)</label>
                 <input type="text" id="upload-url" placeholder="https://example.com/page" style="width:100%;margin-bottom:8px;">
+            </div>
+            <div id="upload-gdrive-section" style="display:none;">
+                <label class="form-label">Google Drive URL</label>
+                <input type="text" id="upload-gdrive-url" placeholder="https://docs.google.com/document/d/... or folder URL" style="width:100%;margin-bottom:8px;">
+                <span style="font-size:10px;color:#888;">Paste a Google Doc, Sheet, or Drive folder URL. The document must be shared with the service account.</span>
             </div>
             <div>
                 <label class="form-label">Title</label>
@@ -1424,7 +1647,7 @@ var _callServerUrl = '{{ call_server_url }}';
 // Fetch call server version
 fetch(_callServerUrl + '/health').then(r=>r.json()).then(d=>{
     if(d.version) document.getElementById('call-server-ver').innerHTML='<i class="fa-solid fa-server"></i> Call: '+d.version;
-}).catch(()=>{});
+}).catch(e=>{console.error('Call server health fetch failed:', e);});
 var _activeCallSid = null;
 var _activeCallId = null;
 var _callTimerInterval = null;
@@ -2264,6 +2487,9 @@ function loadDocuments() {
             if (doc.status === 'ready') {
                 html += '<button class="btn" style="font-size:10px;padding:2px 8px;background:#6c757d;margin-right:4px;" onclick="viewChunks(' + doc.id + ',\'' + esc(doc.title).replace(/'/g, "\\'") + '\')" title="View extracted text"><i class="fa-solid fa-eye"></i></button>';
                 html += '<button class="btn" style="font-size:10px;padding:2px 8px;background:#3498db;margin-right:4px;" onclick="openTestSearch(' + doc.id + ')" title="Test RAG search"><i class="fa-solid fa-magnifying-glass"></i></button>';
+                if (doc.source_type === 'gdrive') {
+                    html += '<button class="btn" style="font-size:10px;padding:2px 8px;background:#f39c12;margin-right:4px;" onclick="syncGdriveDoc(' + doc.id + ')" title="Re-sync from Google Drive"><i class="fa-solid fa-rotate"></i></button>';
+                }
             }
             html += '<button class="btn btn-red" style="font-size:10px;padding:2px 8px;" onclick="deleteDocument(' + doc.id + ')"><i class="fa-solid fa-trash"></i></button>';
             html += '</td></tr>';
@@ -2371,6 +2597,7 @@ function askAI() {
 function showUploadModal() {
     document.getElementById('upload-file').value = '';
     document.getElementById('upload-url').value = '';
+    document.getElementById('upload-gdrive-url').value = '';
     document.getElementById('upload-title').value = '';
     document.getElementById('upload-type').value = 'file';
     toggleUploadType();
@@ -2378,14 +2605,33 @@ function showUploadModal() {
 }
 
 function toggleUploadType() {
-    var isUrl = document.getElementById('upload-type').value === 'url';
-    document.getElementById('upload-file-section').style.display = isUrl ? 'none' : '';
-    document.getElementById('upload-url-section').style.display = isUrl ? '' : 'none';
+    var t = document.getElementById('upload-type').value;
+    document.getElementById('upload-file-section').style.display = t === 'file' ? '' : 'none';
+    document.getElementById('upload-url-section').style.display = t === 'url' ? '' : 'none';
+    document.getElementById('upload-gdrive-section').style.display = t === 'gdrive' ? '' : 'none';
 }
 
 function uploadDocument() {
     var uploadType = document.getElementById('upload-type').value;
     var title = document.getElementById('upload-title').value.trim();
+
+    if (uploadType === 'gdrive') {
+        var gurl = document.getElementById('upload-gdrive-url').value.trim();
+        if (!gurl) { alert('Enter a Google Drive URL.'); return; }
+        showStatus('Importing from Google Drive...', '');
+        fetch('/api/gemini/rag/import-gdrive', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({url: gurl})
+        }).then(r=>r.json()).then(function(d) {
+            if (!d.ok) { alert('Error: ' + (d.error||'Unknown')); return; }
+            document.getElementById('upload-modal').classList.remove('active');
+            var count = d.imported ? d.imported.length : 0;
+            showStatus('Imported ' + count + ' document(s) from Google Drive — processing...', 'success');
+            loadDocuments();
+        }).catch(function(e) { alert('Import failed: ' + e.message); });
+        return;
+    }
 
     if (uploadType === 'url') {
         var url = document.getElementById('upload-url').value.trim();
@@ -2424,6 +2670,16 @@ function deleteDocument(docId) {
         loadDocuments();
         showStatus('Document deleted.', 'success');
     });
+}
+
+function syncGdriveDoc(docId) {
+    if (!confirm('Re-sync this document from Google Drive? This will re-extract and reprocess all chunks.')) return;
+    showStatus('Syncing from Google Drive...', '');
+    fetch('/api/gemini/rag/sync-gdrive/' + docId, {method: 'POST'}).then(r=>r.json()).then(function(d) {
+        if (!d.ok) { alert('Sync error: ' + (d.error||'Unknown')); return; }
+        showStatus(d.message || 'Syncing...', 'success');
+        loadDocuments();
+    }).catch(function(e) { alert('Sync failed: ' + e.message); });
 }
 
 // ── KB Document Attachment ──

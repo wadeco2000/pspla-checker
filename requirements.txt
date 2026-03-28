@@ -21,3 +21,5 @@ tiktoken
 pdfplumber
 python-docx
 openai
+google-api-python-client
+google-auth
