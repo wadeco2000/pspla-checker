@@ -448,7 +448,8 @@ class ElevenLabsProvider:
         pass
 
     async def send_text(self, text: str):
-        """Initialize the conversation — sends the init message to start the agent talking."""
+        """Initialize the conversation — sends the init message to start the agent talking.
+        Does NOT recv() here — receive_loop handles all incoming messages including metadata."""
         if not self._initiated:
             self._initiated = True
             system_instruction = self._call.get("system_instruction", "")
@@ -476,14 +477,6 @@ class ElevenLabsProvider:
 
             _log_error(self._call_id, f"ElevenLabs init NOW (media stream ready): has_agent={has_agent}")
             await self._ws.send(json.dumps(config))
-
-            # Wait for conversation_initiation_metadata
-            msg = json.loads(await self._ws.recv())
-            if msg.get("type") == "conversation_initiation_metadata":
-                meta = msg.get("conversation_initiation_metadata_event", {})
-                _log_error(self._call_id, f"ElevenLabs conversation started: conv={meta.get('conversation_id','?')}, format={meta.get('agent_output_audio_format','?')}")
-            else:
-                _log_error(self._call_id, f"ElevenLabs unexpected first message: {json.dumps(msg)[:200]}")
 
     async def receive_loop(self, on_audio, on_ai_transcript, on_caller_transcript, on_turn_complete, on_interrupted):
         """Main receive loop. Parses ElevenLabs Conversational AI events."""
@@ -520,6 +513,10 @@ class ElevenLabsProvider:
             elif t == "ping":
                 event_id = event.get("ping_event", {}).get("event_id", 0)
                 await self._ws.send(json.dumps({"type": "pong", "event_id": event_id}))
+
+            elif t == "conversation_initiation_metadata":
+                meta = event.get("conversation_initiation_metadata_event", {})
+                _log_error(self._call_id, f"ElevenLabs conversation started: conv={meta.get('conversation_id','?')}, format={meta.get('agent_output_audio_format','?')}")
 
             elif t == "error":
                 _log_error(self._call_id, f"ElevenLabs error: {event}")
