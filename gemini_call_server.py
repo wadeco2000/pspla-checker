@@ -862,11 +862,16 @@ async def media_stream(websocket: WebSocket, call_id: str):
                 _ai_transcript_buffer.clear()
 
                 # Check if AI said goodbye — schedule auto-hangup
+                # Check current turn AND last 2 AI transcripts (in case transcription is fragmented)
                 lower = full_text.lower()
-                _GOODBYE_PHRASES = ["goodbye", "good bye", "bye bye", "have a great day",
-                    "have a good day", "have a nice day", "take care", "thanks for your time",
-                    "thank you for your time", "talk to you soon", "speak to you soon"]
-                if any(phrase in lower for phrase in _GOODBYE_PHRASES):
+                _GOODBYE_PHRASES = ["goodbye", "good bye", "bye bye", "bye!", "bye.",
+                    "have a great day", "have a good day", "have a nice day", "have a wonderful day",
+                    "take care", "thanks for your time", "thank you for your time",
+                    "talk to you soon", "speak to you soon", "cheers!", "cheers."]
+                # Also check recent AI transcript entries in case goodbye was split across turns
+                recent_ai = " ".join(t["text"] for t in call["transcript"][-3:] if t.get("speaker") == "ai").lower()
+                _log_error(call_id, f"Goodbye check: current='{lower[:80]}' recent='{recent_ai[:80]}'")
+                if any(phrase in lower for phrase in _GOODBYE_PHRASES) or any(phrase in recent_ai for phrase in _GOODBYE_PHRASES):
                     if not _hangup_scheduled["task"]:
                         log.info(f"[{call_id}] AI said goodbye, scheduling auto-hangup in 5s")
                         _hangup_scheduled["task"] = asyncio.create_task(_auto_hangup_after_delay())
