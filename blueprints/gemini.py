@@ -607,17 +607,28 @@ def _is_safe_url(url):
         return False
 
 
-def _get_drive_service():
-    """Create an authenticated Google Drive API client from service account JSON env var."""
+def _get_google_creds():
+    """Get Google service account credentials."""
     sa_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
     if not sa_json:
         raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON not configured")
     from google.oauth2 import service_account
-    from googleapiclient.discovery import build
-    creds = service_account.Credentials.from_service_account_info(
-        json.loads(sa_json), scopes=["https://www.googleapis.com/auth/drive.readonly"]
+    return service_account.Credentials.from_service_account_info(
+        json.loads(sa_json),
+        scopes=["https://www.googleapis.com/auth/drive.readonly", "https://www.googleapis.com/auth/documents.readonly"]
     )
-    return build("drive", "v3", credentials=creds)
+
+
+def _get_drive_service():
+    """Create an authenticated Google Drive API client."""
+    from googleapiclient.discovery import build
+    return build("drive", "v3", credentials=_get_google_creds())
+
+
+def _get_docs_service():
+    """Create an authenticated Google Docs API client."""
+    from googleapiclient.discovery import build
+    return build("docs", "v1", credentials=_get_google_creds())
 
 
 def _extract_gdrive_file_id(url):
@@ -647,22 +658,38 @@ def _extract_gdrive_file_id(url):
 
 
 def _gdrive_export_text(service, file_id):
-    """Export a Google Doc/Sheet as plain text via the Drive API."""
-    # Get file metadata to determine type
+    """Export a Google Doc/Sheet as plain text. Uses Docs API for Google Docs (bypasses org export restrictions)."""
     meta = service.files().get(fileId=file_id, fields="name,mimeType").execute()
     mime = meta.get("mimeType", "")
     name = meta.get("name", "Untitled")
 
     if mime == "application/vnd.google-apps.document":
-        # Google Doc — export as plain text
-        content = service.files().export(fileId=file_id, mimeType="text/plain").execute()
-        return name, content.decode("utf-8", errors="replace") if isinstance(content, bytes) else content
+        # Use Google Docs API — reads doc structure directly (works even when Drive export is blocked)
+        docs_service = _get_docs_service()
+        doc = docs_service.documents().get(documentId=file_id).execute()
+        text = ""
+        for element in doc.get("body", {}).get("content", []):
+            if "paragraph" in element:
+                for run in element["paragraph"].get("elements", []):
+                    if "textRun" in run:
+                        text += run["textRun"].get("content", "")
+            elif "table" in element:
+                for row in element["table"].get("tableRows", []):
+                    row_texts = []
+                    for cell in row.get("tableCells", []):
+                        cell_text = ""
+                        for cel in cell.get("content", []):
+                            if "paragraph" in cel:
+                                for run in cel["paragraph"].get("elements", []):
+                                    if "textRun" in run:
+                                        cell_text += run["textRun"].get("content", "").strip()
+                        row_texts.append(cell_text)
+                    text += " | ".join(row_texts) + "\n"
+        return name, text
     elif mime == "application/vnd.google-apps.spreadsheet":
-        # Google Sheet — export as CSV
         content = service.files().export(fileId=file_id, mimeType="text/csv").execute()
         return name, content.decode("utf-8", errors="replace") if isinstance(content, bytes) else content
     elif mime in ("application/pdf", "text/plain", "text/markdown"):
-        # Binary/text file — download content
         content = service.files().get_media(fileId=file_id).execute()
         if mime == "application/pdf":
             import pdfplumber, io
