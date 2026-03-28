@@ -810,6 +810,178 @@ async def make_call(request: Request):
         raise HTTPException(status_code=502, detail=f"Twilio error: {e}")
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  INBOUND CALLS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_inbound_config_cache = {"config": None, "fetched_at": 0}
+
+def _get_inbound_config(phone_number=None):
+    """Fetch inbound config from Supabase. Cached for 60 seconds."""
+    import time
+    now = time.time()
+    if _inbound_config_cache["config"] and now - _inbound_config_cache["fetched_at"] < 60:
+        return _inbound_config_cache["config"]
+
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return None
+    try:
+        import requests as _req
+        headers = {"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"}
+        # Try phone-specific config first, then default (null phone)
+        r = _req.get(f"{SUPABASE_URL}/rest/v1/gemini_inbound_config",
+            params={"select": "*", "order": "phone_number.desc.nullslast", "limit": "1"},
+            headers=headers, timeout=5)
+        if r.ok and r.json():
+            config = r.json()[0]
+            _inbound_config_cache["config"] = config
+            _inbound_config_cache["fetched_at"] = now
+            return config
+    except Exception as e:
+        log.error(f"Failed to fetch inbound config: {e}")
+    return None
+
+
+def _load_kb(kb_id):
+    """Fetch knowledge base content from Supabase."""
+    if not kb_id or not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return None
+    try:
+        import requests as _req
+        r = _req.get(f"{SUPABASE_URL}/rest/v1/gemini_knowledge_bases",
+            params={"select": "id,content,voice_name,rag_enabled", "id": f"eq.{kb_id}"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+            timeout=5)
+        if r.ok and r.json():
+            return r.json()[0]
+    except Exception as e:
+        log.error(f"Failed to load KB {kb_id}: {e}")
+    return None
+
+
+def _save_inbound_to_history(call_id, call_sid, caller, called, config):
+    """Create a call history record for an inbound call."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return
+    try:
+        import requests as _req
+        _req.post(f"{SUPABASE_URL}/rest/v1/gemini_call_history",
+            json={
+                "call_sid": call_sid,
+                "call_id": call_id,
+                "to_number": called,
+                "from_number": caller,
+                "knowledge_base_id": config.get("knowledge_base_id"),
+                "status": "initiated",
+                "triggered_by": "inbound",
+                "notes": json.dumps({"ai_provider": config.get("ai_provider", "gemini"), "direction": "inbound"}),
+            },
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                     "Content-Type": "application/json", "Prefer": "return=minimal"},
+            timeout=5)
+    except Exception as e:
+        log.error(f"[{call_id}] Failed to save inbound history: {e}")
+
+
+@app.api_route("/api/inbound-call", methods=["GET", "POST"])
+async def handle_inbound_call(request: Request):
+    """Twilio webhook for incoming calls. Returns TwiML to connect to AI."""
+    form = await request.form()
+    caller = form.get("From", "")
+    called = form.get("To", "")
+    call_sid = form.get("CallSid", "")
+
+    log.info(f"Inbound call from {caller} to {called} (SID: {call_sid})")
+
+    # Load config
+    config = _get_inbound_config(called)
+    if not config or not config.get("enabled", True):
+        _log_error("inbound", f"No config or disabled for {called}")
+        return Response(
+            content='<?xml version="1.0" encoding="UTF-8"?><Response><Say>Sorry, this number is not currently accepting calls. Please try again later.</Say></Response>',
+            media_type="application/xml")
+
+    # Load knowledge base
+    kb_id = config.get("knowledge_base_id")
+    kb = _load_kb(kb_id) if kb_id else None
+    system_instruction = kb.get("content", "") if kb else config.get("system_instruction", "")
+
+    # Pre-compute RAG context
+    if kb and kb.get("rag_enabled") and system_instruction:
+        try:
+            rag_context = _rag_search_sync(kb_id, system_instruction, top_k=5)
+            if rag_context:
+                system_instruction += (
+                    "\n\n--- REFERENCE DOCUMENTS ---\n"
+                    "The following are relevant excerpts from reference documents. "
+                    "Use this information to answer questions accurately.\n\n"
+                    + rag_context
+                )
+        except Exception as e:
+            log.error(f"Inbound RAG error: {e}")
+
+    # Build settings
+    settings = {
+        "ai_provider": config.get("ai_provider", "gemini"),
+        "language": config.get("language", "en"),
+        "end_sensitivity": config.get("end_sensitivity", "HIGH"),
+        "strict_mode": config.get("strict_mode", False),
+    }
+    # ElevenLabs-specific
+    if settings["ai_provider"] == "elevenlabs":
+        if config.get("elevenlabs_agent_id"):
+            settings["elevenlabs_agent_id"] = config["elevenlabs_agent_id"]
+        settings["elevenlabs_prompt_source"] = config.get("elevenlabs_prompt_source", "knowledgebase")
+        settings["elevenlabs_rag_source"] = config.get("elevenlabs_rag_source", "inhouse")
+    # Multi-turn RAG
+    if kb and kb.get("rag_enabled"):
+        settings["rag_kb_id"] = kb_id
+
+    # Add strict mode to prompt
+    if config.get("strict_mode"):
+        system_instruction += "\n\nSTRICT MODE: You must ONLY use information from the reference documents and knowledge base provided above. If the caller asks something not covered in your reference materials, say 'I don't have that information in my reference materials.' Do NOT use general knowledge to answer questions."
+
+    call_id = str(uuid.uuid4())[:12]
+    _log_error(call_id, f"Inbound call from {caller} — provider: {settings['ai_provider']}, kb: {kb_id}")
+
+    # Create call state (same structure as outbound)
+    _active_calls[call_id] = {
+        "to_number": called,
+        "from_number": caller,
+        "call_sid": call_sid,
+        "system_instruction": system_instruction,
+        "voice_name": config.get("voice_name") or (kb.get("voice_name") if kb else None) or "Kore",
+        "triggered_by": "inbound",
+        "settings": settings,
+        "status": "ringing",
+        "transcript": [],
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "barged_in": False,
+        "ai_provider": None,
+        "ai_ready": asyncio.Event(),
+        "ai_error": None,
+        "ai_cancel": asyncio.Event(),
+        "is_inbound": True,
+    }
+    _transcript_subscribers[call_id] = set()
+
+    # Pre-connect AI provider
+    asyncio.create_task(_preconnect_ai(call_id))
+
+    # Save to call history
+    _save_inbound_to_history(call_id, call_sid, caller, called, config)
+
+    # Return TwiML — connect to media stream
+    ws_url = SELF_URL.replace("http://", "wss://").replace("https://", "wss://")
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Connect>
+        <Stream url="{ws_url}/media-stream/{call_id}" />
+    </Connect>
+</Response>"""
+    return Response(content=xml, media_type="application/xml")
+
+
 @app.api_route("/twiml/{call_id}", methods=["GET", "POST"])
 async def twiml(call_id: str):
     """Return TwiML that tells Twilio to connect a media stream to us."""

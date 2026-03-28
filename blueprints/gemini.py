@@ -469,6 +469,62 @@ def gemini_debug():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  INBOUND CALL CONFIG
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@gemini_bp.route("/api/gemini/inbound-config", methods=["GET"])
+def get_inbound_config():
+    """Fetch inbound call configuration."""
+    try:
+        r = _requests.get(f"{SUPABASE_URL}/rest/v1/gemini_inbound_config",
+            params={"select": "*", "order": "id.asc", "limit": "1"},
+            headers=_sb_headers(), timeout=10)
+        if r.ok and r.json():
+            return jsonify({"ok": True, "config": r.json()[0]})
+        return jsonify({"ok": True, "config": None})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@gemini_bp.route("/api/gemini/inbound-config", methods=["POST"])
+def save_inbound_config():
+    """Save/update inbound call configuration."""
+    data = request.json or {}
+    fields = {
+        "enabled": data.get("enabled", True),
+        "ai_provider": data.get("ai_provider", "gemini"),
+        "knowledge_base_id": data.get("knowledge_base_id"),
+        "voice_name": data.get("voice_name", ""),
+        "language": data.get("language", "en"),
+        "strict_mode": data.get("strict_mode", False),
+        "end_sensitivity": data.get("end_sensitivity", "HIGH"),
+        "elevenlabs_agent_id": data.get("elevenlabs_agent_id"),
+        "elevenlabs_prompt_source": data.get("elevenlabs_prompt_source", "knowledgebase"),
+        "elevenlabs_rag_source": data.get("elevenlabs_rag_source", "inhouse"),
+        "greeting": data.get("greeting", ""),
+        "updated_at": "now()",
+    }
+    try:
+        config_id = data.get("id")
+        if config_id:
+            # Update existing
+            r = _requests.patch(f"{SUPABASE_URL}/rest/v1/gemini_inbound_config",
+                params={"id": f"eq.{config_id}"},
+                json=fields,
+                headers={**_sb_headers(), "Prefer": "return=representation"}, timeout=10)
+        else:
+            # Create new
+            r = _requests.post(f"{SUPABASE_URL}/rest/v1/gemini_inbound_config",
+                json=fields,
+                headers={**_sb_headers(), "Prefer": "return=representation"}, timeout=10)
+        if r.ok:
+            return jsonify({"ok": True, "config": r.json()[0] if r.json() else None})
+        return jsonify({"ok": False, "error": f"HTTP {r.status_code}"}), 502
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  RAG — Document Processing & Search
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1475,6 +1531,78 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
             <strong style="font-size:12px;color:#555;"><i class="fa-solid fa-file-lines"></i> Live Transcript</strong>
             <div class="transcript-panel" id="transcript-panel">
                 <div class="empty-state" style="color:#666;">Waiting for call to connect...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Inbound Calls Config -->
+    <div class="card">
+        <h2><i class="fa-solid fa-phone-flip"></i> Inbound Calls
+            <span id="inbound-status-badge" style="margin-left:auto;"></span>
+        </h2>
+        <span style="font-size:11px;color:#888;">Configure how the AI handles incoming phone calls to your Twilio number.</span>
+        <div id="inbound-config-container" style="margin-top:12px;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px;">
+                <div>
+                    <label class="form-label">Enabled</label>
+                    <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;">
+                        <input type="checkbox" id="inbound-enabled" checked> Accept inbound calls
+                    </label>
+                </div>
+                <div>
+                    <label class="form-label">AI Provider</label>
+                    <select id="inbound-provider" style="width:100%;" onchange="onInboundProviderChange()">
+                        <option value="gemini">Google Gemini</option>
+                        <option value="openai">OpenAI Realtime</option>
+                        <option value="elevenlabs">ElevenLabs Conversational AI</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label">Knowledge Base</label>
+                    <select id="inbound-kb" style="width:100%;">
+                        <option value="">— None —</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label">Voice</label>
+                    <select id="inbound-voice" style="width:100%;"></select>
+                </div>
+                <div>
+                    <label class="form-label">Language</label>
+                    <select id="inbound-language" style="width:100%;">
+                        <option value="en">English</option>
+                        <option value="en-NZ">English (NZ)</option>
+                        <option value="en-AU">English (AU)</option>
+                        <option value="en-GB">English (UK)</option>
+                        <option value="en-US">English (US)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label">End of Speech Sensitivity</label>
+                    <select id="inbound-end-sensitivity" style="width:100%;">
+                        <option value="low">Low</option>
+                        <option value="default">Default</option>
+                        <option value="high" selected>High</option>
+                    </select>
+                </div>
+                <div id="inbound-el-agent-row" style="display:none;">
+                    <label class="form-label">ElevenLabs Agent</label>
+                    <select id="inbound-el-agent" style="width:100%;"><option value="">— None —</option></select>
+                </div>
+                <div>
+                    <label class="form-label">Strict Mode</label>
+                    <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;">
+                        <input type="checkbox" id="inbound-strict"> Only answer from reference documents
+                    </label>
+                </div>
+            </div>
+            <div style="margin-top:12px;">
+                <label class="form-label">Greeting (what the AI says first)</label>
+                <input type="text" id="inbound-greeting" placeholder="Hello, thank you for calling. How can I help you today?" style="width:100%;">
+                <span style="font-size:10px;color:#888;">Leave blank to use the knowledge base prompt's default greeting.</span>
+            </div>
+            <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
+                <button class="btn" style="background:#27ae60;" onclick="saveInboundConfig()"><i class="fa-solid fa-save"></i> Save Inbound Config</button>
             </div>
         </div>
     </div>
@@ -2727,10 +2855,98 @@ function saveKbDocAttachments(kbId) {
     return Promise.all(promises);
 }
 
+// ── Inbound Config ──
+var _inboundConfigId = null;
+
+function onInboundProviderChange() {
+    var p = document.getElementById('inbound-provider').value;
+    document.getElementById('inbound-el-agent-row').style.display = p === 'elevenlabs' ? '' : 'none';
+    // Update voice options
+    var voiceSelect = document.getElementById('inbound-voice');
+    var voices = _PROVIDER_VOICES[p] || _PROVIDER_VOICES.gemini;
+    voiceSelect.innerHTML = '';
+    voices.forEach(function(v) {
+        voiceSelect.innerHTML += '<option value="' + v.value + '">' + v.label + '</option>';
+    });
+}
+
+function loadInboundConfig() {
+    fetch('/api/gemini/inbound-config').then(r=>r.json()).then(function(d) {
+        if (!d.ok) return;
+        var badge = document.getElementById('inbound-status-badge');
+        if (!d.config) {
+            badge.innerHTML = '<span class="badge badge-grey">Not configured</span>';
+            onInboundProviderChange();
+            return;
+        }
+        var c = d.config;
+        _inboundConfigId = c.id;
+        document.getElementById('inbound-enabled').checked = c.enabled !== false;
+        document.getElementById('inbound-provider').value = c.ai_provider || 'gemini';
+        onInboundProviderChange();
+        if (c.voice_name) document.getElementById('inbound-voice').value = c.voice_name;
+        if (c.language) document.getElementById('inbound-language').value = c.language;
+        if (c.end_sensitivity) document.getElementById('inbound-end-sensitivity').value = c.end_sensitivity;
+        document.getElementById('inbound-strict').checked = c.strict_mode || false;
+        document.getElementById('inbound-greeting').value = c.greeting || '';
+        if (c.elevenlabs_agent_id) document.getElementById('inbound-el-agent').value = c.elevenlabs_agent_id;
+        // Set KB dropdown (needs KBs to be loaded first)
+        if (c.knowledge_base_id) {
+            var kbSel = document.getElementById('inbound-kb');
+            if (kbSel.querySelector('option[value="' + c.knowledge_base_id + '"]')) {
+                kbSel.value = c.knowledge_base_id;
+            }
+        }
+        badge.innerHTML = c.enabled !== false
+            ? '<span class="badge badge-green">Active</span>'
+            : '<span class="badge badge-red">Disabled</span>';
+    });
+}
+
+function saveInboundConfig() {
+    var payload = {
+        enabled: document.getElementById('inbound-enabled').checked,
+        ai_provider: document.getElementById('inbound-provider').value,
+        knowledge_base_id: document.getElementById('inbound-kb').value ? parseInt(document.getElementById('inbound-kb').value) : null,
+        voice_name: document.getElementById('inbound-voice').value,
+        language: document.getElementById('inbound-language').value,
+        end_sensitivity: document.getElementById('inbound-end-sensitivity').value,
+        strict_mode: document.getElementById('inbound-strict').checked,
+        greeting: document.getElementById('inbound-greeting').value,
+        elevenlabs_agent_id: document.getElementById('inbound-el-agent').value || null,
+    };
+    if (_inboundConfigId) payload.id = _inboundConfigId;
+    fetch('/api/gemini/inbound-config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    }).then(r=>r.json()).then(function(d) {
+        if (!d.ok) { alert('Error: ' + (d.error||'Unknown')); return; }
+        if (d.config) _inboundConfigId = d.config.id;
+        showStatus('Inbound config saved.', 'success');
+        loadInboundConfig();
+    });
+}
+
+// Populate inbound KB dropdown when KBs load
+function _populateInboundKbDropdown() {
+    var kbSel = document.getElementById('inbound-kb');
+    var mainSel = document.getElementById('kb-select');
+    if (!kbSel || !mainSel) return;
+    kbSel.innerHTML = '<option value="">— None —</option>';
+    for (var i = 0; i < mainSel.options.length; i++) {
+        var opt = mainSel.options[i];
+        if (opt.value) {
+            kbSel.innerHTML += '<option value="' + opt.value + '">' + esc(opt.textContent) + '</option>';
+        }
+    }
+}
+
 // ── Init ──
 loadKnowledgeBases();
 loadHistory();
 loadDocuments();
+setTimeout(function() { _populateInboundKbDropdown(); loadInboundConfig(); }, 500);
 </script>
 </body>
 </html>
