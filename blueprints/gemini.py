@@ -742,43 +742,86 @@ def _extract_text(file_bytes, source_type, source_url=None):
         raise ValueError(f"Unsupported source type: {source_type}")
 
 
+def _strip_meta_tags(text):
+    """Strip <md:meta> tags from text, extract topic per section.
+    Returns (cleaned_text, topic_map) where topic_map maps character offsets to topic strings."""
+    topics = []  # list of (start_pos_in_cleaned, topic_string)
+    cleaned = ""
+    current_topic = ""
+    pos = 0
+    for part in re.split(r'(<md:meta[^>]*>)', text):
+        m = re.match(r'<md:meta\s+Tags="([^"]*)"', part)
+        if m:
+            current_topic = m.group(1)
+            topics.append((len(cleaned), current_topic))
+        else:
+            cleaned += part
+    return cleaned, topics
+
+
 def _chunk_text(text, chunk_size=_CHUNK_SIZE, overlap=_CHUNK_OVERLAP):
-    """Split text into overlapping chunks, respecting paragraph boundaries."""
+    """Split text into overlapping chunks, respecting paragraph boundaries.
+    Returns list of (chunk_text, topic) tuples if text has meta tags, otherwise list of strings."""
     if not text or not text.strip():
         return []
 
-    # Split on paragraph boundaries first
-    paragraphs = re.split(r'\n\s*\n', text)
+    # Strip meta tags and extract topic map
+    cleaned, topics = _strip_meta_tags(text)
+
+    def _get_topic_at(char_pos):
+        """Find the active topic at a given character position."""
+        active = ""
+        for tpos, tname in topics:
+            if tpos <= char_pos:
+                active = tname
+            else:
+                break
+        return active
+
+    # Split on paragraph boundaries
+    paragraphs = re.split(r'\n\s*\n', cleaned)
     chunks = []
+    chunk_starts = []  # track start position for topic lookup
     current = ""
+    current_start = 0
+    char_offset = 0
 
     for para in paragraphs:
         para = para.strip()
         if not para:
+            char_offset += len(para) + 2
             continue
         if len(current) + len(para) + 2 <= chunk_size:
+            if not current:
+                current_start = char_offset
             current = (current + "\n\n" + para).strip() if current else para
         else:
             if current:
                 chunks.append(current)
-            # If single paragraph exceeds chunk_size, split by sentences
+                chunk_starts.append(current_start)
             if len(para) > chunk_size:
                 sentences = re.split(r'(?<=[.!?])\s+', para)
                 current = ""
+                current_start = char_offset
                 for sent in sentences:
                     if len(current) + len(sent) + 1 <= chunk_size:
                         current = (current + " " + sent).strip() if current else sent
                     else:
                         if current:
                             chunks.append(current)
+                            chunk_starts.append(current_start)
                         current = sent
+                        current_start = char_offset
             else:
                 current = para
+                current_start = char_offset
+        char_offset += len(para) + 2
 
     if current:
         chunks.append(current)
+        chunk_starts.append(current_start)
 
-    # Add overlap: prepend tail of previous chunk to each chunk
+    # Add overlap
     if overlap > 0 and len(chunks) > 1:
         overlapped = [chunks[0]]
         for i in range(1, len(chunks)):
@@ -786,7 +829,16 @@ def _chunk_text(text, chunk_size=_CHUNK_SIZE, overlap=_CHUNK_OVERLAP):
             overlapped.append(prev_tail + "\n" + chunks[i])
         chunks = overlapped
 
-    return chunks
+    # Assign topics
+    if topics:
+        result = []
+        for i, chunk in enumerate(chunks):
+            start = chunk_starts[i] if i < len(chunk_starts) else 0
+            topic = _get_topic_at(start)
+            result.append((chunk, topic))
+        return result
+    else:
+        return [(chunk, "") for chunk in chunks]
 
 
 def _generate_embeddings(texts):
@@ -854,37 +906,43 @@ def _process_document_bg(doc_id, source_type, source_url=None, file_bytes_b64=No
             json={"raw_text": raw_text, "char_count": len(raw_text), "status": "chunking"},
             headers={**_sb_headers(), "Prefer": "return=minimal"}, timeout=15)
 
-        # Stage 2: Chunking
-        chunks = _chunk_text(raw_text)
-        if not chunks:
+        # Stage 2: Chunking (returns list of (text, topic) tuples)
+        chunk_tuples = _chunk_text(raw_text)
+        if not chunk_tuples:
             _update_doc_status(doc_id, "error", error_message="No text chunks produced")
             return
 
-        _update_doc_status(doc_id, "embedding", chunk_count=len(chunks))
+        chunk_texts = [t[0] for t in chunk_tuples]
+        chunk_topics = [t[1] for t in chunk_tuples]
+
+        _update_doc_status(doc_id, "embedding", chunk_count=len(chunk_texts))
 
         # Stage 3: Generating embeddings
-        embeddings = _generate_embeddings(chunks)
+        embeddings = _generate_embeddings(chunk_texts)
 
         # Count tokens
         try:
             import tiktoken
             enc = tiktoken.get_encoding("cl100k_base")
-            token_counts = [len(enc.encode(c)) for c in chunks]
+            token_counts = [len(enc.encode(c)) for c in chunk_texts]
         except Exception:
-            token_counts = [len(c) // 4 for c in chunks]
+            token_counts = [len(c) // 4 for c in chunk_texts]
 
         # Stage 4: Storing chunks
         _update_doc_status(doc_id, "storing")
 
         chunk_rows = []
-        for i, (chunk_text, embedding, tok_count) in enumerate(zip(chunks, embeddings, token_counts)):
-            chunk_rows.append({
+        for i, (chunk_text, embedding, tok_count, topic) in enumerate(zip(chunk_texts, embeddings, token_counts, chunk_topics)):
+            row = {
                 "document_id": doc_id,
                 "chunk_index": i,
                 "content": chunk_text,
                 "token_count": tok_count,
                 "embedding": embedding,
-            })
+            }
+            if topic:
+                row["topic"] = topic
+            chunk_rows.append(row)
 
         # Batch insert in groups of 50 (large embedding arrays can exceed request limits)
         headers = {**_sb_headers(), "Prefer": "return=minimal"}
