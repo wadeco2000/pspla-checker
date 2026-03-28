@@ -34,6 +34,8 @@ TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
+ELEVENLABS_AGENT_ID = os.getenv("ELEVENLABS_AGENT_ID", "")
 SERVER_SECRET = os.getenv("GEMINI_CALL_SERVER_SECRET", "")
 SELF_URL = os.getenv("GEMINI_CALL_SERVER_SELF_URL", "http://localhost:8001")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
@@ -65,6 +67,10 @@ COST_RATES = {
         "audio_input_per_1m_tokens": 32.00,
         "audio_output_per_1m_tokens": 64.00,
         "transcription_per_min": 0.006,  # gpt-4o-transcribe
+    },
+    "elevenlabs": {
+        # ElevenLabs charges per minute of conversation
+        "per_min": 0.10,  # $0.10 USD/min (Creator/Pro plan)
     },
 }
 
@@ -400,6 +406,137 @@ class OpenAIProvider:
                 pass
 
 
+class ElevenLabsProvider:
+    """ElevenLabs Conversational AI voice provider. Uses mulaw 8kHz natively via Twilio."""
+    name = "elevenlabs"
+
+    def __init__(self, call: dict, call_id: str):
+        self._call = call
+        self._call_id = call_id
+        self._ws = None
+
+    async def connect(self):
+        import websockets
+        import httpx
+
+        # Agent ID from call settings (dropdown) or fallback to env var
+        agent_id = self._call.get("settings", {}).get("elevenlabs_agent_id", "") or ELEVENLABS_AGENT_ID
+        if not agent_id:
+            raise RuntimeError("No ElevenLabs agent selected. Select an agent in Settings or set ELEVENLABS_AGENT_ID.")
+
+        # Get signed URL for private agent
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"https://api.elevenlabs.io/v1/convai/conversation/get_signed_url?agent_id={agent_id}",
+                headers={"xi-api-key": ELEVENLABS_API_KEY},
+                timeout=10
+            )
+            if resp.status_code != 200:
+                raise RuntimeError(f"ElevenLabs signed URL error: {resp.status_code} {resp.text[:200]}")
+            signed_url = resp.json()["signed_url"]
+
+        self._ws = await websockets.connect(signed_url)
+        log.info(f"[{self._call_id}] ElevenLabs WebSocket connected")
+
+        # Send conversation config override
+        settings = self._call.get("settings", {})
+        language = settings.get("language", "en")
+
+        config = {
+            "type": "conversation_initiation_client_data",
+            "conversation_config_override": {
+                "agent": {
+                    "prompt": {
+                        "prompt": self._call.get("system_instruction", "You are a helpful AI assistant.")
+                            + f"\n\nIMPORTANT: You are on a live phone call. You MUST speak in English only. Start speaking immediately — introduce yourself right away."
+                            + "\n\nWhen the conversation is naturally over, say goodbye clearly."
+                    },
+                    "first_message": "",  # We use the system prompt to drive the greeting
+                    "language": language,
+                },
+                "tts": {
+                    "voice_id": self._call.get("voice_name", "IKne3meq5aSn9XLyUdCD"),  # Charlie (Australian) default
+                }
+            }
+        }
+        await self._ws.send(json.dumps(config))
+
+        # Wait for conversation_initiation_metadata
+        msg = json.loads(await self._ws.recv())
+        if msg.get("type") == "conversation_initiation_metadata":
+            log.info(f"[{self._call_id}] ElevenLabs conversation started (agent_id={agent_id})")
+        else:
+            log.info(f"[{self._call_id}] ElevenLabs first message type: {msg.get('type')}")
+
+    async def send_audio(self, mulaw_bytes: bytes):
+        """Send mulaw audio — ElevenLabs accepts base64 audio directly."""
+        b64 = base64.b64encode(mulaw_bytes).decode("utf-8")
+        await self._ws.send(json.dumps({"user_audio_chunk": b64}))
+
+    async def flush_audio(self):
+        pass
+
+    async def send_text(self, text: str):
+        """Send contextual update — ElevenLabs doesn't have a direct text trigger like OpenAI."""
+        # Use contextual_update to inject context, then the agent's first_message handles greeting
+        try:
+            await self._ws.send(json.dumps({
+                "type": "contextual_update",
+                "text": text
+            }))
+        except Exception:
+            pass
+
+    async def receive_loop(self, on_audio, on_ai_transcript, on_caller_transcript, on_turn_complete, on_interrupted):
+        """Main receive loop. Parses ElevenLabs Conversational AI events."""
+        _first_audio = False
+        async for raw in self._ws:
+            event = json.loads(raw)
+            t = event.get("type", "")
+
+            if t == "audio":
+                audio_b64 = event.get("audio_event", {}).get("audio_base_64", "")
+                if audio_b64:
+                    if not _first_audio:
+                        _first_audio = True
+                        _log_error(self._call_id, "PERF: first ElevenLabs audio received")
+                    mulaw_bytes = base64.b64decode(audio_b64)
+                    if len(mulaw_bytes) > 0:
+                        await on_audio(mulaw_bytes)
+
+            elif t == "user_transcript":
+                transcript = event.get("user_transcription_event", {}).get("user_transcript", "")
+                if transcript:
+                    await on_caller_transcript(transcript)
+
+            elif t == "agent_response":
+                transcript = event.get("agent_response_event", {}).get("agent_response", "")
+                if transcript:
+                    await on_ai_transcript(transcript)
+                    await on_turn_complete()
+
+            elif t == "interruption":
+                await on_interrupted()
+
+            elif t == "ping":
+                event_id = event.get("ping_event", {}).get("event_id", 0)
+                await self._ws.send(json.dumps({"type": "pong", "event_id": event_id}))
+
+            elif t == "error":
+                _log_error(self._call_id, f"ElevenLabs error: {event}")
+
+            elif t == "conversation_ended":
+                log.info(f"[{self._call_id}] ElevenLabs conversation ended by server")
+                break
+
+    async def close(self):
+        if self._ws:
+            try:
+                await self._ws.close()
+            except Exception:
+                pass
+
+
 def _create_provider(call: dict, call_id: str):
     """Factory: create the right AI provider based on call settings."""
     provider_name = call.get("settings", {}).get("ai_provider", "gemini")
@@ -407,6 +544,10 @@ def _create_provider(call: dict, call_id: str):
         if not OPENAI_API_KEY:
             raise RuntimeError("OPENAI_API_KEY not configured")
         return OpenAIProvider(call, call_id)
+    elif provider_name == "elevenlabs":
+        if not ELEVENLABS_API_KEY:
+            raise RuntimeError("ELEVENLABS_API_KEY not configured")
+        return ElevenLabsProvider(call, call_id)
     else:
         if not GEMINI_API_KEY:
             raise RuntimeError("GEMINI_API_KEY not configured")
@@ -1164,6 +1305,8 @@ def _calculate_cost_nzd(call: dict, duration_seconds: int) -> dict:
             "total_input_tokens": provider.total_input_tokens,
             "total_output_tokens": provider.total_output_tokens,
         }
+    elif provider_name == "elevenlabs":
+        ai_cost = mins * COST_RATES["elevenlabs"]["per_min"]
     elif provider_name == "gemini":
         ai_cost = mins * COST_RATES["gemini"]["audio_per_min"]
     # Future providers: add elif branches here

@@ -263,6 +263,32 @@ def gemini_call_detail(call_sid):
         return jsonify({"ok": False, "error": str(e)}), 502
 
 
+@gemini_bp.route("/api/gemini/elevenlabs-agents", methods=["GET"])
+def gemini_elevenlabs_agents():
+    """Fetch list of ElevenLabs Conversational AI agents."""
+    api_key = os.getenv("ELEVENLABS_API_KEY", "")
+    if not api_key:
+        return jsonify({"ok": False, "error": "ELEVENLABS_API_KEY not configured"}), 500
+    try:
+        r = _requests.get(
+            "https://api.elevenlabs.io/v1/convai/agents",
+            headers={"xi-api-key": api_key},
+            timeout=10
+        )
+        if not r.ok:
+            return jsonify({"ok": False, "error": f"ElevenLabs API error: {r.status_code}"}), 502
+        data = r.json()
+        agents = []
+        for a in data.get("agents", []):
+            agents.append({
+                "agent_id": a.get("agent_id", ""),
+                "name": a.get("name", "Unnamed"),
+            })
+        return jsonify({"ok": True, "agents": agents})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 @gemini_bp.route("/api/gemini/recording/<call_sid>", methods=["GET"])
 def gemini_recording_proxy(call_sid):
     """Proxy Twilio recording download (requires Twilio auth)."""
@@ -495,6 +521,7 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                 <select id="set-ai-provider" style="width:100%;" onchange="onProviderChange()">
                     <option value="gemini" selected>Gemini 3.1 Flash Live</option>
                     <option value="openai">OpenAI Realtime (GPT)</option>
+                    <option value="elevenlabs">ElevenLabs Conversational AI</option>
                 </select>
                 <span style="font-size:10px;color:#888;">Which AI model handles the voice conversation. Different providers have different voices, latency, and capabilities.</span>
             </div>
@@ -504,6 +531,16 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                     <!-- Populated dynamically by onProviderChange() -->
                 </select>
                 <span style="font-size:10px;color:#888;">The AI voice used for the call. Available voices depend on the selected provider.</span>
+            </div>
+            <div data-provider="elevenlabs" style="grid-column:1/-1;">
+                <label class="form-label">ElevenLabs Agent</label>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <select id="set-elevenlabs-agent" style="flex:1;">
+                        <option value="">Loading agents...</option>
+                    </select>
+                    <button class="btn btn-grey" style="font-size:11px;padding:4px 10px;" onclick="loadElevenLabsAgents()"><i class="fa-solid fa-rotate"></i></button>
+                </div>
+                <span style="font-size:10px;color:#888;">Select which ElevenLabs agent handles the call. Agents are configured in the ElevenLabs dashboard with their own voice, prompt, and tools. The voice dropdown above is ignored when an agent is selected (agent has its own voice).</span>
             </div>
             <div>
                 <label class="form-label">Language</label>
@@ -778,7 +815,7 @@ function toggleSettings() {
 }
 
 function getCallSettings() {
-    return {
+    var settings = {
         ai_provider: document.getElementById('set-ai-provider').value,
         language: document.getElementById('set-language').value,
         thinking_level: document.getElementById('set-thinking').value,
@@ -787,6 +824,12 @@ function getCallSettings() {
         end_sensitivity: document.getElementById('set-end-sensitivity').value,
         silence_duration_ms: parseInt(document.getElementById('set-silence-ms').value) || 500,
     };
+    // Add ElevenLabs agent ID if selected
+    if (settings.ai_provider === 'elevenlabs') {
+        var agentId = document.getElementById('set-elevenlabs-agent').value;
+        if (agentId) settings.elevenlabs_agent_id = agentId;
+    }
+    return settings;
 }
 
 var _PROVIDER_VOICES = {
@@ -807,6 +850,15 @@ var _PROVIDER_VOICES = {
         {value: 'shimmer', label: 'Shimmer'},
         {value: 'marin', label: 'Marin'},
         {value: 'cedar', label: 'Cedar'},
+    ],
+    elevenlabs: [
+        {value: 'IKne3meq5aSn9XLyUdCD', label: 'Charlie (Australian male)'},
+        {value: 'ZQe5CZNOzWyzPSCn5a3c', label: 'James (Australian male, calm)'},
+        {value: '21m00Tcm4TlvDq8ikWAM', label: 'Rachel (female, professional)'},
+        {value: 'EXAVITQu4vr4xnSDxMaL', label: 'Sarah (female, soft)'},
+        {value: 'pNInz6obpgDQGcFmaJgB', label: 'Adam (male, deep)'},
+        {value: 'ErXwobaYiN019PkySvjV', label: 'Antoni (male, warm)'},
+        {value: 'jBpfuIE2acCO8z3wKNLl', label: 'Gigi (female, childlike)'},
     ]
 };
 
@@ -825,8 +877,29 @@ function onProviderChange() {
     document.querySelectorAll('[data-provider]').forEach(function(el) {
         el.style.display = (el.dataset.provider === provider) ? '' : 'none';
     });
+    // Load ElevenLabs agents when switching to elevenlabs
+    if (provider === 'elevenlabs') loadElevenLabsAgents();
     // Save selection
     localStorage.setItem('gemini_ai_provider', provider);
+}
+
+function loadElevenLabsAgents() {
+    var select = document.getElementById('set-elevenlabs-agent');
+    select.innerHTML = '<option value="">Loading...</option>';
+    fetch('/api/gemini/elevenlabs-agents').then(r=>r.json()).then(function(d) {
+        if (!d.ok || !d.agents.length) {
+            select.innerHTML = '<option value="">No agents found</option>';
+            return;
+        }
+        select.innerHTML = d.agents.map(function(a) {
+            return '<option value="' + esc(a.agent_id) + '">' + esc(a.name) + '</option>';
+        }).join('');
+        // Restore saved selection
+        var saved = localStorage.getItem('gemini_elevenlabs_agent');
+        if (saved) select.value = saved;
+    }).catch(function() {
+        select.innerHTML = '<option value="">Error loading agents</option>';
+    });
 }
 
 // ── Persist preferences in localStorage ──
@@ -835,6 +908,8 @@ function _savePrefs() {
     localStorage.setItem('gemini_ai_provider', document.getElementById('set-ai-provider').value);
     localStorage.setItem('gemini_voice_' + document.getElementById('set-ai-provider').value,
         document.getElementById('set-voice').value);
+    var elAgent = document.getElementById('set-elevenlabs-agent');
+    if (elAgent && elAgent.value) localStorage.setItem('gemini_elevenlabs_agent', elAgent.value);
 }
 
 function _restorePrefs() {
@@ -1170,7 +1245,7 @@ function loadHistory() {
             var notesData = {};
             try { notesData = typeof c.notes === 'string' ? JSON.parse(c.notes) : (c.notes || {}); } catch(e) { notesData = {ai_provider: c.notes || 'gemini'}; }
             var aiProvider = (notesData.ai_provider || 'gemini').toLowerCase();
-            var aiBadge = aiProvider === 'openai' ? '<span class="badge badge-blue">OpenAI</span>' : '<span class="badge badge-green">Gemini</span>';
+            var aiBadge = aiProvider === 'openai' ? '<span class="badge badge-blue">OpenAI</span>' : aiProvider === 'elevenlabs' ? '<span class="badge" style="background:#8e44ad;color:#fff;">ElevenLabs</span>' : '<span class="badge badge-green">Gemini</span>';
             var costInfo = notesData.cost || {};
             var costDisplay = costInfo.total_nzd ? '$' + costInfo.total_nzd.toFixed(2) : '-';
             var costTitle = costInfo.total_nzd ? 'Twilio: $' + (costInfo.twilio_usd * (costInfo.usd_to_nzd||1.73)).toFixed(3) + ' NZD\\nAI: $' + (costInfo.ai_usd * (costInfo.usd_to_nzd||1.73)).toFixed(3) + ' NZD\\nRate: 1 USD = ' + (costInfo.usd_to_nzd||'?') + ' NZD' : '';
