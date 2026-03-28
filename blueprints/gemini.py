@@ -1024,6 +1024,11 @@ function connectTranscriptWs() {
     }
 }
 
+function _cleanTranscriptText(text) {
+    // Strip ElevenLabs speech direction tags like [warmly], [excited], etc.
+    return text.replace(/\[[\w\s]+\]\s*/g, '');
+}
+
 function addTranscriptLine(speaker, text, timestamp) {
     var panel = document.getElementById('transcript-panel');
     // Remove empty state
@@ -1031,7 +1036,7 @@ function addTranscriptLine(speaker, text, timestamp) {
     var time = timestamp ? new Date(timestamp).toLocaleTimeString('en-NZ', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '';
     var cls = speaker === 'ai' ? 'ai' : 'caller';
     var label = speaker === 'ai' ? '🤖 AI' : '👤 Caller';
-    panel.innerHTML += '<div class="transcript-line ' + cls + '"><span class="time">' + time + '</span><span class="speaker">' + label + ':</span>' + esc(text) + '</div>';
+    panel.innerHTML += '<div class="transcript-line ' + cls + '"><span class="time">' + time + '</span><span class="speaker">' + label + ':</span>' + esc(_cleanTranscriptText(text)) + '</div>';
     panel.scrollTop = panel.scrollHeight;
 }
 
