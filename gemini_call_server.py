@@ -1177,33 +1177,62 @@ async def _preconnect_ai(call_id: str):
 #  SENTIMENT ANALYSIS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_FRUSTRATED_PHRASES = [
-    "already told you", "i said", "not what i asked", "that's wrong", "no no no",
-    "can you just", "for the third time", "that's not right", "useless", "speak to someone",
-    "real person", "human", "manager", "supervisor", "not helpful", "doesn't make sense",
-    "i don't understand", "you're not listening", "that's not what i said", "can i talk to",
-    "transfer me", "this isn't working",
-]
-_ANGRY_PHRASES = [
-    "ridiculous", "waste of time", "terrible", "horrible", "stupid", "incompetent",
-    "hang up", "worst", "pathetic", "joke", "scam", "rip off", "disgusting",
-]
-_POSITIVE_PHRASES = [
-    "thank you", "thanks", "that's great", "perfect", "exactly", "wonderful",
-    "you've been helpful", "that helps", "brilliant", "awesome", "excellent", "cheers",
-]
+_DEFAULT_SENTIMENT = {
+    "frustrated": ["already told you", "i said", "not what i asked", "that's wrong", "no no no",
+        "can you just", "for the third time", "that's not right", "useless", "speak to someone",
+        "real person", "human", "manager", "supervisor", "not helpful", "doesn't make sense",
+        "i don't understand", "you're not listening", "that's not what i said", "can i talk to",
+        "transfer me", "this isn't working"],
+    "angry": ["ridiculous", "waste of time", "terrible", "horrible", "stupid", "incompetent",
+        "hang up", "worst", "pathetic", "joke", "scam", "rip off", "disgusting"],
+    "positive": ["thank you", "thanks", "that's great", "perfect", "exactly", "wonderful",
+        "you've been helpful", "that helps", "brilliant", "awesome", "excellent", "cheers"],
+}
+_sentiment_cache = {"data": None, "fetched_at": 0}
+
+
+def _get_sentiment_triggers():
+    """Load sentiment triggers from Supabase, cached for 60s. Falls back to defaults."""
+    import time
+    now = time.time()
+    if _sentiment_cache["data"] and now - _sentiment_cache["fetched_at"] < 60:
+        return _sentiment_cache["data"]
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return _DEFAULT_SENTIMENT
+    try:
+        import requests as _req
+        r = _req.get(f"{SUPABASE_URL}/rest/v1/gemini_sentiment_triggers",
+            params={"select": "level,phrase", "order": "level.asc"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+            timeout=5)
+        if r.ok and r.json():
+            triggers = {"frustrated": [], "angry": [], "positive": []}
+            for row in r.json():
+                lvl = row.get("level", "")
+                phrase = row.get("phrase", "").strip().lower()
+                if lvl in triggers and phrase:
+                    triggers[lvl].append(phrase)
+            # Only use DB triggers if at least one exists
+            if any(triggers.values()):
+                _sentiment_cache["data"] = triggers
+                _sentiment_cache["fetched_at"] = now
+                return triggers
+    except Exception:
+        pass
+    return _DEFAULT_SENTIMENT
 
 
 def _analyze_sentiment(text, current_sentiment, turns_since_negative):
     """Keyword-based sentiment analysis. Returns (sentiment, turns_since_negative)."""
+    triggers = _get_sentiment_triggers()
     lower = text.lower().strip()
-    for phrase in _ANGRY_PHRASES:
+    for phrase in triggers.get("angry", []):
         if phrase in lower:
             return "angry", 0
-    for phrase in _FRUSTRATED_PHRASES:
+    for phrase in triggers.get("frustrated", []):
         if phrase in lower:
             return "frustrated", 0
-    for phrase in _POSITIVE_PHRASES:
+    for phrase in triggers.get("positive", []):
         if phrase in lower:
             return "positive", turns_since_negative + 1
     # Decay: reset to neutral after 3 calm turns

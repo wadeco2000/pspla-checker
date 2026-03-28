@@ -469,6 +469,55 @@ def gemini_debug():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  SENTIMENT TRIGGERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@gemini_bp.route("/api/gemini/sentiment-triggers", methods=["GET"])
+def get_sentiment_triggers():
+    """Fetch all sentiment trigger phrases."""
+    try:
+        r = _requests.get(f"{SUPABASE_URL}/rest/v1/gemini_sentiment_triggers",
+            params={"select": "id,level,phrase", "order": "level.asc,phrase.asc"},
+            headers=_sb_headers(), timeout=10)
+        return jsonify({"ok": True, "triggers": r.json() if r.ok else []})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@gemini_bp.route("/api/gemini/sentiment-triggers", methods=["POST"])
+def add_sentiment_trigger():
+    """Add a new sentiment trigger phrase."""
+    data = request.json or {}
+    level = data.get("level", "").strip()
+    phrase = data.get("phrase", "").strip().lower()
+    if level not in ("frustrated", "angry", "positive"):
+        return jsonify({"ok": False, "error": "Level must be frustrated, angry, or positive"}), 400
+    if not phrase:
+        return jsonify({"ok": False, "error": "Phrase required"}), 400
+    try:
+        r = _requests.post(f"{SUPABASE_URL}/rest/v1/gemini_sentiment_triggers",
+            json={"level": level, "phrase": phrase},
+            headers={**_sb_headers(), "Prefer": "return=representation"}, timeout=10)
+        if r.ok:
+            return jsonify({"ok": True, "trigger": r.json()[0] if r.json() else None})
+        return jsonify({"ok": False, "error": f"HTTP {r.status_code}"}), 502
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@gemini_bp.route("/api/gemini/sentiment-triggers/<int:trigger_id>", methods=["DELETE"])
+def delete_sentiment_trigger(trigger_id):
+    """Delete a sentiment trigger phrase."""
+    try:
+        _requests.delete(f"{SUPABASE_URL}/rest/v1/gemini_sentiment_triggers",
+            params={"id": f"eq.{trigger_id}"},
+            headers={**_sb_headers(), "Prefer": "return=minimal"}, timeout=10)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  INBOUND CALL CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1560,6 +1609,36 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
         </h2>
         <div id="supervisor-calls-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:12px;margin-top:8px;">
             <div class="empty-state" style="font-size:12px;color:#888;">No active calls</div>
+        </div>
+        <div style="margin-top:12px;border-top:1px solid #e2e8f0;padding-top:10px;">
+            <button class="btn btn-grey" style="font-size:11px;" onclick="document.getElementById('sentiment-editor').style.display=document.getElementById('sentiment-editor').style.display==='none'?'block':'none'">
+                <i class="fa-solid fa-gear"></i> Edit Sentiment Triggers
+            </button>
+            <div id="sentiment-editor" style="display:none;margin-top:10px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+                    <div>
+                        <h4 style="font-size:12px;color:#f39c12;margin-bottom:6px;"><span class="sentiment-dot frustrated"></span> Frustrated</h4>
+                        <div id="triggers-frustrated" style="font-size:11px;max-height:150px;overflow-y:auto;"></div>
+                    </div>
+                    <div>
+                        <h4 style="font-size:12px;color:#e74c3c;margin-bottom:6px;"><span class="sentiment-dot angry"></span> Angry</h4>
+                        <div id="triggers-angry" style="font-size:11px;max-height:150px;overflow-y:auto;"></div>
+                    </div>
+                    <div>
+                        <h4 style="font-size:12px;color:#27ae60;margin-bottom:6px;"><span class="sentiment-dot positive"></span> Positive</h4>
+                        <div id="triggers-positive" style="font-size:11px;max-height:150px;overflow-y:auto;"></div>
+                    </div>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:10px;">
+                    <select id="new-trigger-level" style="min-width:120px;">
+                        <option value="frustrated">Frustrated</option>
+                        <option value="angry">Angry</option>
+                        <option value="positive">Positive</option>
+                    </select>
+                    <input type="text" id="new-trigger-phrase" placeholder="Add a trigger phrase..." style="flex:1;" onkeydown="if(event.key==='Enter')addTrigger()">
+                    <button class="btn" style="background:#27ae60;font-size:11px;" onclick="addTrigger()"><i class="fa-solid fa-plus"></i> Add</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -3083,6 +3162,48 @@ function _supHangup(callId, callSid) {
         showStatus('Call ended.', 'success');
     });
 }
+
+// ── Sentiment Triggers ──
+function loadTriggers() {
+    fetch('/api/gemini/sentiment-triggers').then(r=>r.json()).then(function(d) {
+        if (!d.ok) return;
+        ['frustrated','angry','positive'].forEach(function(level) {
+            var container = document.getElementById('triggers-' + level);
+            var items = d.triggers.filter(function(t){ return t.level === level; });
+            if (!items.length) { container.innerHTML = '<span style="color:#aaa;">No triggers</span>'; return; }
+            container.innerHTML = '';
+            items.forEach(function(t) {
+                container.innerHTML += '<div style="display:flex;align-items:center;gap:4px;padding:2px 0;">'
+                    + '<span style="flex:1;">' + esc(t.phrase) + '</span>'
+                    + '<button style="border:none;background:none;color:#e74c3c;cursor:pointer;font-size:10px;" onclick="deleteTrigger(' + t.id + ')"><i class="fa-solid fa-xmark"></i></button>'
+                    + '</div>';
+            });
+        });
+    });
+}
+
+function addTrigger() {
+    var level = document.getElementById('new-trigger-level').value;
+    var phrase = document.getElementById('new-trigger-phrase').value.trim();
+    if (!phrase) return;
+    fetch('/api/gemini/sentiment-triggers', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({level: level, phrase: phrase})
+    }).then(r=>r.json()).then(function(d) {
+        if (!d.ok) { alert('Error: ' + (d.error||'Unknown')); return; }
+        document.getElementById('new-trigger-phrase').value = '';
+        loadTriggers();
+    });
+}
+
+function deleteTrigger(id) {
+    fetch('/api/gemini/sentiment-triggers/' + id, {method: 'DELETE'}).then(r=>r.json()).then(function(d) {
+        loadTriggers();
+    });
+}
+
+loadTriggers();
 
 // Start polling
 _supPollTimer = setInterval(_pollActiveCalls, 3000);
