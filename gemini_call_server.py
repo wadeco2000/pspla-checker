@@ -455,10 +455,10 @@ class ElevenLabsProvider:
                 "language": language,
             }
 
-        # Override voice if explicitly selected in our dashboard dropdown
-        # Don't override if it's a non-ElevenLabs voice ID (Gemini/OpenAI voice names)
+        # Only override voice if NO agent is selected (agent has its own voice)
+        has_agent = bool(settings.get("elevenlabs_agent_id"))
         voice_id = self._call.get("voice_name", "")
-        if voice_id and len(voice_id) > 15:  # ElevenLabs voice IDs are long strings
+        if not has_agent and voice_id and len(voice_id) > 15:
             overrides["tts"] = {"voice_id": voice_id}
 
         if overrides:
