@@ -6,9 +6,18 @@ Google Gemini 3.1 Flash Live + Twilio telephony.
 import os
 import re
 import json
+import logging
 import threading
 import requests as _requests
 from datetime import datetime, timezone
+
+_log = logging.getLogger(__name__)
+
+
+def _safe_error(e, context=""):
+    """Log the real error, return a safe generic message."""
+    _log.error(f"Gemini error [{context}]: {e}", exc_info=True)
+    return "An internal error occurred. Check server logs for details."
 from flask import Blueprint, render_template_string, request, jsonify, session, redirect
 from markupsafe import escape as _esc
 import ipaddress
@@ -97,7 +106,7 @@ def gemini_knowledge_bases():
                 headers=_sb_headers(), timeout=10)
             return jsonify({"ok": True, "knowledge_bases": r.json() if r.ok else []})
         except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 502
+            return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
     # POST — create or update
     data = request.json or {}
@@ -130,7 +139,7 @@ def gemini_knowledge_bases():
                 json=payload, headers=headers, timeout=10)
         return jsonify({"ok": r.ok, "data": r.json() if r.ok else None})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 @gemini_bp.route("/api/gemini/knowledge-bases/<int:kb_id>", methods=["DELETE"])
@@ -141,7 +150,7 @@ def gemini_delete_kb(kb_id):
             headers={**_sb_headers(), "Prefer": "return=minimal"}, timeout=10)
         return jsonify({"ok": r.ok})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -271,7 +280,7 @@ def gemini_end_call():
             timeout=15)
         return jsonify(r.json() if r.ok else {"ok": False, "error": "Call server error"})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -286,7 +295,7 @@ def gemini_call_history():
             headers=_sb_headers(), timeout=10)
         return jsonify({"ok": True, "calls": r.json() if r.ok else []})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 @gemini_bp.route("/api/gemini/call/<call_sid>", methods=["GET"])
@@ -302,7 +311,7 @@ def gemini_call_detail(call_sid):
             return jsonify({"ok": True, "call": data[0]})
         return jsonify({"ok": False, "error": "Call not found."}), 404
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 @gemini_bp.route("/api/gemini/elevenlabs-agents", methods=["GET"])
@@ -328,7 +337,7 @@ def gemini_elevenlabs_agents():
             })
         return jsonify({"ok": True, "agents": agents})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 @gemini_bp.route("/api/gemini/recording/<call_sid>", methods=["GET"])
@@ -346,7 +355,7 @@ def gemini_recording_proxy(call_sid):
             return jsonify({"ok": False, "error": "No recording found."}), 404
         rec_url = data[0]["recording_url"]
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
     # Validate URL is from Twilio (prevent SSRF)
     if not re.match(r"^https://api\.twilio\.com/", rec_url):
@@ -366,12 +375,14 @@ def gemini_recording_proxy(call_sid):
             headers={"Content-Disposition": f"attachment; filename=call-{call_sid}.mp3"}
         )
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 @gemini_bp.route("/api/gemini/debug", methods=["GET"])
 def gemini_debug():
-    """Fetch debug info from all components."""
+    """Fetch debug info from all components. Admin only."""
+    if not _is_admin():
+        return jsonify({"ok": False, "error": "Admin access required"}), 403
     server_url = os.getenv("GEMINI_CALL_SERVER_URL", "http://localhost:8001")
     secret = os.getenv("GEMINI_CALL_SERVER_SECRET", "")
     headers = {"X-Server-Secret": secret}
@@ -481,7 +492,7 @@ def get_sentiment_triggers():
             headers=_sb_headers(), timeout=10)
         return jsonify({"ok": True, "triggers": r.json() if r.ok else []})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 @gemini_bp.route("/api/gemini/sentiment-triggers", methods=["POST"])
@@ -502,7 +513,7 @@ def add_sentiment_trigger():
             return jsonify({"ok": True, "trigger": r.json()[0] if r.json() else None})
         return jsonify({"ok": False, "error": f"HTTP {r.status_code}"}), 502
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 @gemini_bp.route("/api/gemini/sentiment-triggers/<int:trigger_id>", methods=["DELETE"])
@@ -514,7 +525,24 @@ def delete_sentiment_trigger(trigger_id):
             headers={**_sb_headers(), "Prefer": "return=minimal"}, timeout=10)
         return jsonify({"ok": True})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ACTIVE CALLS (proxy to call server — adds auth)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@gemini_bp.route("/api/gemini/active-calls", methods=["GET"])
+def get_active_calls():
+    """Proxy to call server's active-calls-summary — adds server secret auth."""
+    server_url = os.getenv("GEMINI_CALL_SERVER_URL", "http://localhost:8001")
+    secret = os.getenv("GEMINI_CALL_SERVER_SECRET", "")
+    try:
+        r = _requests.get(f"{server_url}/api/active-calls-summary",
+            headers={"X-Server-Secret": secret}, timeout=5)
+        return jsonify(r.json() if r.ok else [])
+    except Exception:
+        return jsonify([])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -532,7 +560,7 @@ def get_inbound_config():
             return jsonify({"ok": True, "config": r.json()[0]})
         return jsonify({"ok": True, "config": None})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 @gemini_bp.route("/api/gemini/inbound-config", methods=["POST"])
@@ -571,7 +599,7 @@ def save_inbound_config():
             return jsonify({"ok": True, "config": r.json()[0] if r.json() else None})
         return jsonify({"ok": False, "error": f"HTTP {r.status_code}"}), 502
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1011,7 +1039,7 @@ def rag_list_documents():
             headers=_sb_headers(), timeout=10)
         return jsonify({"ok": True, "documents": r.json() if r.ok else []})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 @gemini_bp.route("/api/gemini/rag/precompute/<int:kb_id>", methods=["GET"])
@@ -1029,7 +1057,7 @@ def rag_precompute(kb_id):
         context = _rag_search(kb_id, kb.get("content", ""), top_k=5)
         return jsonify({"ok": True, "context": context})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 @gemini_bp.route("/api/gemini/rag/documents", methods=["POST"])
@@ -1108,7 +1136,7 @@ def rag_upload_document():
         return jsonify({"ok": True, "document": {"id": doc_id, "title": title, "status": "pending"}})
 
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 @gemini_bp.route("/api/gemini/rag/documents/<int:doc_id>", methods=["DELETE"])
@@ -1119,7 +1147,7 @@ def rag_delete_document(doc_id):
             headers={**_sb_headers(), "Prefer": "return=minimal"}, timeout=10)
         return jsonify({"ok": True})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 @gemini_bp.route("/api/gemini/rag/documents/<int:doc_id>/chunks", methods=["GET"])
@@ -1133,7 +1161,7 @@ def rag_document_chunks(doc_id):
             return jsonify({"ok": False, "error": f"HTTP {r.status_code}"}), 502
         return jsonify({"ok": True, "chunks": r.json()})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 @gemini_bp.route("/api/gemini/rag/test-search", methods=["POST"])
@@ -1179,7 +1207,7 @@ def rag_test_search():
             })
         return jsonify({"ok": True, "results": results, "query": query})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 @gemini_bp.route("/api/gemini/rag/test-ask", methods=["POST"])
@@ -1225,7 +1253,7 @@ def rag_test_ask():
         answer = msg.content[0].text
         return jsonify({"ok": True, "answer": answer})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 @gemini_bp.route("/api/gemini/rag/import-gdrive", methods=["POST"])
@@ -1270,7 +1298,7 @@ def rag_import_gdrive():
 
         return jsonify({"ok": True, "imported": imported})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 def _import_single_gdrive_doc(service, file_id, name, source_url):
@@ -1350,7 +1378,7 @@ def rag_sync_gdrive(doc_id):
 
         return jsonify({"ok": True, "message": f"Syncing '{name}'..."})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 @gemini_bp.route("/api/gemini/rag/kb-documents/<int:kb_id>", methods=["GET"])
@@ -1363,7 +1391,7 @@ def rag_kb_documents(kb_id):
         attached_ids = [row["document_id"] for row in r.json()] if r.ok else []
         return jsonify({"ok": True, "document_ids": attached_ids})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 @gemini_bp.route("/api/gemini/rag/kb-documents", methods=["POST"])
@@ -1388,7 +1416,7 @@ def rag_attach_document():
                 headers={**_sb_headers(), "Prefer": "return=minimal"}, timeout=10)
         return jsonify({"ok": True})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1976,6 +2004,7 @@ fetch(_callServerUrl + '/health').then(r=>r.json()).then(d=>{
 }).catch(e=>{console.error('Call server health fetch failed:', e);});
 var _activeCallSid = null;
 var _activeCallId = null;
+var _activeWsToken = null;
 var _callTimerInterval = null;
 var _callStartTime = null;
 var _transcriptWs = null;
@@ -2278,6 +2307,7 @@ function makeCall() {
         if (!d.ok) { showStatus('Error: ' + (d.error||'Unknown'), 'error'); return; }
         _activeCallSid = d.call_sid;
         _activeCallId = d.call_id;
+        _activeWsToken = d.ws_token || '';
         showStatus('Call initiated! Waiting for connection...', 'success');
         showActiveCall();
         connectTranscriptWs();
@@ -2331,7 +2361,7 @@ function endCall() {
 
 function connectTranscriptWs() {
     if (!_activeCallId || !_callServerUrl) return;
-    var wsUrl = _callServerUrl.replace('http', 'ws') + '/ws/transcript/' + _activeCallId;
+    var wsUrl = _callServerUrl.replace('http', 'ws') + '/ws/transcript/' + _activeCallId + '?token=' + (_activeWsToken||'');
     try {
         _transcriptWs = new WebSocket(wsUrl);
         _transcriptWs.onmessage = function(e) {
@@ -2443,7 +2473,7 @@ function toggleMonitor() {
         _monitorAudioCtx = new (window.AudioContext || window.webkitAudioContext)({sampleRate: 8000});
         _monitorNextTime = 0;
 
-        var wsUrl = _callServerUrl.replace('http', 'ws') + '/ws/monitor/' + _activeCallId;
+        var wsUrl = _callServerUrl.replace('http', 'ws') + '/ws/monitor/' + _activeCallId + '?token=' + (_activeWsToken||'');
         _monitorWs = new WebSocket(wsUrl);
         _monitorWs.onmessage = function(e) {
             var msg = JSON.parse(e.data);
@@ -2514,7 +2544,7 @@ function toggleBarge() {
             if (!_monitorActive) toggleMonitor();
 
             // Connect barge WebSocket
-            var wsUrl = _callServerUrl.replace('http', 'ws') + '/ws/barge/' + _activeCallId;
+            var wsUrl = _callServerUrl.replace('http', 'ws') + '/ws/barge/' + _activeCallId + '?token=' + (_activeWsToken||'');
             _bargeWs = new WebSocket(wsUrl);
 
             // Set up mic capture and encoding
@@ -3058,11 +3088,12 @@ function saveKbDocAttachments(kbId) {
 var _supCallWs = {};  // call_id -> WebSocket (transcript)
 var _supMonitorWs = {};  // call_id -> {ws, audioCtx, nextTime}
 var _supBargeWs = {};  // call_id -> {ws, audioCtx, processor, stream}
+var _supTokens = {};  // call_id -> ws_token
 var _supPollTimer = null;
 
 function _pollActiveCalls() {
     var dot = document.getElementById('active-calls-poll-dot');
-    fetch(_callServerUrl + '/api/active-calls-summary').then(r=>r.json()).then(function(calls) {
+    fetch('/api/gemini/active-calls').then(r=>r.json()).then(function(calls) {
         dot.style.background = '#27ae60';
         var grid = document.getElementById('supervisor-calls-grid');
         var badge = document.getElementById('active-calls-count');
@@ -3077,7 +3108,7 @@ function _pollActiveCalls() {
         }
         // Build/update cards
         var activeIds = {};
-        calls.forEach(function(c) { activeIds[c.call_id] = true; });
+        calls.forEach(function(c) { activeIds[c.call_id] = true; if(c.ws_token) _supTokens[c.call_id]=c.ws_token; });
         // Remove cards for ended calls
         grid.querySelectorAll('.sup-card').forEach(function(card) {
             if (!activeIds[card.dataset.callId]) card.remove();
@@ -3135,7 +3166,7 @@ function _renderSupCard(grid, c) {
 
 function _supConnectTranscript(callId) {
     if (_supCallWs[callId]) return;
-    var wsUrl = _callServerUrl.replace('http','ws') + '/ws/transcript/' + callId;
+    var wsUrl = _callServerUrl.replace('http','ws') + '/ws/transcript/' + callId + '?token=' + (_supTokens[callId]||'');
     try {
         var ws = new WebSocket(wsUrl);
         _supCallWs[callId] = ws;
@@ -3182,7 +3213,7 @@ function _supMonitor(callId) {
     }
     var audioCtx = new (window.AudioContext||window.webkitAudioContext)({sampleRate:8000});
     var nextTime = 0;
-    var wsUrl = _callServerUrl.replace('http','ws') + '/ws/monitor/' + callId;
+    var wsUrl = _callServerUrl.replace('http','ws') + '/ws/monitor/' + callId + '?token=' + (_supTokens[callId]||'');
     var ws = new WebSocket(wsUrl);
     _supMonitorWs[callId] = {ws:ws, audioCtx:audioCtx};
     var card = document.querySelector('.sup-card[data-call-id="'+callId+'"]');
@@ -3215,7 +3246,7 @@ function _supBarge(callId) {
     navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream) {
         // Start monitor if not already
         if (!_supMonitorWs[callId]) _supMonitor(callId);
-        var wsUrl = _callServerUrl.replace('http','ws') + '/ws/barge/' + callId;
+        var wsUrl = _callServerUrl.replace('http','ws') + '/ws/barge/' + callId + '?token=' + (_supTokens[callId]||'');
         var ws = new WebSocket(wsUrl);
         var audioCtx = new (window.AudioContext||window.webkitAudioContext)();
         var source = audioCtx.createMediaStreamSource(stream);

@@ -656,6 +656,19 @@ def _verify_secret(request: Request):
         raise HTTPException(status_code=403, detail="Invalid server secret.")
 
 
+def _verify_twilio_signature(request: Request, form: dict):
+    """Verify that a webhook request actually came from Twilio."""
+    if not TWILIO_AUTH_TOKEN:
+        return  # Dev mode — no validation
+    from twilio.request_validator import RequestValidator
+    validator = RequestValidator(TWILIO_AUTH_TOKEN)
+    signature = request.headers.get("X-Twilio-Signature", "")
+    url = str(request.url)
+    if not validator.validate(url, form, signature):
+        log.warning(f"Rejected forged Twilio webhook: {url}")
+        raise HTTPException(status_code=403, detail="Invalid Twilio signature.")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  API ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -708,8 +721,9 @@ async def debug_active_calls(request: Request):
 
 
 @app.get("/api/active-calls-summary")
-async def active_calls_summary():
-    """Lightweight summary of all active calls for the supervisor dashboard. No auth required."""
+async def active_calls_summary(request: Request):
+    """Lightweight summary of all active calls for the supervisor dashboard."""
+    _verify_secret(request)
     calls = []
     for cid, c in _active_calls.items():
         transcript = c.get("transcript", [])
@@ -736,6 +750,7 @@ async def active_calls_summary():
             "last_transcript": last_line,
             "sentiment": c.get("sentiment", "neutral"),
             "transcript_count": len(transcript),
+            "ws_token": c.get("ws_token", ""),
         })
     return calls
 
@@ -787,6 +802,9 @@ async def make_call(request: Request):
     call_id = str(uuid.uuid4())[:12]
     log.info(f"[{call_id}] Making call to {to_number} from {from_number} (provider: {ai_provider})")
 
+    # Generate WebSocket auth token for this call
+    ws_token = str(uuid.uuid4())
+
     # Store call state
     _active_calls[call_id] = {
         "to_number": to_number,
@@ -804,6 +822,7 @@ async def make_call(request: Request):
         "ai_ready": asyncio.Event(),
         "ai_error": None,
         "ai_cancel": asyncio.Event(),
+        "ws_token": ws_token,
     }
     _transcript_subscribers[call_id] = set()
 
@@ -834,7 +853,7 @@ async def make_call(request: Request):
         _active_calls[call_id]["status"] = "ringing"
         log.info(f"[{call_id}] Twilio call SID: {call.sid}")
 
-        return {"ok": True, "call_id": call_id, "call_sid": call.sid}
+        return {"ok": True, "call_id": call_id, "call_sid": call.sid, "ws_token": ws_token}
 
     except Exception as e:
         log.error(f"[{call_id}] Twilio error: {e}")
@@ -920,6 +939,7 @@ def _save_inbound_to_history(call_id, call_sid, caller, called, config):
 async def handle_inbound_call(request: Request):
     """Twilio webhook for incoming calls. Returns TwiML to connect to AI."""
     form = await request.form()
+    _verify_twilio_signature(request, dict(form))
     caller = form.get("From", "")
     called = form.get("To", "")
     call_sid = form.get("CallSid", "")
@@ -984,6 +1004,7 @@ async def handle_inbound_call(request: Request):
         system_instruction += "\n\nSTRICT MODE: You must ONLY use information from the reference documents and knowledge base provided above. If the caller asks something not covered in your reference materials, say 'I don't have that information in my reference materials.' Do NOT use general knowledge to answer questions."
 
     call_id = str(uuid.uuid4())[:12]
+    ws_token = str(uuid.uuid4())
     _log_error(call_id, f"Inbound call from {caller} — provider: {settings['ai_provider']}, kb: {kb_id}, rag_enabled: {kb.get('rag_enabled') if kb else False}, greeting: {greeting[:50] if greeting else 'none'}, prompt_len: {len(system_instruction)}")
 
     # Create call state (same structure as outbound)
@@ -1004,6 +1025,7 @@ async def handle_inbound_call(request: Request):
         "ai_error": None,
         "ai_cancel": asyncio.Event(),
         "is_inbound": True,
+        "ws_token": ws_token,
     }
     _transcript_subscribers[call_id] = set()
 
@@ -1046,6 +1068,7 @@ async def recording_status(call_id: str, request: Request):
     if not re.match(r"^[a-f0-9\-]{12}$", call_id):
         return Response(content="Invalid call_id", status_code=400)
     form = await request.form()
+    _verify_twilio_signature(request, dict(form))
     recording_url = form.get("RecordingUrl", "")
     recording_sid = form.get("RecordingSid", "")
     recording_duration = form.get("RecordingDuration", "")
@@ -1108,6 +1131,7 @@ async def end_call(request: Request):
 async def call_status(request: Request):
     """Twilio status callback webhook."""
     form = await request.form()
+    _verify_twilio_signature(request, dict(form))
     call_sid = form.get("CallSid", "")
     status = form.get("CallStatus", "")
     duration = form.get("CallDuration", "")
@@ -1538,9 +1562,24 @@ async def media_stream(websocket: WebSocket, call_id: str):
 #  TRANSCRIPT WEBSOCKET (Dashboard connects here)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _verify_ws_token(websocket: WebSocket, call_id: str):
+    """Verify WebSocket auth token from query string."""
+    call = _active_calls.get(call_id)
+    if not call:
+        return False
+    expected = call.get("ws_token", "")
+    if not expected:
+        return True  # No token set (legacy calls) — allow
+    provided = websocket.query_params.get("token", "")
+    return hmac.compare_digest(provided, expected)
+
+
 @app.websocket("/ws/transcript/{call_id}")
 async def transcript_ws(websocket: WebSocket, call_id: str):
     """WebSocket for live transcript broadcast to dashboard."""
+    if not _verify_ws_token(websocket, call_id):
+        await websocket.close(code=4003, reason="Invalid token")
+        return
     await websocket.accept()
 
     if call_id not in _transcript_subscribers:
@@ -1586,6 +1625,9 @@ async def _broadcast_monitor(call_id: str, speaker: str, mulaw_b64: str):
 @app.websocket("/ws/monitor/{call_id}")
 async def monitor_ws(websocket: WebSocket, call_id: str):
     """WebSocket for live audio monitoring — browser listens to both sides."""
+    if not _verify_ws_token(websocket, call_id):
+        await websocket.close(code=4003, reason="Invalid token")
+        return
     if call_id not in _active_calls:
         await websocket.close(code=4004, reason="Unknown call")
         return
@@ -1614,6 +1656,9 @@ async def monitor_ws(websocket: WebSocket, call_id: str):
 @app.websocket("/ws/barge/{call_id}")
 async def barge_ws(websocket: WebSocket, call_id: str):
     """WebSocket for barge-in — human operator takes over from AI."""
+    if not _verify_ws_token(websocket, call_id):
+        await websocket.close(code=4003, reason="Invalid token")
+        return
     if call_id not in _active_calls:
         await websocket.close(code=4004, reason="Unknown call")
         return
