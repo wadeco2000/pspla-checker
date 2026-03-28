@@ -555,40 +555,55 @@ def _generate_embeddings(texts):
     return all_embeddings
 
 
-def _process_document_bg(doc_id):
-    """Background thread: extract text, chunk, embed, store in Supabase."""
-    headers = _sb_headers()
-
+def _update_doc_status(doc_id, status, **extra):
+    """Helper: update document status in Supabase."""
+    payload = {"status": status, **extra}
     try:
-        # Fetch document record
-        r = _requests.get(f"{SUPABASE_URL}/rest/v1/rag_documents",
-            params={"select": "*", "id": f"eq.{doc_id}"},
-            headers=headers, timeout=10)
-        docs = r.json()
-        if not docs:
-            return
-        doc = docs[0]
-
-        # Update status to processing
         _requests.patch(f"{SUPABASE_URL}/rest/v1/rag_documents",
             params={"id": f"eq.{doc_id}"},
-            json={"status": "processing"}, headers={**headers, "Prefer": "return=minimal"}, timeout=10)
+            json=payload,
+            headers={**_sb_headers(), "Prefer": "return=minimal"}, timeout=10)
+    except Exception:
+        pass
 
-        # Extract text
-        raw_text = doc.get("raw_text", "")
-        if not raw_text:
-            return  # No text to process
 
-        # Chunk
-        chunks = _chunk_text(raw_text)
-        if not chunks:
-            _requests.patch(f"{SUPABASE_URL}/rest/v1/rag_documents",
-                params={"id": f"eq.{doc_id}"},
-                json={"status": "error", "error_message": "No text chunks produced"},
-                headers={**headers, "Prefer": "return=minimal"}, timeout=10)
+def _process_document_bg(doc_id, source_type, source_url=None, file_bytes_b64=None):
+    """Background thread: extract text, chunk, embed, store in Supabase.
+    Updates status at each stage so the UI can show progress."""
+    import base64 as _b64
+
+    try:
+        # Stage 1: Extracting text
+        _update_doc_status(doc_id, "extracting")
+
+        if source_type == "url":
+            raw_text = _extract_text(None, "url", source_url)
+        elif file_bytes_b64:
+            file_bytes = _b64.b64decode(file_bytes_b64)
+            raw_text = _extract_text(file_bytes, source_type)
+        else:
+            _update_doc_status(doc_id, "error", error_message="No file data or URL provided")
             return
 
-        # Generate embeddings
+        if not raw_text or len(raw_text.strip()) < 10:
+            _update_doc_status(doc_id, "error", error_message="No text could be extracted")
+            return
+
+        # Save raw text to DB
+        _requests.patch(f"{SUPABASE_URL}/rest/v1/rag_documents",
+            params={"id": f"eq.{doc_id}"},
+            json={"raw_text": raw_text, "char_count": len(raw_text), "status": "chunking"},
+            headers={**_sb_headers(), "Prefer": "return=minimal"}, timeout=15)
+
+        # Stage 2: Chunking
+        chunks = _chunk_text(raw_text)
+        if not chunks:
+            _update_doc_status(doc_id, "error", error_message="No text chunks produced")
+            return
+
+        _update_doc_status(doc_id, "embedding", chunk_count=len(chunks))
+
+        # Stage 3: Generating embeddings
         embeddings = _generate_embeddings(chunks)
 
         # Count tokens
@@ -597,9 +612,11 @@ def _process_document_bg(doc_id):
             enc = tiktoken.get_encoding("cl100k_base")
             token_counts = [len(enc.encode(c)) for c in chunks]
         except Exception:
-            token_counts = [len(c) // 4 for c in chunks]  # rough estimate
+            token_counts = [len(c) // 4 for c in chunks]
 
-        # Insert chunks with embeddings
+        # Stage 4: Storing chunks
+        _update_doc_status(doc_id, "storing")
+
         chunk_rows = []
         for i, (chunk_text, embedding, tok_count) in enumerate(zip(chunks, embeddings, token_counts)):
             chunk_rows.append({
@@ -610,29 +627,18 @@ def _process_document_bg(doc_id):
                 "embedding": embedding,
             })
 
-        # Batch insert (Supabase REST accepts arrays)
-        _requests.post(f"{SUPABASE_URL}/rest/v1/rag_chunks",
-            json=chunk_rows,
-            headers={**headers, "Prefer": "return=minimal"}, timeout=30)
+        # Batch insert in groups of 50 (large embedding arrays can exceed request limits)
+        headers = {**_sb_headers(), "Prefer": "return=minimal"}
+        for i in range(0, len(chunk_rows), 50):
+            batch = chunk_rows[i:i + 50]
+            _requests.post(f"{SUPABASE_URL}/rest/v1/rag_chunks",
+                json=batch, headers=headers, timeout=30)
 
-        # Update document status
-        _requests.patch(f"{SUPABASE_URL}/rest/v1/rag_documents",
-            params={"id": f"eq.{doc_id}"},
-            json={
-                "status": "ready",
-                "chunk_count": len(chunks),
-                "char_count": len(raw_text),
-            },
-            headers={**headers, "Prefer": "return=minimal"}, timeout=10)
+        # Done
+        _update_doc_status(doc_id, "ready", chunk_count=len(chunks), char_count=len(raw_text))
 
     except Exception as e:
-        try:
-            _requests.patch(f"{SUPABASE_URL}/rest/v1/rag_documents",
-                params={"id": f"eq.{doc_id}"},
-                json={"status": "error", "error_message": str(e)[:500]},
-                headers={**_sb_headers(), "Prefer": "return=minimal"}, timeout=10)
-        except Exception:
-            pass
+        _update_doc_status(doc_id, "error", error_message=str(e)[:500])
 
 
 def _rag_search(kb_id, query_text, top_k=5):
@@ -693,13 +699,16 @@ def rag_list_documents():
 
 @gemini_bp.route("/api/gemini/rag/documents", methods=["POST"])
 def rag_upload_document():
-    """Upload a document (file or URL) for RAG processing."""
+    """Upload a document (file or URL) for RAG processing.
+    Returns immediately — all extraction and processing happens in background."""
+    import base64 as _b64
+
     title = ""
     source_type = ""
-    raw_text = ""
     file_size = 0
     original_filename = ""
     source_url = ""
+    file_bytes_b64 = None  # store raw bytes for background extraction
 
     # Check for URL upload
     if request.content_type and "application/json" in request.content_type:
@@ -713,10 +722,6 @@ def rag_upload_document():
         source_type = "url"
         if not title:
             title = source_url[:100]
-        try:
-            raw_text = _extract_text(None, "url", source_url)
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"Failed to fetch URL: {e}"}), 400
     else:
         # File upload
         f = request.files.get("file")
@@ -736,15 +741,9 @@ def rag_upload_document():
             return jsonify({"ok": False, "error": f"File too large ({file_size // 1024 // 1024}MB). Max 20MB."}), 400
 
         title = request.form.get("title", "").strip() or original_filename
-        try:
-            raw_text = _extract_text(file_bytes, source_type)
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"Failed to extract text: {e}"}), 400
+        file_bytes_b64 = _b64.b64encode(file_bytes).decode("ascii")
 
-    if not raw_text or len(raw_text.strip()) < 10:
-        return jsonify({"ok": False, "error": "No text could be extracted from this document"}), 400
-
-    # Create document record
+    # Create document record — return immediately, process in background
     try:
         r = _requests.post(f"{SUPABASE_URL}/rest/v1/rag_documents",
             json={
@@ -753,7 +752,6 @@ def rag_upload_document():
                 "source_url": source_url or None,
                 "original_filename": original_filename or None,
                 "file_size_bytes": file_size or None,
-                "raw_text": raw_text,
                 "status": "pending",
             },
             headers={**_sb_headers(), "Prefer": "return=representation"}, timeout=10)
@@ -764,8 +762,12 @@ def rag_upload_document():
         doc = r.json()[0]
         doc_id = doc["id"]
 
-        # Start background processing
-        thread = threading.Thread(target=_process_document_bg, args=(doc_id,), daemon=True)
+        # Start background processing (extraction + chunking + embedding)
+        thread = threading.Thread(
+            target=_process_document_bg,
+            args=(doc_id, source_type, source_url, file_bytes_b64),
+            daemon=True
+        )
         thread.start()
 
         return jsonify({"ok": True, "document": {"id": doc_id, "title": title, "status": "pending"}})
@@ -1966,10 +1968,14 @@ function loadDocuments() {
         var html = '<table class="history-table"><thead><tr><th>Title</th><th>Type</th><th>Size</th><th>Chunks</th><th>Status</th><th></th></tr></thead><tbody>';
         d.documents.forEach(function(doc) {
             var size = doc.file_size_bytes ? Math.round(doc.file_size_bytes/1024) + 'KB' : '-';
-            var statusCls = doc.status === 'ready' ? 'badge-green' : doc.status === 'error' ? 'badge-red' : doc.status === 'processing' ? 'badge-blue' : 'badge-grey';
+            var statusCls = doc.status === 'ready' ? 'badge-green' : doc.status === 'error' ? 'badge-red' : 'badge-blue';
+            var statusLabels = {pending:'Pending', extracting:'Extracting text...', chunking:'Chunking...', embedding:'Generating embeddings...', storing:'Storing chunks...', ready:'Ready', error:'Error'};
+            var statusLabel = statusLabels[doc.status] || doc.status;
             html += '<tr><td>' + esc(doc.title) + '</td><td>' + esc(doc.source_type) + '</td>';
             html += '<td>' + size + '</td><td>' + (doc.chunk_count || '-') + '</td>';
-            html += '<td><span class="badge ' + statusCls + '">' + esc(doc.status) + '</span></td>';
+            html += '<td><span class="badge ' + statusCls + '">' + esc(statusLabel) + '</span>';
+            if (doc.error_message) html += '<br><span style="font-size:10px;color:#e74c3c;">' + esc(doc.error_message).substring(0,100) + '</span>';
+            html += '</td>';
             html += '<td><button class="btn btn-red" style="font-size:10px;padding:2px 8px;" onclick="deleteDocument(' + doc.id + ')"><i class="fa-solid fa-trash"></i></button></td></tr>';
         });
         html += '</tbody></table>';
@@ -1998,7 +2004,6 @@ function toggleUploadType() {
 }
 
 function uploadDocument() {
-    console.log('uploadDocument called');
     var uploadType = document.getElementById('upload-type').value;
     var title = document.getElementById('upload-title').value.trim();
 
