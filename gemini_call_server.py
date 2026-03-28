@@ -1062,9 +1062,11 @@ async def media_stream(websocket: WebSocket, call_id: str):
                         )
                         if rag_context:
                             await provider.send_context(rag_context)
-                            log.info(f"[{call_id}] RAG: injected context for '{query[:50]}'")
+                            _log_error(call_id, f"RAG: injected {len(rag_context)} chars for '{query[:50]}'")
+                        else:
+                            _log_error(call_id, f"RAG: no results for '{query[:50]}'")
                     except Exception as e:
-                        log.error(f"[{call_id}] RAG search error: {e}")
+                        _log_error(call_id, f"RAG search error: {e}")
                 asyncio.create_task(_do_rag_search(text.strip()))
 
         async def _auto_hangup_after_delay():
