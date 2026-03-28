@@ -1998,6 +1998,7 @@ function toggleUploadType() {
 }
 
 function uploadDocument() {
+    console.log('uploadDocument called');
     var uploadType = document.getElementById('upload-type').value;
     var title = document.getElementById('upload-title').value.trim();
 
@@ -2021,12 +2022,13 @@ function uploadDocument() {
         formData.append('file', fileInput.files[0]);
         if (title) formData.append('title', title);
         fetch('/api/gemini/rag/documents', {method: 'POST', body: formData})
-        .then(r=>r.json()).then(function(d) {
+        .then(function(r) { if (!r.ok) { return r.text().then(function(t) { throw new Error('HTTP ' + r.status + ': ' + t.substring(0,200)); }); } return r.json(); })
+        .then(function(d) {
             if (!d.ok) { alert('Error: ' + (d.error||'Unknown')); return; }
             document.getElementById('upload-modal').classList.remove('active');
             showStatus('Document uploaded — processing...', 'success');
             loadDocuments();
-        });
+        }).catch(function(e) { alert('Upload failed: ' + e.message); });
     }
 }
 
