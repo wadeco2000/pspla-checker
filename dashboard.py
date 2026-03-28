@@ -8493,12 +8493,12 @@ function loadUsers() {
             if (u.is_admin) {
                 permCol = '<span style="font-size:11px;color:#8e44ad">All (admin)</span>';
             } else if (IS_ADMIN) {
-                ['searches','database','history','utilities','actuate','shelly','club_fitness'].forEach(function(g){
+                ['searches','database','history','utilities','actuate','shelly','club_fitness','gemini'].forEach(function(g){
                     var on = perms[g];
                     permCol += '<button class="perm-btn ' + (on ? 'perm-on' : 'perm-off') + '" onclick="togglePerm(\\'' + u.id + '\\',\\'' + g + '\\',' + !on + ')" title="' + g + '">' + permLabels[g] + '</button>';
                 });
             } else {
-                ['searches','database','history','utilities','actuate','shelly','club_fitness'].forEach(function(g){
+                ['searches','database','history','utilities','actuate','shelly','club_fitness','gemini'].forEach(function(g){
                     var on = perms[g];
                     permCol += '<span class="perm-btn ' + (on ? 'perm-on' : 'perm-off') + '" style="cursor:default" title="' + g + '">' + permLabels[g] + '</span>';
                 });
