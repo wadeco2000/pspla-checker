@@ -663,7 +663,13 @@ def _verify_twilio_signature(request: Request, form: dict):
     from twilio.request_validator import RequestValidator
     validator = RequestValidator(TWILIO_AUTH_TOKEN)
     signature = request.headers.get("X-Twilio-Signature", "")
-    url = str(request.url)
+    # Reconstruct external URL — Azure proxy rewrites the URL internally
+    proto = request.headers.get("X-Forwarded-Proto", request.url.scheme)
+    host = request.headers.get("X-Forwarded-Host", request.url.netloc)
+    path = request.url.path
+    url = f"{proto}://{host}{path}"
+    if request.url.query:
+        url += f"?{request.url.query}"
     if not validator.validate(url, form, signature):
         log.warning(f"Rejected forged Twilio webhook: {url}")
         raise HTTPException(status_code=403, detail="Invalid Twilio signature.")

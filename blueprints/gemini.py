@@ -261,7 +261,7 @@ def gemini_make_call():
         except Exception:
             pass
 
-        return jsonify({"ok": True, "call_sid": result.get("call_sid"), "call_id": result.get("call_id")})
+        return jsonify({"ok": True, "call_sid": result.get("call_sid"), "call_id": result.get("call_id"), "ws_token": result.get("ws_token", "")})
     except Exception as e:
         return jsonify({"ok": False, "error": f"Failed to reach call server: {e}"}), 502
 
