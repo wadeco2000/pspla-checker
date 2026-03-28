@@ -42,6 +42,33 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 
 GEMINI_MODEL = "gemini-3.1-flash-live-preview"
+
+# ── RAG search for multi-turn (runs on call server mid-conversation) ─────────
+def _rag_search_sync(kb_id, query_text, top_k=3):
+    """Search RAG chunks. Runs synchronously in async context via thread."""
+    if not OPENAI_API_KEY or not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return ""
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        resp = client.embeddings.create(model="text-embedding-3-small", input=[query_text[:4000]])
+        query_embedding = resp.data[0].embedding
+
+        import requests as _req
+        r = _req.post(f"{SUPABASE_URL}/rest/v1/rpc/match_rag_chunks",
+            json={"query_embedding": query_embedding, "match_kb_id": kb_id,
+                  "match_threshold": 0.6, "match_count": top_k},
+            headers={"apikey": SUPABASE_SERVICE_KEY,
+                     "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                     "Content-Type": "application/json"},
+            timeout=10)
+        if not r.ok or not r.json():
+            return ""
+        parts = [chunk["content"] for chunk in r.json()]
+        return "\n\n---\n\n".join(parts)
+    except Exception as e:
+        log.error(f"RAG search error: {e}")
+        return ""
 OPENAI_REALTIME_MODEL = "gpt-realtime"
 OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime"
 
@@ -204,6 +231,12 @@ class GeminiProvider:
         """Send text trigger to prompt AI to speak."""
         await self._session.send_realtime_input(text=text)
 
+    async def send_context(self, context: str):
+        """Inject reference context mid-conversation."""
+        await self._session.send_realtime_input(
+            text=f"[REFERENCE INFO - use this to answer the caller's question]: {context}"
+        )
+
     async def receive_loop(self, on_audio, on_ai_transcript, on_caller_transcript, on_turn_complete, on_interrupted):
         """Main receive loop. Calls callbacks with processed data."""
         try:
@@ -350,6 +383,17 @@ class OpenAIProvider:
         }))
         await self._ws.send(json.dumps({"type": "response.create"}))
 
+    async def send_context(self, context: str):
+        """Inject reference context mid-conversation as a system message."""
+        await self._ws.send(json.dumps({
+            "type": "conversation.item.create",
+            "item": {
+                "type": "message",
+                "role": "system",
+                "content": [{"type": "input_text", "text": f"[REFERENCE INFO for answering the caller]: {context}"}]
+            }
+        }))
+
     async def receive_loop(self, on_audio, on_ai_transcript, on_caller_transcript, on_turn_complete, on_interrupted):
         """Main receive loop. Parses OpenAI Realtime events."""
         _first_audio = False
@@ -489,6 +533,14 @@ class ElevenLabsProvider:
 
             _log_error(self._call_id, f"ElevenLabs init: agent={has_agent}, prompt_source={prompt_source}")
             await self._ws.send(json.dumps(config))
+
+    async def send_context(self, context: str):
+        """Inject reference context mid-conversation via contextual_update."""
+        if self._ws:
+            await self._ws.send(json.dumps({
+                "type": "contextual_update",
+                "text": f"[REFERENCE INFO for answering the caller]: {context}"
+            }))
 
     async def receive_loop(self, on_audio, on_ai_transcript, on_caller_transcript, on_turn_complete, on_interrupted):
         """Main receive loop. Parses ElevenLabs Conversational AI events."""
@@ -972,8 +1024,12 @@ async def media_stream(websocket: WebSocket, call_id: str):
         async def on_ai_transcript(text: str):
             _ai_transcript_buffer.append(text)
 
+        # RAG: check if multi-turn search is enabled for this call
+        _rag_kb_id = call.get("settings", {}).get("rag_kb_id")
+        _last_rag_query = {"text": ""}  # avoid duplicate searches
+
         async def on_caller_transcript(text: str):
-            """Caller transcript — flush immediately for faster display."""
+            """Caller transcript — flush immediately, trigger RAG search if enabled."""
             # Cancel auto-hangup if caller speaks again
             if _hangup_scheduled.get("task"):
                 _hangup_scheduled["task"].cancel()
@@ -984,6 +1040,21 @@ async def media_stream(websocket: WebSocket, call_id: str):
             await _broadcast_transcript(call_id, {
                 "type": "transcript", "speaker": "caller", "text": text, "timestamp": ts
             })
+
+            # Multi-turn RAG: search documents based on what the caller just said
+            if _rag_kb_id and len(text.strip()) > 10 and text.strip() != _last_rag_query["text"]:
+                _last_rag_query["text"] = text.strip()
+                try:
+                    # Run search in thread to avoid blocking audio
+                    loop = asyncio.get_event_loop()
+                    rag_context = await loop.run_in_executor(
+                        None, _rag_search_sync, _rag_kb_id, text.strip(), 3
+                    )
+                    if rag_context:
+                        await provider.send_context(rag_context)
+                        log.info(f"[{call_id}] RAG: injected context for '{text.strip()[:50]}'")
+                except Exception as e:
+                    log.error(f"[{call_id}] RAG search error: {e}")
 
         async def _auto_hangup_after_delay():
             """Wait 5 seconds after AI goodbye, then disconnect."""

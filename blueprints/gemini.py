@@ -167,6 +167,7 @@ def gemini_make_call():
     settings = data.get("settings", {})
     voice_name = data.get("voice_name", "Kore")
     system_instruction = ""
+    use_rag = False
 
     if kb_id:
         try:
@@ -189,7 +190,8 @@ def gemini_make_call():
                         use_rag = False  # ElevenLabs handles its own KB
 
                 if use_rag and system_instruction:
-                    rag_context = _rag_search(kb_id, system_instruction, top_k=5)
+                    # Use pre-computed context if provided, otherwise search now
+                    rag_context = data.get("rag_context") or _rag_search(kb_id, system_instruction, top_k=5)
                     if rag_context:
                         system_instruction += (
                             "\n\n--- REFERENCE DOCUMENTS ---\n"
@@ -200,6 +202,10 @@ def gemini_make_call():
                         )
         except Exception:
             pass
+
+    # Pass RAG info to call server for multi-turn search
+    if kb_id and use_rag:
+        settings["rag_kb_id"] = kb_id
 
     # Call the FastAPI server to initiate the call
     try:
@@ -213,7 +219,7 @@ def gemini_make_call():
                 "triggered_by": session.get("email", "unknown"),
                 "settings": settings,
             },
-            timeout=30)
+            timeout=60)
         result = r.json()
         if not result.get("ok"):
             return jsonify({"ok": False, "error": result.get("error", "Call server error")}), 502
@@ -693,6 +699,24 @@ def rag_list_documents():
                     "order": "created_at.desc"},
             headers=_sb_headers(), timeout=10)
         return jsonify({"ok": True, "documents": r.json() if r.ok else []})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@gemini_bp.route("/api/gemini/rag/precompute/<int:kb_id>", methods=["GET"])
+def rag_precompute(kb_id):
+    """Pre-compute RAG context for a KB so it's ready before a call is made."""
+    try:
+        r = _requests.get(f"{SUPABASE_URL}/rest/v1/gemini_knowledge_bases",
+            params={"select": "content,rag_enabled", "id": f"eq.{kb_id}"},
+            headers=_sb_headers(), timeout=10)
+        if not r.ok or not r.json():
+            return jsonify({"ok": True, "context": ""})
+        kb = r.json()[0]
+        if not kb.get("rag_enabled"):
+            return jsonify({"ok": True, "context": ""})
+        context = _rag_search(kb_id, kb.get("content", ""), top_k=5)
+        return jsonify({"ok": True, "context": context})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
@@ -1248,11 +1272,14 @@ function loadKnowledgeBases() {
     });
 }
 
+var _cachedRagContext = '';  // Pre-computed RAG context for selected KB
+
 function loadKbContent() {
     var id = document.getElementById('kb-select').value;
     var preview = document.getElementById('kb-preview');
     var editBtn = document.getElementById('btn-edit-kb');
     var delBtn = document.getElementById('btn-delete-kb');
+    _cachedRagContext = '';  // Clear cache when KB changes
     if (!id) {
         preview.style.display = 'none';
         editBtn.style.display = 'none';
@@ -1265,6 +1292,15 @@ function loadKbContent() {
         preview.textContent = kb.content.substring(0, 500) + (kb.content.length > 500 ? '...' : '');
         editBtn.style.display = '';
         delBtn.style.display = '';
+        // Pre-compute RAG context in background
+        if (kb.rag_enabled) {
+            fetch('/api/gemini/rag/precompute/' + id).then(r=>r.json()).then(function(d) {
+                if (d.ok && d.context) {
+                    _cachedRagContext = d.context;
+                    console.log('RAG context pre-computed (' + d.context.length + ' chars)');
+                }
+            }).catch(function(){});
+        }
     }
 }
 
@@ -1471,6 +1507,7 @@ function makeCall() {
     var settings = getCallSettings();
     var voice = document.getElementById('set-voice').value;
     var payload = {to_number: number, knowledge_base_id: kbId ? parseInt(kbId) : null, voice_name: voice, settings: settings};
+    if (_cachedRagContext) payload.rag_context = _cachedRagContext;
     fetch('/api/gemini/make-call', {method:'POST', headers:{'Content-Type':'application/json'},
         body:JSON.stringify(payload)
     }).then(r=>r.json()).then(d=>{
@@ -1965,15 +2002,29 @@ function loadDocuments() {
             container.innerHTML = '<div class="empty-state" style="font-size:12px;color:#888;">No documents uploaded yet.</div>';
             return;
         }
+        var _stages = ['pending','extracting','chunking','embedding','storing','ready'];
         var html = '<table class="history-table"><thead><tr><th>Title</th><th>Type</th><th>Size</th><th>Chunks</th><th>Status</th><th></th></tr></thead><tbody>';
         d.documents.forEach(function(doc) {
             var size = doc.file_size_bytes ? Math.round(doc.file_size_bytes/1024) + 'KB' : '-';
             var statusCls = doc.status === 'ready' ? 'badge-green' : doc.status === 'error' ? 'badge-red' : 'badge-blue';
             var statusLabels = {pending:'Pending', extracting:'Extracting text...', chunking:'Chunking...', embedding:'Generating embeddings...', storing:'Storing chunks...', ready:'Ready', error:'Error'};
             var statusLabel = statusLabels[doc.status] || doc.status;
+
+            // Progress bar for processing documents
+            var progressHtml = '';
+            if (doc.status !== 'ready' && doc.status !== 'error') {
+                var stageIdx = _stages.indexOf(doc.status);
+                var pct = stageIdx >= 0 ? Math.round((stageIdx / (_stages.length - 1)) * 100) : 0;
+                progressHtml = '<div style="background:#e2e8f0;border-radius:4px;height:6px;margin-top:4px;width:120px;">'
+                    + '<div style="background:#3498db;border-radius:4px;height:6px;width:' + pct + '%;transition:width 0.5s;"></div></div>'
+                    + '<span style="font-size:9px;color:#888;">' + pct + '%</span>';
+            }
+
             html += '<tr><td>' + esc(doc.title) + '</td><td>' + esc(doc.source_type) + '</td>';
             html += '<td>' + size + '</td><td>' + (doc.chunk_count || '-') + '</td>';
             html += '<td><span class="badge ' + statusCls + '">' + esc(statusLabel) + '</span>';
+            if (progressHtml) html += progressHtml;
+            if (doc.status === 'ready') html += '<br><span style="font-size:9px;color:#27ae60;">' + (doc.char_count ? doc.char_count.toLocaleString() + ' chars' : '') + '</span>';
             if (doc.error_message) html += '<br><span style="font-size:10px;color:#e74c3c;">' + esc(doc.error_message).substring(0,100) + '</span>';
             html += '</td>';
             html += '<td><button class="btn btn-red" style="font-size:10px;padding:2px 8px;" onclick="deleteDocument(' + doc.id + ')"><i class="fa-solid fa-trash"></i></button></td></tr>';
@@ -1981,9 +2032,10 @@ function loadDocuments() {
         html += '</tbody></table>';
         container.innerHTML = html;
 
-        // Poll if any are still processing
-        if (d.documents.some(function(doc) { return doc.status === 'pending' || doc.status === 'processing'; })) {
-            setTimeout(loadDocuments, 3000);
+        // Poll if any are still processing (check all non-terminal statuses)
+        var _processing = ['pending','extracting','chunking','embedding','storing'];
+        if (d.documents.some(function(doc) { return _processing.indexOf(doc.status) >= 0; })) {
+            setTimeout(loadDocuments, 2000);
         }
     });
 }
