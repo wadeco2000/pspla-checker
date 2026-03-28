@@ -501,6 +501,7 @@ def save_inbound_config():
         "elevenlabs_agent_id": data.get("elevenlabs_agent_id"),
         "elevenlabs_prompt_source": data.get("elevenlabs_prompt_source", "knowledgebase"),
         "elevenlabs_rag_source": data.get("elevenlabs_rag_source", "inhouse"),
+        "system_prompt": data.get("system_prompt", ""),
         "greeting": data.get("greeting", ""),
         "updated_at": "now()",
     }
@@ -1597,9 +1598,14 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                 </div>
             </div>
             <div style="margin-top:12px;">
+                <label class="form-label">System Prompt</label>
+                <textarea id="inbound-prompt" rows="5" placeholder="You are a helpful receptionist for Alarm Watch. You answer questions about our alarm systems and services. Be friendly and professional." style="width:100%;"></textarea>
+                <span style="font-size:10px;color:#888;">Tell the AI who it is and how to behave. If a Knowledge Base is also selected, this prompt is used and the KB's reference documents are added as context.</span>
+            </div>
+            <div style="margin-top:12px;">
                 <label class="form-label">Greeting (what the AI says first)</label>
                 <input type="text" id="inbound-greeting" placeholder="Hello, thank you for calling. How can I help you today?" style="width:100%;">
-                <span style="font-size:10px;color:#888;">Leave blank to use the knowledge base prompt's default greeting.</span>
+                <span style="font-size:10px;color:#888;">Leave blank to let the AI decide its own greeting based on the system prompt.</span>
             </div>
             <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
                 <button class="btn" style="background:#27ae60;" onclick="saveInboundConfig()"><i class="fa-solid fa-save"></i> Save Inbound Config</button>
@@ -2888,6 +2894,7 @@ function loadInboundConfig() {
         if (c.language) document.getElementById('inbound-language').value = c.language;
         if (c.end_sensitivity) document.getElementById('inbound-end-sensitivity').value = c.end_sensitivity;
         document.getElementById('inbound-strict').checked = c.strict_mode || false;
+        document.getElementById('inbound-prompt').value = c.system_prompt || '';
         document.getElementById('inbound-greeting').value = c.greeting || '';
         if (c.elevenlabs_agent_id) document.getElementById('inbound-el-agent').value = c.elevenlabs_agent_id;
         // Set KB dropdown (needs KBs to be loaded first)
@@ -2912,6 +2919,7 @@ function saveInboundConfig() {
         language: document.getElementById('inbound-language').value,
         end_sensitivity: document.getElementById('inbound-end-sensitivity').value,
         strict_mode: document.getElementById('inbound-strict').checked,
+        system_prompt: document.getElementById('inbound-prompt').value,
         greeting: document.getElementById('inbound-greeting').value,
         elevenlabs_agent_id: document.getElementById('inbound-el-agent').value || null,
     };

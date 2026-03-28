@@ -904,7 +904,15 @@ async def handle_inbound_call(request: Request):
     # Load knowledge base
     kb_id = config.get("knowledge_base_id")
     kb = _load_kb(kb_id) if kb_id else None
-    system_instruction = kb.get("content", "") if kb else config.get("system_instruction", "")
+    # Use system_prompt from config; if KB selected, append KB content as context
+    system_instruction = config.get("system_prompt", "")
+    if kb and kb.get("content"):
+        if system_instruction:
+            system_instruction += "\n\n" + kb["content"]
+        else:
+            system_instruction = kb["content"]
+    if not system_instruction:
+        system_instruction = "You are a helpful AI assistant answering phone calls."
 
     # Pre-compute RAG context
     if kb and kb.get("rag_enabled") and system_instruction:
