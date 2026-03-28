@@ -710,7 +710,7 @@ def _rag_search(kb_id, query_text, top_k=5):
             json={
                 "query_embedding": query_embedding,
                 "match_kb_id": kb_id,
-                "match_threshold": 0.5,
+                "match_threshold": 0.3,
                 "match_count": top_k,
             },
             headers=_sb_headers(), timeout=10)

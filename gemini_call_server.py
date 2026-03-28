@@ -59,7 +59,7 @@ def _rag_search_sync(kb_id, query_text, top_k=3):
         import requests as _req
         r = _req.post(f"{SUPABASE_URL}/rest/v1/rpc/match_rag_chunks",
             json={"query_embedding": query_embedding, "match_kb_id": kb_id,
-                  "match_threshold": 0.6, "match_count": top_k},
+                  "match_threshold": 0.3, "match_count": top_k},
             headers={"apikey": SUPABASE_SERVICE_KEY,
                      "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
                      "Content-Type": "application/json"},
