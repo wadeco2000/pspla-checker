@@ -421,6 +421,39 @@ def gemini_debug():
     except Exception as e:
         result["supabase"] = {"ok": False, "error": str(e)}
 
+    # 5. ElevenLabs — check subscription/usage
+    try:
+        el_key = os.getenv("ELEVENLABS_API_KEY", "")
+        if el_key:
+            el_data = {"ok": True}
+            # Try subscription endpoint (needs user_read permission)
+            el = _requests.get("https://api.elevenlabs.io/v1/user/subscription",
+                headers={"xi-api-key": el_key}, timeout=5)
+            if el.ok:
+                eld = el.json()
+                el_data["tier"] = eld.get("tier", "unknown")
+                el_data["character_count"] = eld.get("character_count", 0)
+                el_data["character_limit"] = eld.get("character_limit", 0)
+                reset = eld.get("next_character_count_reset_unix")
+                if reset:
+                    from datetime import datetime, timezone
+                    el_data["next_reset"] = datetime.fromtimestamp(reset, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            else:
+                el_data["subscription_error"] = f"HTTP {el.status_code} (may need user_read permission on API key)"
+            # Always try agents list for call count
+            el_agents = _requests.get("https://api.elevenlabs.io/v1/convai/agents",
+                headers={"xi-api-key": el_key}, timeout=5)
+            if el_agents.ok:
+                agents = el_agents.json().get("agents", [])
+                el_data["agents"] = len(agents)
+                total_calls_7d = sum(a.get("last_7_day_call_count", 0) for a in agents)
+                el_data["calls_last_7_days"] = total_calls_7d
+            result["elevenlabs"] = el_data
+        else:
+            result["elevenlabs"] = {"ok": False, "error": "ELEVENLABS_API_KEY not configured"}
+    except Exception as e:
+        result["elevenlabs"] = {"ok": False, "error": str(e)}
+
     return jsonify(result)
 
 
@@ -924,6 +957,7 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
             <a href="/auth/logout" class="btn btn-red" style="font-size:11px;padding:4px 10px;"><i class="fa-solid fa-right-from-bracket"></i> Sign out</a>
             <button class="btn" style="font-size:11px;padding:4px 10px;background:#6c757d;" onclick="openDebug()"><i class="fa-solid fa-bug"></i> Debug</button>
             <span style="font-size:10px;color:#aab;"><i class="fa-solid fa-code-branch"></i> {{ git_version }}</span>
+            <span id="call-server-ver" style="font-size:10px;color:#aab;"></span>
         </div>
     </div>
 
@@ -1237,6 +1271,10 @@ CALL PROCEDURE:
 
 <script>
 var _callServerUrl = '{{ call_server_url }}';
+// Fetch call server version
+fetch(_callServerUrl + '/health').then(r=>r.json()).then(d=>{
+    if(d.version) document.getElementById('call-server-ver').innerHTML='<i class="fa-solid fa-server"></i> Call: '+d.version;
+}).catch(()=>{});
 var _activeCallSid = null;
 var _activeCallId = null;
 var _callTimerInterval = null;
@@ -1913,6 +1951,25 @@ function openDebug() {
             if (t.phone) s += '<div class="debug-row"><span class="debug-label">Phone:</span>' + esc(t.phone) + '</div>';
             if (t.note) s += '<div class="debug-row"><span class="debug-label">Note:</span>' + esc(t.note) + '</div>';
             if (t.error) s += '<div class="debug-row"><span class="debug-label">Error:</span><span style="color:#e74c3c;">' + esc(t.error) + '</span></div>';
+            return s;
+        });
+
+        // ElevenLabs
+        html += _debugSection('ElevenLabs', 'fa-microphone', function() {
+            var el = d.elevenlabs || {};
+            var s = '<div class="debug-row"><span class="debug-label">Status:</span>' + _debugBadge(el.ok) + '</div>';
+            if (el.tier) s += '<div class="debug-row"><span class="debug-label">Plan:</span>' + esc(el.tier) + '</div>';
+            if (el.character_limit) {
+                var pct = Math.round((el.character_count / el.character_limit) * 100);
+                var color = pct > 90 ? '#e74c3c' : pct > 70 ? '#f39c12' : '#27ae60';
+                s += '<div class="debug-row"><span class="debug-label">Characters:</span>' +
+                    '<span style="color:' + color + ';">' + el.character_count.toLocaleString() + ' / ' + el.character_limit.toLocaleString() + ' (' + pct + '%)</span></div>';
+            }
+            if (el.next_reset) s += '<div class="debug-row"><span class="debug-label">Resets:</span>' + esc(el.next_reset) + '</div>';
+            if (el.agents !== undefined) s += '<div class="debug-row"><span class="debug-label">Agents:</span>' + el.agents + '</div>';
+            if (el.calls_last_7_days !== undefined) s += '<div class="debug-row"><span class="debug-label">Calls (7 days):</span>' + el.calls_last_7_days + '</div>';
+            if (el.subscription_error) s += '<div class="debug-row"><span class="debug-label">Note:</span><span style="color:#f39c12;font-size:11px;">' + esc(el.subscription_error) + '</span></div>';
+            if (el.error) s += '<div class="debug-row"><span class="debug-label">Error:</span><span style="color:#e74c3c;">' + esc(el.error) + '</span></div>';
             return s;
         });
 

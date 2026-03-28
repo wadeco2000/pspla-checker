@@ -10,6 +10,8 @@ This server handles:
 
 Run: uvicorn gemini_call_server:app --host 0.0.0.0 --port 8001
 """
+SERVER_VERSION = "2026-03-28 20:18"
+
 import os
 import re
 import json
@@ -537,10 +539,13 @@ class ElevenLabsProvider:
     async def send_context(self, context: str):
         """Inject reference context mid-conversation via contextual_update."""
         if self._ws:
-            await self._ws.send(json.dumps({
-                "type": "contextual_update",
-                "text": f"[REFERENCE INFO for answering the caller]: {context}"
-            }))
+            try:
+                await self._ws.send(json.dumps({
+                    "type": "contextual_update",
+                    "text": f"[REFERENCE INFO for answering the caller]: {context}"
+                }))
+            except Exception as e:
+                log.error(f"[{self._call_id}] ElevenLabs send_context failed: {e}")
 
     async def receive_loop(self, on_audio, on_ai_transcript, on_caller_transcript, on_turn_complete, on_interrupted):
         """Main receive loop. Parses ElevenLabs Conversational AI events."""
@@ -586,8 +591,12 @@ class ElevenLabsProvider:
                 _log_error(self._call_id, f"ElevenLabs error: {event}")
 
             elif t == "conversation_ended":
-                log.info(f"[{self._call_id}] ElevenLabs conversation ended by server")
+                _log_error(self._call_id, f"ElevenLabs conversation ended by server: {event}")
                 break
+        # Log close code/reason
+        close_code = getattr(self._ws, 'close_code', None)
+        close_reason = getattr(self._ws, 'close_reason', None) or ''
+        _log_error(self._call_id, f"ElevenLabs receive_loop ended — close_code={close_code} reason={close_reason}")
 
     async def close(self):
         if self._ws:
@@ -639,7 +648,7 @@ def _log_error(call_id, msg):
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "active_calls": len(_active_calls)}
+    return {"ok": True, "active_calls": len(_active_calls), "version": SERVER_VERSION}
 
 
 @app.get("/debug/errors")
@@ -1042,19 +1051,21 @@ async def media_stream(websocket: WebSocket, call_id: str):
             })
 
             # Multi-turn RAG: search documents based on what the caller just said
+            # Fire-and-forget so receive_loop keeps processing pings/audio
             if _rag_kb_id and len(text.strip()) > 10 and text.strip() != _last_rag_query["text"]:
                 _last_rag_query["text"] = text.strip()
-                try:
-                    # Run search in thread to avoid blocking audio
-                    loop = asyncio.get_event_loop()
-                    rag_context = await loop.run_in_executor(
-                        None, _rag_search_sync, _rag_kb_id, text.strip(), 3
-                    )
-                    if rag_context:
-                        await provider.send_context(rag_context)
-                        log.info(f"[{call_id}] RAG: injected context for '{text.strip()[:50]}'")
-                except Exception as e:
-                    log.error(f"[{call_id}] RAG search error: {e}")
+                async def _do_rag_search(query: str):
+                    try:
+                        loop = asyncio.get_event_loop()
+                        rag_context = await loop.run_in_executor(
+                            None, _rag_search_sync, _rag_kb_id, query, 3
+                        )
+                        if rag_context:
+                            await provider.send_context(rag_context)
+                            log.info(f"[{call_id}] RAG: injected context for '{query[:50]}'")
+                    except Exception as e:
+                        log.error(f"[{call_id}] RAG search error: {e}")
+                asyncio.create_task(_do_rag_search(text.strip()))
 
         async def _auto_hangup_after_delay():
             """Wait 5 seconds after AI goodbye, then disconnect."""
@@ -1139,7 +1150,7 @@ async def media_stream(websocket: WebSocket, call_id: str):
                         break
 
             except WebSocketDisconnect:
-                log.info(f"[{call_id}] Twilio WebSocket disconnected")
+                _log_error(call_id, "Twilio WebSocket disconnected")
             except Exception as e:
                 _log_error(call_id, f"Twilio→AI error: {e}")
                 import traceback
@@ -1162,6 +1173,8 @@ async def media_stream(websocket: WebSocket, call_id: str):
             return_when=asyncio.FIRST_COMPLETED
         )
         for task in done:
+            which = "Twilio" if task is twilio_task else "AI"
+            _log_error(call_id, f"Call ended: {which} side disconnected first")
             if task.exception():
                 _log_error(call_id, f"Task exception: {task.exception()}")
         for task in pending:
