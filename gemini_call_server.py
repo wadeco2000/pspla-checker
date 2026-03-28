@@ -467,19 +467,19 @@ class ElevenLabsProvider:
 
             config = {"type": "conversation_initiation_client_data"}
 
+            # Override first_message to empty — wait for caller to speak first
+            overrides = {"agent": {"first_message": ""}}
+
             if not has_agent:
                 language = settings.get("language", "en")
-                overrides = {}
                 voice_id = self._call.get("voice_name", "")
                 if voice_id and len(voice_id) > 15:
                     overrides["tts"] = {"voice_id": voice_id}
                 if system_instruction:
-                    overrides["agent"] = {
-                        "prompt": {"prompt": system_instruction},
-                        "language": language,
-                    }
-                if overrides:
-                    config["conversation_config_override"] = overrides
+                    overrides["agent"]["prompt"] = {"prompt": system_instruction}
+                    overrides["agent"]["language"] = language
+
+            config["conversation_config_override"] = overrides
 
             if system_instruction:
                 config["dynamic_variables"] = {"context": system_instruction}
