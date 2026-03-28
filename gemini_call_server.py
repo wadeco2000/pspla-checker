@@ -459,9 +459,12 @@ class ElevenLabsProvider:
         # Wait for conversation_initiation_metadata
         msg = json.loads(await self._ws.recv())
         if msg.get("type") == "conversation_initiation_metadata":
-            log.info(f"[{self._call_id}] ElevenLabs conversation started (agent_id={agent_id})")
+            meta = msg.get("conversation_initiation_metadata_event", {})
+            conv_id = meta.get("conversation_id", "?")
+            out_fmt = meta.get("agent_output_audio_format", "?")
+            _log_error(self._call_id, f"ElevenLabs conversation started: agent={agent_id}, conv={conv_id}, format={out_fmt}")
         else:
-            log.info(f"[{self._call_id}] ElevenLabs first message type: {msg.get('type')}")
+            _log_error(self._call_id, f"ElevenLabs unexpected first message: {json.dumps(msg)[:200]}")
 
     async def send_audio(self, mulaw_bytes: bytes):
         """Send mulaw 8kHz audio — convert to PCM 16kHz for ElevenLabs."""
