@@ -43,6 +43,31 @@ GEMINI_MODEL = "gemini-3.1-flash-live-preview"
 OPENAI_REALTIME_MODEL = "gpt-realtime"
 OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime"
 
+# ── Cost tracking (USD rates, converted to NZD at display time) ──────────────
+USD_TO_NZD = float(os.getenv("USD_TO_NZD", "1.73"))  # Update via env var as rate changes
+
+# Per-provider cost rates (USD per unit)
+# To add a new provider: add an entry here with per-token or per-minute rates
+COST_RATES = {
+    "twilio": {
+        "voice_nz_mobile_per_min": 0.084,
+        "media_stream_per_min": 0.004,
+        "recording_per_min": 0.0025,
+    },
+    "gemini": {
+        # Gemini Live doesn't report tokens — estimate from duration
+        # $3.00/1M input tokens, $12.00/1M output tokens
+        # ~1 min audio ≈ ~167 tokens in + ~167 tokens out (rough estimate)
+        "audio_per_min": 0.023,  # combined in+out estimate
+    },
+    "openai": {
+        # OpenAI reports actual tokens — we calculate from those
+        "audio_input_per_1m_tokens": 32.00,
+        "audio_output_per_1m_tokens": 64.00,
+        "transcription_per_min": 0.006,  # gpt-4o-transcribe
+    },
+}
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("gemini-call")
 
@@ -231,6 +256,10 @@ class OpenAIProvider:
         self._call_id = call_id
         self._ws = None
         self._ai_transcript_buf = []
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+        self.audio_input_tokens = 0
+        self.audio_output_tokens = 0
 
     async def connect(self):
         import websockets
@@ -341,6 +370,15 @@ class OpenAIProvider:
                     await on_caller_transcript(transcript)
 
             elif t == "response.done":
+                # Extract token usage
+                usage = event.get("response", {}).get("usage", {})
+                if usage:
+                    self.total_input_tokens += usage.get("input_tokens", 0)
+                    self.total_output_tokens += usage.get("output_tokens", 0)
+                    details_in = usage.get("input_token_details", {})
+                    details_out = usage.get("output_token_details", {})
+                    self.audio_input_tokens += details_in.get("audio_tokens", 0)
+                    self.audio_output_tokens += details_out.get("audio_tokens", 0)
                 await on_turn_complete()
 
             elif t == "input_audio_buffer.speech_started":
@@ -775,16 +813,35 @@ async def media_stream(websocket: WebSocket, call_id: str):
                 except Exception:
                     pass
 
+        _hangup_scheduled = {"task": None}
+
         async def on_ai_transcript(text: str):
             _ai_transcript_buffer.append(text)
 
         async def on_caller_transcript(text: str):
             """Caller transcript — flush immediately for faster display."""
+            # Cancel auto-hangup if caller speaks again
+            if _hangup_scheduled.get("task"):
+                _hangup_scheduled["task"].cancel()
+                _hangup_scheduled["task"] = None
+                log.info(f"[{call_id}] Auto-hangup cancelled — caller spoke again")
             ts = datetime.now(timezone.utc).isoformat()
             call["transcript"].append({"speaker": "caller", "text": text, "timestamp": ts})
             await _broadcast_transcript(call_id, {
                 "type": "transcript", "speaker": "caller", "text": text, "timestamp": ts
             })
+
+        async def _auto_hangup_after_delay():
+            """Wait 5 seconds after AI goodbye, then disconnect."""
+            await asyncio.sleep(5)
+            log.info(f"[{call_id}] Auto-hangup: conversation ended naturally")
+            # End the call via Twilio
+            try:
+                from twilio.rest import Client
+                client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+                client.calls(call.get("call_sid")).update(status="completed")
+            except Exception as e:
+                _log_error(call_id, f"Auto-hangup failed: {e}")
 
         async def on_turn_complete():
             _perf["turns"] += 1
@@ -798,6 +855,17 @@ async def media_stream(websocket: WebSocket, call_id: str):
                     "type": "transcript", "speaker": "ai", "text": full_text, "timestamp": ts
                 })
                 _ai_transcript_buffer.clear()
+
+                # Check if AI said goodbye — schedule auto-hangup
+                lower = full_text.lower()
+                _GOODBYE_PHRASES = ["goodbye", "good bye", "bye bye", "have a great day",
+                    "have a good day", "have a nice day", "take care", "thanks for your time",
+                    "thank you for your time", "talk to you soon", "speak to you soon"]
+                if any(phrase in lower for phrase in _GOODBYE_PHRASES):
+                    if not _hangup_scheduled["task"]:
+                        log.info(f"[{call_id}] AI said goodbye, scheduling auto-hangup in 5s")
+                        _hangup_scheduled["task"] = asyncio.create_task(_auto_hangup_after_delay())
+
 
         async def on_interrupted():
             if stream_sid:
@@ -1051,6 +1119,60 @@ async def _broadcast_transcript(call_id: str, message: dict):
     subscribers -= dead
 
 
+def _calculate_cost_nzd(call: dict, duration_seconds: int) -> dict:
+    """Calculate call cost in NZD. Returns breakdown dict.
+
+    Each provider calculates its AI cost differently:
+    - gemini: estimated from duration (no token reporting)
+    - openai: actual tokens from response.done events
+    Future providers: add a new elif branch with their cost logic.
+    """
+    mins = (duration_seconds or 0) / 60.0
+    provider_name = call.get("settings", {}).get("ai_provider", "gemini")
+    provider = call.get("ai_provider")  # the provider instance
+
+    # Twilio costs (same for all providers)
+    twilio = COST_RATES["twilio"]
+    twilio_voice = mins * twilio["voice_nz_mobile_per_min"]
+    twilio_stream = mins * twilio["media_stream_per_min"]
+    twilio_recording = mins * twilio["recording_per_min"]
+    twilio_total = twilio_voice + twilio_stream + twilio_recording
+
+    # AI provider cost
+    ai_cost = 0.0
+    token_info = {}
+
+    if provider_name == "openai" and provider and hasattr(provider, "audio_input_tokens"):
+        rates = COST_RATES["openai"]
+        ai_in = provider.audio_input_tokens * rates["audio_input_per_1m_tokens"] / 1_000_000
+        ai_out = provider.audio_output_tokens * rates["audio_output_per_1m_tokens"] / 1_000_000
+        transcription = mins * rates["transcription_per_min"]
+        ai_cost = ai_in + ai_out + transcription
+        token_info = {
+            "audio_input_tokens": provider.audio_input_tokens,
+            "audio_output_tokens": provider.audio_output_tokens,
+            "total_input_tokens": provider.total_input_tokens,
+            "total_output_tokens": provider.total_output_tokens,
+        }
+    elif provider_name == "gemini":
+        ai_cost = mins * COST_RATES["gemini"]["audio_per_min"]
+    # Future providers: add elif branches here
+
+    total_usd = twilio_total + ai_cost
+    total_nzd = total_usd * USD_TO_NZD
+
+    return {
+        "total_nzd": round(total_nzd, 4),
+        "total_usd": round(total_usd, 4),
+        "twilio_usd": round(twilio_total, 4),
+        "ai_usd": round(ai_cost, 4),
+        "provider": provider_name,
+        "duration_mins": round(mins, 2),
+        "usd_to_nzd": USD_TO_NZD,
+        **token_info,
+    }
+
+
 async def _save_call_history(call_id: str):
     """Save call transcript and status to Supabase."""
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
@@ -1068,6 +1190,16 @@ async def _save_call_history(call_id: str):
         except Exception:
             pass
 
+    # Calculate cost
+    cost = _calculate_cost_nzd(call, duration or 0)
+    log.info(f"[{call_id}] Cost: ${cost['total_nzd']:.4f} NZD (Twilio: ${cost['twilio_usd']:.4f} USD, AI: ${cost['ai_usd']:.4f} USD)")
+
+    # Build notes with provider + cost JSON
+    notes_data = {
+        "ai_provider": call.get("settings", {}).get("ai_provider", "gemini"),
+        "cost": cost,
+    }
+
     import requests as _req
     try:
         _req.patch(
@@ -1079,7 +1211,7 @@ async def _save_call_history(call_id: str):
                 "transcript": call.get("transcript", []),
                 "recording_url": call.get("recording_url"),
                 "ended_at": datetime.now(timezone.utc).isoformat(),
-                "notes": call.get("settings", {}).get("ai_provider", "gemini"),
+                "notes": json.dumps(notes_data),
             },
             headers={
                 "apikey": SUPABASE_SERVICE_KEY,

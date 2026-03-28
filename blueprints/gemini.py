@@ -204,7 +204,7 @@ def gemini_make_call():
                     "knowledge_base_id": kb_id,
                     "status": "initiated",
                     "triggered_by": session.get("email", "unknown"),
-                    "notes": settings.get("ai_provider", "gemini"),
+                    "notes": json.dumps({"ai_provider": settings.get("ai_provider", "gemini")}),
                 },
                 headers={**_sb_headers(), "Prefer": "return=minimal"}, timeout=10)
         except Exception:
@@ -1161,13 +1161,19 @@ function loadHistory() {
     fetch('/api/gemini/call-history').then(r=>r.json()).then(d=>{
         if (!d.ok) { document.getElementById('history-container').innerHTML = '<div class="empty-state">Error loading history.</div>'; return; }
         if (!d.calls.length) { document.getElementById('history-container').innerHTML = '<div class="empty-state">No calls yet.</div>'; return; }
-        var html = '<table class="history-table"><thead><tr><th>Date</th><th>To</th><th>Duration</th><th>Status</th><th>AI</th><th>Knowledge Base</th><th>User</th><th>Transcript</th><th>Recording</th></tr></thead><tbody>';
+        var html = '<table class="history-table"><thead><tr><th>Date</th><th>To</th><th>Duration</th><th>Status</th><th>AI</th><th>Cost (NZD)</th><th>KB</th><th>User</th><th>Transcript</th><th>Recording</th></tr></thead><tbody>';
         d.calls.forEach(function(c){
             var date = c.started_at ? new Date(c.started_at).toLocaleString('en-NZ', {day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '-';
             var dur = c.duration_seconds ? Math.floor(c.duration_seconds/60) + 'm ' + (c.duration_seconds%60) + 's' : '-';
             var statusCls = c.status === 'completed' ? 'badge-green' : c.status === 'error' ? 'badge-red' : c.status === 'initiated' ? 'badge-blue' : 'badge-grey';
-            var aiProvider = (c.notes || 'gemini').toLowerCase();
+            // Parse notes JSON for provider + cost
+            var notesData = {};
+            try { notesData = typeof c.notes === 'string' ? JSON.parse(c.notes) : (c.notes || {}); } catch(e) { notesData = {ai_provider: c.notes || 'gemini'}; }
+            var aiProvider = (notesData.ai_provider || 'gemini').toLowerCase();
             var aiBadge = aiProvider === 'openai' ? '<span class="badge badge-blue">OpenAI</span>' : '<span class="badge badge-green">Gemini</span>';
+            var costInfo = notesData.cost || {};
+            var costDisplay = costInfo.total_nzd ? '$' + costInfo.total_nzd.toFixed(2) : '-';
+            var costTitle = costInfo.total_nzd ? 'Twilio: $' + (costInfo.twilio_usd * (costInfo.usd_to_nzd||1.73)).toFixed(3) + ' NZD\\nAI: $' + (costInfo.ai_usd * (costInfo.usd_to_nzd||1.73)).toFixed(3) + ' NZD\\nRate: 1 USD = ' + (costInfo.usd_to_nzd||'?') + ' NZD' : '';
             var transcriptBtn = c.transcript ? '<button class="btn btn-grey" style="font-size:10px;padding:2px 8px;" onclick="showTranscript(\'' + esc(c.call_sid) + '\')"><i class="fa-solid fa-file-lines"></i></button>' : '-';
             var recordingBtns = '-';
             if (c.recording_url) {
@@ -1177,6 +1183,7 @@ function loadHistory() {
             html += '<tr><td>' + date + '</td><td>' + esc(c.to_number||'') + '</td><td>' + dur + '</td>';
             html += '<td><span class="badge ' + statusCls + '">' + esc(c.status||'unknown') + '</span></td>';
             html += '<td>' + aiBadge + '</td>';
+            html += '<td title="' + costTitle + '" style="cursor:help;">' + costDisplay + '</td>';
             html += '<td>' + (c.knowledge_base_id || '-') + '</td><td>' + esc(c.triggered_by||'') + '</td>';
             html += '<td>' + transcriptBtn + '</td><td>' + recordingBtns + '</td></tr>';
         });
