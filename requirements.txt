@@ -17,3 +17,7 @@ python-multipart
 uvicorn[standard]
 websockets
 httpx
+tiktoken
+pdfplumber
+python-docx
+openai
