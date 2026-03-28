@@ -159,8 +159,8 @@ def gemini_make_call():
 
     kb_id = data.get("knowledge_base_id")
     settings = data.get("settings", {})
+    voice_name = data.get("voice_name", "Kore")
     system_instruction = ""
-    voice_name = "Kore"
 
     if kb_id:
         try:
@@ -170,7 +170,9 @@ def gemini_make_call():
             if r.ok and r.json():
                 kb = r.json()[0]
                 system_instruction = kb.get("content", "")
-                voice_name = kb.get("voice_name", "Kore")
+                # Use KB voice as fallback if no voice selected in settings
+                if not voice_name or voice_name == "Kore":
+                    voice_name = kb.get("voice_name", voice_name)
         except Exception:
             pass
 
@@ -202,6 +204,7 @@ def gemini_make_call():
                     "knowledge_base_id": kb_id,
                     "status": "initiated",
                     "triggered_by": session.get("email", "unknown"),
+                    "notes": settings.get("ai_provider", "gemini"),
                 },
                 headers={**_sb_headers(), "Prefer": "return=minimal"}, timeout=10)
         except Exception:
@@ -521,7 +524,7 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                 </select>
                 <span style="font-size:10px;color:#888;">The language the AI will speak and listen in. The caller can still speak another language but transcription accuracy may be reduced.</span>
             </div>
-            <div>
+            <div data-provider="gemini">
                 <label class="form-label">Thinking Level</label>
                 <select id="set-thinking" style="width:100%;">
                     <option value="minimal" selected>Minimal (fastest)</option>
@@ -531,7 +534,7 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                 </select>
                 <span style="font-size:10px;color:#888;">Controls how much the AI "thinks" before responding. Higher levels give more considered answers but add latency. Minimal is best for natural phone conversations.</span>
             </div>
-            <div>
+            <div data-provider="gemini">
                 <label class="form-label">Start of Speech Sensitivity</label>
                 <select id="set-start-sensitivity" style="width:100%;">
                     <option value="low" selected>Low</option>
@@ -549,12 +552,12 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                 </select>
                 <span style="font-size:10px;color:#888;">How quickly the AI decides the caller has finished speaking. Low waits longer for the caller to continue (good for slow or thoughtful speakers). High responds quickly after any pause (good for fast-paced conversations).</span>
             </div>
-            <div>
+            <div data-provider="gemini">
                 <label class="form-label">Silence Duration (ms)</label>
                 <input type="number" id="set-silence-ms" value="500" min="100" max="5000" step="100" style="width:100%;">
                 <span style="font-size:10px;color:#888;">How many milliseconds of silence before the AI considers the caller's turn finished and starts responding. Lower values (300ms) feel snappier but may cut people off. Higher values (1000ms+) give the caller more time to pause and continue.</span>
             </div>
-            <div>
+            <div data-provider="gemini">
                 <label class="form-label">Include AI Thoughts</label>
                 <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;">
                     <input type="checkbox" id="set-include-thoughts"> Show AI reasoning in transcript
@@ -809,14 +812,39 @@ var _PROVIDER_VOICES = {
 
 function onProviderChange() {
     var provider = document.getElementById('set-ai-provider').value;
+    // Update voice dropdown
     var voiceSelect = document.getElementById('set-voice');
     var voices = _PROVIDER_VOICES[provider] || _PROVIDER_VOICES.gemini;
     voiceSelect.innerHTML = voices.map(function(v) {
         return '<option value="' + v.value + '">' + v.label + '</option>';
     }).join('');
+    // Restore saved voice for this provider
+    var savedVoice = localStorage.getItem('gemini_voice_' + provider);
+    if (savedVoice) voiceSelect.value = savedVoice;
+    // Show/hide provider-specific settings
+    document.querySelectorAll('[data-provider]').forEach(function(el) {
+        el.style.display = (el.dataset.provider === provider) ? '' : 'none';
+    });
+    // Save selection
+    localStorage.setItem('gemini_ai_provider', provider);
 }
-// Init voice dropdown on load
-onProviderChange();
+
+// ── Persist preferences in localStorage ──
+function _savePrefs() {
+    localStorage.setItem('gemini_last_number', document.getElementById('call-number').value);
+    localStorage.setItem('gemini_ai_provider', document.getElementById('set-ai-provider').value);
+    localStorage.setItem('gemini_voice_' + document.getElementById('set-ai-provider').value,
+        document.getElementById('set-voice').value);
+}
+
+function _restorePrefs() {
+    var savedNumber = localStorage.getItem('gemini_last_number');
+    if (savedNumber) document.getElementById('call-number').value = savedNumber;
+    var savedProvider = localStorage.getItem('gemini_ai_provider');
+    if (savedProvider) document.getElementById('set-ai-provider').value = savedProvider;
+    onProviderChange();
+}
+_restorePrefs();
 
 function makeCall() {
     var number = document.getElementById('call-number').value.trim();
@@ -826,6 +854,7 @@ function makeCall() {
     if (!confirm('Call ' + number + '?')) return;
 
     showStatus('Initiating call...', '');
+    _savePrefs();
     var settings = getCallSettings();
     var voice = document.getElementById('set-voice').value;
     var payload = {to_number: number, knowledge_base_id: kbId ? parseInt(kbId) : null, voice_name: voice, settings: settings};
@@ -1132,11 +1161,13 @@ function loadHistory() {
     fetch('/api/gemini/call-history').then(r=>r.json()).then(d=>{
         if (!d.ok) { document.getElementById('history-container').innerHTML = '<div class="empty-state">Error loading history.</div>'; return; }
         if (!d.calls.length) { document.getElementById('history-container').innerHTML = '<div class="empty-state">No calls yet.</div>'; return; }
-        var html = '<table class="history-table"><thead><tr><th>Date</th><th>To</th><th>Duration</th><th>Status</th><th>Knowledge Base</th><th>User</th><th>Transcript</th><th>Recording</th></tr></thead><tbody>';
+        var html = '<table class="history-table"><thead><tr><th>Date</th><th>To</th><th>Duration</th><th>Status</th><th>AI</th><th>Knowledge Base</th><th>User</th><th>Transcript</th><th>Recording</th></tr></thead><tbody>';
         d.calls.forEach(function(c){
             var date = c.started_at ? new Date(c.started_at).toLocaleString('en-NZ', {day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '-';
             var dur = c.duration_seconds ? Math.floor(c.duration_seconds/60) + 'm ' + (c.duration_seconds%60) + 's' : '-';
             var statusCls = c.status === 'completed' ? 'badge-green' : c.status === 'error' ? 'badge-red' : c.status === 'initiated' ? 'badge-blue' : 'badge-grey';
+            var aiProvider = (c.notes || 'gemini').toLowerCase();
+            var aiBadge = aiProvider === 'openai' ? '<span class="badge badge-blue">OpenAI</span>' : '<span class="badge badge-green">Gemini</span>';
             var transcriptBtn = c.transcript ? '<button class="btn btn-grey" style="font-size:10px;padding:2px 8px;" onclick="showTranscript(\'' + esc(c.call_sid) + '\')"><i class="fa-solid fa-file-lines"></i></button>' : '-';
             var recordingBtns = '-';
             if (c.recording_url) {
@@ -1145,6 +1176,7 @@ function loadHistory() {
             }
             html += '<tr><td>' + date + '</td><td>' + esc(c.to_number||'') + '</td><td>' + dur + '</td>';
             html += '<td><span class="badge ' + statusCls + '">' + esc(c.status||'unknown') + '</span></td>';
+            html += '<td>' + aiBadge + '</td>';
             html += '<td>' + (c.knowledge_base_id || '-') + '</td><td>' + esc(c.triggered_by||'') + '</td>';
             html += '<td>' + transcriptBtn + '</td><td>' + recordingBtns + '</td></tr>';
         });

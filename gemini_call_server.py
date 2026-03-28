@@ -115,7 +115,7 @@ class GeminiProvider:
             system_instruction=types.Content(
                 parts=[types.Part(text=self._call.get("system_instruction", "You are a helpful AI assistant.")
                        + "\n\nIMPORTANT: You are on a live phone call. Start speaking immediately — introduce yourself right away without waiting for the other person to speak first."
-                       + "\n\nThis is a phone call over 8kHz telephony audio. When transcribing what the caller says, listen carefully and prefer common names and words over unusual interpretations. For example 'John' not 'jump', 'yes' not 'yeah this'."
+                       + "\n\nCRITICAL TRANSCRIPTION RULES: This is a phone call over 8kHz telephony audio. The caller is speaking English. ALL transcription MUST be in English/Latin script only — NEVER output Chinese, Japanese, Korean, Arabic, or other non-Latin characters in transcriptions. If audio is unclear, transcribe your best guess in English or mark as [inaudible]. Prefer common English names and words over unusual interpretations (e.g. 'John' not 'jump', 'Tuesday' not random syllables)."
                        + lang_hint)]
             ),
             speech_config=types.SpeechConfig(
@@ -235,14 +235,19 @@ class OpenAIProvider:
     async def connect(self):
         import websockets
         url = f"{OPENAI_REALTIME_URL}?model={OPENAI_REALTIME_MODEL}"
-        headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
+        headers = {
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "OpenAI-Beta": "realtime=v1",
+        }
 
         self._ws = await websockets.connect(url, additional_headers=headers)
 
         # Wait for session.created
         msg = json.loads(await self._ws.recv())
+        if msg.get("type") == "error":
+            raise RuntimeError(f"OpenAI error: {msg.get('error', {}).get('message', msg)}")
         if msg.get("type") != "session.created":
-            raise RuntimeError(f"Expected session.created, got {msg.get('type')}: {msg}")
+            raise RuntimeError(f"Expected session.created, got {msg.get('type')}: {json.dumps(msg)[:200]}")
         log.info(f"[{self._call_id}] OpenAI session created")
 
         # Configure session
@@ -255,34 +260,31 @@ class OpenAIProvider:
             "type": "session.update",
             "session": {
                 "instructions": self._call.get("system_instruction", "You are a helpful AI assistant.")
-                    + "\n\nIMPORTANT: You are on a live phone call. Start speaking immediately — introduce yourself right away without waiting for the other person to speak first.",
-                "output_modalities": ["audio"],
-                "audio": {
-                    "input": {
-                        "format": {"type": "audio/pcmu"},
-                        "transcription": {
-                            "model": "gpt-4o-transcribe",
-                            "language": language,
-                        },
-                        "turn_detection": {
-                            "type": "semantic_vad",
-                            "eagerness": eagerness,
-                            "create_response": True,
-                            "interrupt_response": True,
-                        }
-                    },
-                    "output": {
-                        "format": {"type": "audio/pcmu"},
-                        "voice": self._call.get("voice_name", "coral"),
-                    }
-                }
+                    + "\n\nIMPORTANT: You are on a live phone call. Start speaking immediately — introduce yourself right away without waiting for the other person to speak first."
+                    + "\n\nALL transcription MUST be in English/Latin script only — NEVER output non-Latin characters.",
+                "modalities": ["audio", "text"],
+                "voice": self._call.get("voice_name", "coral"),
+                "input_audio_format": "g711_ulaw",
+                "output_audio_format": "g711_ulaw",
+                "input_audio_transcription": {
+                    "model": "gpt-4o-transcribe",
+                    "language": language,
+                },
+                "turn_detection": {
+                    "type": "semantic_vad",
+                    "eagerness": eagerness,
+                    "create_response": True,
+                    "interrupt_response": True,
+                },
             }
         }
         await self._ws.send(json.dumps(session_config))
 
-        # Wait for session.updated
+        # Wait for session.updated confirmation
         msg = json.loads(await self._ws.recv())
-        log.info(f"[{self._call_id}] OpenAI session configured (eagerness={eagerness}, lang={language})")
+        if msg.get("type") == "error":
+            raise RuntimeError(f"OpenAI session.update error: {msg.get('error', {}).get('message', msg)}")
+        log.info(f"[{self._call_id}] OpenAI session configured (eagerness={eagerness}, lang={language}, voice={self._call.get('voice_name', 'coral')})")
 
     async def send_audio(self, mulaw_bytes: bytes):
         """Send mulaw 8kHz audio directly — OpenAI accepts g711_ulaw natively."""
@@ -310,12 +312,16 @@ class OpenAIProvider:
 
     async def receive_loop(self, on_audio, on_ai_transcript, on_caller_transcript, on_turn_complete, on_interrupted):
         """Main receive loop. Parses OpenAI Realtime events."""
+        _first_audio = False
         async for raw in self._ws:
             event = json.loads(raw)
             t = event.get("type", "")
 
             if t == "response.audio.delta":
                 # Audio output — already g711_ulaw, decode base64
+                if not _first_audio:
+                    _first_audio = True
+                    _log_error(self._call_id, "PERF: first OpenAI audio delta received")
                 mulaw_bytes = base64.b64decode(event["delta"])
                 if len(mulaw_bytes) > 0:
                     await on_audio(mulaw_bytes)
@@ -1073,6 +1079,7 @@ async def _save_call_history(call_id: str):
                 "transcript": call.get("transcript", []),
                 "recording_url": call.get("recording_url"),
                 "ended_at": datetime.now(timezone.utc).isoformat(),
+                "notes": call.get("settings", {}).get("ai_provider", "gemini"),
             },
             headers={
                 "apikey": SUPABASE_SERVICE_KEY,
