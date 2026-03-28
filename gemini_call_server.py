@@ -106,11 +106,17 @@ class GeminiProvider:
                                  types.EndSensitivity.END_SENSITIVITY_HIGH)
         silence_ms = int(settings.get("silence_duration_ms", 500))
 
+        # Add language hint to system instruction (Gemini doesn't support languageCodes on AudioTranscriptionConfig)
+        lang = settings.get("language", "en")
+        lang_hint = f"\n\nThe caller is speaking {lang}. Listen and respond in this language." if lang != "en" else ""
+
         config = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
             system_instruction=types.Content(
                 parts=[types.Part(text=self._call.get("system_instruction", "You are a helpful AI assistant.")
-                       + "\n\nIMPORTANT: You are on a live phone call. Start speaking immediately — introduce yourself right away without waiting for the other person to speak first.")]
+                       + "\n\nIMPORTANT: You are on a live phone call. Start speaking immediately — introduce yourself right away without waiting for the other person to speak first."
+                       + "\n\nThis is a phone call over 8kHz telephony audio. When transcribing what the caller says, listen carefully and prefer common names and words over unusual interpretations. For example 'John' not 'jump', 'yes' not 'yeah this'."
+                       + lang_hint)]
             ),
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
@@ -119,12 +125,8 @@ class GeminiProvider:
                     )
                 )
             ),
-            input_audio_transcription=types.AudioTranscriptionConfig(
-                languageCodes=[settings.get("language", "en")]
-            ),
-            output_audio_transcription=types.AudioTranscriptionConfig(
-                languageCodes=[settings.get("language", "en")]
-            ),
+            input_audio_transcription=types.AudioTranscriptionConfig(),
+            output_audio_transcription=types.AudioTranscriptionConfig(),
             realtime_input_config=types.RealtimeInputConfig(
                 turn_coverage="TURN_INCLUDES_ONLY_ACTIVITY",
                 automatic_activity_detection=types.AutomaticActivityDetection(
