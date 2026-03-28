@@ -707,6 +707,39 @@ async def debug_active_calls(request: Request):
     return result
 
 
+@app.get("/api/active-calls-summary")
+async def active_calls_summary():
+    """Lightweight summary of all active calls for the supervisor dashboard. No auth required."""
+    calls = []
+    for cid, c in _active_calls.items():
+        transcript = c.get("transcript", [])
+        last_line = transcript[-1] if transcript else None
+        duration = 0
+        if c.get("started_at"):
+            try:
+                started = datetime.fromisoformat(c["started_at"])
+                duration = int((datetime.now(timezone.utc) - started).total_seconds())
+            except Exception:
+                pass
+        calls.append({
+            "call_id": cid,
+            "direction": "inbound" if c.get("is_inbound") else "outbound",
+            "from_number": c.get("from_number", ""),
+            "to_number": c.get("to_number", ""),
+            "call_sid": c.get("call_sid", ""),
+            "status": c.get("status", "unknown"),
+            "ai_provider": c.get("settings", {}).get("ai_provider", "gemini"),
+            "duration_seconds": duration,
+            "started_at": c.get("started_at", ""),
+            "barged_in": c.get("barged_in", False),
+            "is_inbound": c.get("is_inbound", False),
+            "last_transcript": last_line,
+            "sentiment": c.get("sentiment", "neutral"),
+            "transcript_count": len(transcript),
+        })
+    return calls
+
+
 @app.get("/debug/test-gemini")
 async def test_gemini(request: Request):
     """Test if Gemini API key works and Live model is available."""
@@ -1141,6 +1174,46 @@ async def _preconnect_ai(call_id: str):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  SENTIMENT ANALYSIS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_FRUSTRATED_PHRASES = [
+    "already told you", "i said", "not what i asked", "that's wrong", "no no no",
+    "can you just", "for the third time", "that's not right", "useless", "speak to someone",
+    "real person", "human", "manager", "supervisor", "not helpful", "doesn't make sense",
+    "i don't understand", "you're not listening", "that's not what i said", "can i talk to",
+    "transfer me", "this isn't working",
+]
+_ANGRY_PHRASES = [
+    "ridiculous", "waste of time", "terrible", "horrible", "stupid", "incompetent",
+    "hang up", "worst", "pathetic", "joke", "scam", "rip off", "disgusting",
+]
+_POSITIVE_PHRASES = [
+    "thank you", "thanks", "that's great", "perfect", "exactly", "wonderful",
+    "you've been helpful", "that helps", "brilliant", "awesome", "excellent", "cheers",
+]
+
+
+def _analyze_sentiment(text, current_sentiment, turns_since_negative):
+    """Keyword-based sentiment analysis. Returns (sentiment, turns_since_negative)."""
+    lower = text.lower().strip()
+    for phrase in _ANGRY_PHRASES:
+        if phrase in lower:
+            return "angry", 0
+    for phrase in _FRUSTRATED_PHRASES:
+        if phrase in lower:
+            return "frustrated", 0
+    for phrase in _POSITIVE_PHRASES:
+        if phrase in lower:
+            return "positive", turns_since_negative + 1
+    # Decay: reset to neutral after 3 calm turns
+    turns = turns_since_negative + 1
+    if current_sentiment in ("frustrated", "angry") and turns >= 3:
+        return "neutral", turns
+    return current_sentiment, turns
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  TWILIO MEDIA STREAM ↔ GEMINI LIVE API BRIDGE
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1241,6 +1314,8 @@ async def media_stream(websocket: WebSocket, call_id: str):
         # RAG: check if multi-turn search is enabled for this call
         _rag_kb_id = call.get("settings", {}).get("rag_kb_id")
         _last_rag_query = {"text": ""}  # avoid duplicate searches
+        _sentiment_state = {"turns_since_negative": 0}
+        call["sentiment"] = "neutral"
 
         async def on_caller_transcript(text: str):
             """Caller transcript — flush immediately, trigger RAG search if enabled."""
@@ -1273,6 +1348,19 @@ async def media_stream(websocket: WebSocket, call_id: str):
                     except Exception as e:
                         _log_error(call_id, f"RAG search error: {e}")
                 asyncio.create_task(_do_rag_search(text.strip()))
+
+            # Sentiment analysis
+            new_sentiment, _sentiment_state["turns_since_negative"] = _analyze_sentiment(
+                text, call.get("sentiment", "neutral"), _sentiment_state["turns_since_negative"]
+            )
+            if new_sentiment != call.get("sentiment"):
+                call["sentiment"] = new_sentiment
+                await _broadcast_transcript(call_id, {
+                    "type": "sentiment", "value": new_sentiment,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+                if new_sentiment in ("frustrated", "angry"):
+                    _log_error(call_id, f"Sentiment: {new_sentiment} — caller said: '{text.strip()[:80]}'")
 
         async def _auto_hangup_after_delay():
             """Wait 5 seconds after AI goodbye, then disconnect."""

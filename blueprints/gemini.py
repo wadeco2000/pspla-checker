@@ -1320,6 +1320,22 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
         .modal h3{margin-bottom:16px;font-size:16px;}
         .empty-state{text-align:center;padding:40px;color:#aaa;font-size:14px;}
         .config-warning{background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:16px;margin:16px 24px;color:#856404;}
+        /* Supervisor call cards */
+        .sup-card{border:2px solid #e2e8f0;border-radius:10px;padding:12px;background:#fff;transition:border-color 0.3s;}
+        .sup-card.sentiment-neutral{border-color:#e2e8f0;}
+        .sup-card.sentiment-positive{border-color:#27ae60;}
+        .sup-card.sentiment-frustrated{border-color:#f39c12;background:#fffcf0;}
+        .sup-card.sentiment-angry{border-color:#e74c3c;background:#fff5f5;animation:pulse-red 1.5s infinite;}
+        @keyframes pulse-red{0%,100%{box-shadow:0 0 0 0 rgba(231,76,60,0.3);}50%{box-shadow:0 0 12px 4px rgba(231,76,60,0.3);}}
+        .sup-card .sup-header{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+        .sup-card .sup-number{font-weight:600;font-size:14px;}
+        .sup-card .sup-timer{font-family:'Courier New',monospace;font-size:13px;color:#555;margin-left:auto;}
+        .sup-card .sup-preview{font-size:11px;color:#666;margin:6px 0;max-height:40px;overflow:hidden;font-style:italic;}
+        .sup-card .sup-transcript{background:#1a1a2e;border-radius:6px;max-height:250px;overflow-y:auto;padding:10px;font-family:'Courier New',monospace;font-size:11px;margin:8px 0;display:none;}
+        .sup-card .sup-controls{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+        .sentiment-dot{width:10px;height:10px;border-radius:50%;display:inline-block;}
+        .sentiment-dot.neutral{background:#95a5a6;}.sentiment-dot.positive{background:#27ae60;}
+        .sentiment-dot.frustrated{background:#f39c12;}.sentiment-dot.angry{background:#e74c3c;}
         /* Mobile responsive */
         @media (max-width: 768px) {
             .header{flex-direction:column;gap:8px;padding:10px 16px;}
@@ -1533,6 +1549,17 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
             <div class="transcript-panel" id="transcript-panel">
                 <div class="empty-state" style="color:#666;">Waiting for call to connect...</div>
             </div>
+        </div>
+    </div>
+
+    <!-- Supervisor: Active Calls -->
+    <div class="card">
+        <h2><i class="fa-solid fa-headset"></i> Active Calls
+            <span id="active-calls-count" class="badge badge-grey" style="margin-left:8px;">0</span>
+            <span id="active-calls-poll-dot" style="margin-left:auto;width:8px;height:8px;border-radius:50%;background:#27ae60;display:inline-block;" title="Polling active"></span>
+        </h2>
+        <div id="supervisor-calls-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:12px;margin-top:8px;">
+            <div class="empty-state" style="font-size:12px;color:#888;">No active calls</div>
         </div>
     </div>
 
@@ -2862,6 +2889,204 @@ function saveKbDocAttachments(kbId) {
     });
     return Promise.all(promises);
 }
+
+// ── Supervisor: Active Calls ──
+var _supCallWs = {};  // call_id -> WebSocket (transcript)
+var _supMonitorWs = {};  // call_id -> {ws, audioCtx, nextTime}
+var _supBargeWs = {};  // call_id -> {ws, audioCtx, processor, stream}
+var _supPollTimer = null;
+
+function _pollActiveCalls() {
+    var dot = document.getElementById('active-calls-poll-dot');
+    fetch(_callServerUrl + '/api/active-calls-summary').then(r=>r.json()).then(function(calls) {
+        dot.style.background = '#27ae60';
+        var grid = document.getElementById('supervisor-calls-grid');
+        var badge = document.getElementById('active-calls-count');
+        badge.textContent = calls.length;
+        badge.className = 'badge ' + (calls.length > 0 ? 'badge-green' : 'badge-grey');
+        if (!calls.length) {
+            grid.innerHTML = '<div class="empty-state" style="font-size:12px;color:#888;">No active calls</div>';
+            // Clean up orphaned WebSockets
+            Object.keys(_supCallWs).forEach(function(id) { try{_supCallWs[id].close();}catch(e){} });
+            _supCallWs = {};
+            return;
+        }
+        // Build/update cards
+        var activeIds = {};
+        calls.forEach(function(c) { activeIds[c.call_id] = true; });
+        // Remove cards for ended calls
+        grid.querySelectorAll('.sup-card').forEach(function(card) {
+            if (!activeIds[card.dataset.callId]) card.remove();
+        });
+        if (grid.querySelector('.empty-state')) grid.innerHTML = '';
+        calls.forEach(function(c) { _renderSupCard(grid, c); });
+        // Clean up WebSockets for ended calls
+        Object.keys(_supCallWs).forEach(function(id) {
+            if (!activeIds[id]) { try{_supCallWs[id].close();}catch(e){} delete _supCallWs[id]; }
+        });
+    }).catch(function() { dot.style.background = '#e74c3c'; });
+}
+
+function _renderSupCard(grid, c) {
+    var card = grid.querySelector('.sup-card[data-call-id="' + c.call_id + '"]');
+    if (!card) {
+        card = document.createElement('div');
+        card.className = 'sup-card sentiment-' + (c.sentiment || 'neutral');
+        card.dataset.callId = c.call_id;
+        card.innerHTML = '<div class="sup-header">'
+            + '<span class="badge ' + (c.is_inbound ? 'badge-blue' : 'badge-green') + '">' + (c.is_inbound ? 'Inbound' : 'Outbound') + '</span>'
+            + '<span class="sup-number" data-field="number">' + esc(c.is_inbound ? c.from_number : c.to_number) + '</span>'
+            + '<span class="sentiment-dot ' + (c.sentiment||'neutral') + '" data-field="dot" title="' + (c.sentiment||'neutral') + '"></span>'
+            + '<span class="badge badge-grey" style="font-size:9px;">' + esc(c.ai_provider) + '</span>'
+            + '<span class="sup-timer" data-field="timer">00:00</span>'
+            + '</div>'
+            + '<div class="sup-preview" data-field="preview"></div>'
+            + '<div class="sup-transcript" data-field="transcript" id="sup-transcript-' + c.call_id + '"></div>'
+            + '<div class="sup-controls">'
+            + '<button class="btn" style="font-size:10px;padding:3px 10px;background:#3498db;" onclick="_supToggleTranscript(\'' + c.call_id + '\')"><i class="fa-solid fa-file-lines"></i> Transcript</button>'
+            + '<button class="btn" style="font-size:10px;padding:3px 10px;background:#e67e22;" onclick="_supMonitor(\'' + c.call_id + '\')" data-field="monitor-btn"><i class="fa-solid fa-headphones"></i> Monitor</button>'
+            + '<button class="btn" style="font-size:10px;padding:3px 10px;background:#8e44ad;" onclick="_supBarge(\'' + c.call_id + '\')" data-field="barge-btn"><i class="fa-solid fa-microphone"></i> Barge</button>'
+            + '<button class="btn btn-red" style="font-size:10px;padding:3px 10px;" onclick="_supHangup(\'' + c.call_id + '\',\'' + esc(c.call_sid) + '\')"><i class="fa-solid fa-phone-slash"></i></button>'
+            + '</div>';
+        grid.appendChild(card);
+        // Auto-connect transcript WebSocket
+        _supConnectTranscript(c.call_id);
+    }
+    // Update dynamic fields
+    card.className = 'sup-card sentiment-' + (c.sentiment || 'neutral');
+    var dot = card.querySelector('[data-field="dot"]');
+    if (dot) { dot.className = 'sentiment-dot ' + (c.sentiment||'neutral'); dot.title = c.sentiment||'neutral'; }
+    var timer = card.querySelector('[data-field="timer"]');
+    if (timer) {
+        var m = Math.floor(c.duration_seconds/60), s = c.duration_seconds%60;
+        timer.textContent = String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+    }
+    var preview = card.querySelector('[data-field="preview"]');
+    if (preview && c.last_transcript) {
+        var icon = c.last_transcript.speaker === 'ai' ? '🤖' : '👤';
+        preview.textContent = icon + ' ' + c.last_transcript.text.substring(0, 100);
+    }
+    if (c.barged_in) card.querySelector('[data-field="barge-btn"]').style.background = '#e74c3c';
+}
+
+function _supConnectTranscript(callId) {
+    if (_supCallWs[callId]) return;
+    var wsUrl = _callServerUrl.replace('http','ws') + '/ws/transcript/' + callId;
+    try {
+        var ws = new WebSocket(wsUrl);
+        _supCallWs[callId] = ws;
+        ws.onmessage = function(e) {
+            var msg = JSON.parse(e.data);
+            var panel = document.getElementById('sup-transcript-' + callId);
+            if (!panel) return;
+            if (msg.type === 'transcript') {
+                var time = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('en-NZ',{hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '';
+                var cls = msg.speaker === 'ai' ? 'ai' : 'caller';
+                var label = msg.speaker === 'ai' ? '🤖 AI' : '👤 Caller';
+                panel.innerHTML += '<div class="transcript-line '+cls+'"><span class="time">'+time+'</span><span class="speaker">'+label+':</span>'+esc(msg.text)+'</div>';
+                panel.scrollTop = panel.scrollHeight;
+            } else if (msg.type === 'sentiment') {
+                var card = panel.closest('.sup-card');
+                if (card) {
+                    card.className = 'sup-card sentiment-' + msg.value;
+                    var dot = card.querySelector('[data-field="dot"]');
+                    if (dot) { dot.className = 'sentiment-dot ' + msg.value; dot.title = msg.value; }
+                }
+            } else if (msg.type === 'status' && (msg.status === 'ended' || msg.status === 'error')) {
+                ws.close();
+                delete _supCallWs[callId];
+            }
+        };
+        ws.onclose = function() { delete _supCallWs[callId]; };
+    } catch(e) {}
+}
+
+function _supToggleTranscript(callId) {
+    var panel = document.getElementById('sup-transcript-' + callId);
+    if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+function _supMonitor(callId) {
+    if (_supMonitorWs[callId]) {
+        // Stop
+        try{_supMonitorWs[callId].ws.close();}catch(e){}
+        try{_supMonitorWs[callId].audioCtx.close();}catch(e){}
+        delete _supMonitorWs[callId];
+        var card = document.querySelector('.sup-card[data-call-id="'+callId+'"]');
+        if (card) { var btn = card.querySelector('[data-field="monitor-btn"]'); btn.style.background='#e67e22'; btn.innerHTML='<i class="fa-solid fa-headphones"></i> Monitor'; }
+        return;
+    }
+    var audioCtx = new (window.AudioContext||window.webkitAudioContext)({sampleRate:8000});
+    var nextTime = 0;
+    var wsUrl = _callServerUrl.replace('http','ws') + '/ws/monitor/' + callId;
+    var ws = new WebSocket(wsUrl);
+    _supMonitorWs[callId] = {ws:ws, audioCtx:audioCtx};
+    var card = document.querySelector('.sup-card[data-call-id="'+callId+'"]');
+    if (card) { var btn = card.querySelector('[data-field="monitor-btn"]'); btn.style.background='#27ae60'; btn.innerHTML='<i class="fa-solid fa-headphones"></i> Listening'; }
+    ws.onmessage = function(e) {
+        var msg = JSON.parse(e.data);
+        if (msg.type !== 'audio' || !msg.payload) return;
+        var raw = atob(msg.payload);
+        var buf = audioCtx.createBuffer(1, raw.length, 8000);
+        var ch = buf.getChannelData(0);
+        for (var i=0;i<raw.length;i++) ch[i]=_MULAW_DECODE_TABLE[raw.charCodeAt(i)&0xFF]/32768.0;
+        var src = audioCtx.createBufferSource(); src.buffer=buf; src.connect(audioCtx.destination);
+        var now=audioCtx.currentTime; if(nextTime<now) nextTime=now; src.start(nextTime); nextTime+=buf.duration;
+    };
+    ws.onclose = function() { delete _supMonitorWs[callId]; };
+}
+
+function _supBarge(callId) {
+    if (_supBargeWs[callId]) {
+        // Stop barge
+        try{_supBargeWs[callId].processor.disconnect();}catch(e){}
+        try{_supBargeWs[callId].audioCtx.close();}catch(e){}
+        try{_supBargeWs[callId].stream.getTracks().forEach(function(t){t.stop();});}catch(e){}
+        try{_supBargeWs[callId].ws.close();}catch(e){}
+        delete _supBargeWs[callId];
+        var card = document.querySelector('.sup-card[data-call-id="'+callId+'"]');
+        if (card) { var btn = card.querySelector('[data-field="barge-btn"]'); btn.style.background='#8e44ad'; btn.innerHTML='<i class="fa-solid fa-microphone"></i> Barge'; }
+        return;
+    }
+    navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream) {
+        // Start monitor if not already
+        if (!_supMonitorWs[callId]) _supMonitor(callId);
+        var wsUrl = _callServerUrl.replace('http','ws') + '/ws/barge/' + callId;
+        var ws = new WebSocket(wsUrl);
+        var audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+        var source = audioCtx.createMediaStreamSource(stream);
+        var processor = audioCtx.createScriptProcessor(4096,1,1);
+        processor.onaudioprocess = function(e) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            var input = e.inputBuffer.getChannelData(0);
+            var pcm8k = _downsample(input, audioCtx.sampleRate, 8000);
+            var mulaw = new Uint8Array(pcm8k.length);
+            for (var i=0;i<pcm8k.length;i++){var s=Math.max(-1,Math.min(1,pcm8k[i]));mulaw[i]=_mulawEncode(Math.round(s*32767));}
+            var bin='';for(var i=0;i<mulaw.length;i++)bin+=String.fromCharCode(mulaw[i]);
+            ws.send(JSON.stringify({payload:btoa(bin)}));
+        };
+        source.connect(processor); processor.connect(audioCtx.destination);
+        _supBargeWs[callId] = {ws:ws, audioCtx:audioCtx, processor:processor, stream:stream};
+        var card = document.querySelector('.sup-card[data-call-id="'+callId+'"]');
+        if (card) { var btn = card.querySelector('[data-field="barge-btn"]'); btn.style.background='#e74c3c'; btn.innerHTML='<i class="fa-solid fa-microphone-slash"></i> Release'; }
+        ws.onclose = function() {
+            if (_supBargeWs[callId]) { _supBarge(callId); } // cleanup
+        };
+    }).catch(function(err) { showStatus('Mic access required: ' + err.message, 'error'); });
+}
+
+function _supHangup(callId, callSid) {
+    if (!confirm('Hang up this call?')) return;
+    fetch('/api/gemini/end-call', {method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({call_sid: callSid})
+    }).then(r=>r.json()).then(function(d) {
+        showStatus('Call ended.', 'success');
+    });
+}
+
+// Start polling
+_supPollTimer = setInterval(_pollActiveCalls, 3000);
+_pollActiveCalls();
 
 // ── Inbound Config ──
 var _inboundConfigId = null;
