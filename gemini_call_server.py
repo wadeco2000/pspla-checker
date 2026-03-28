@@ -1,8 +1,10 @@
-"""Gemini AI Call Server — FastAPI WebSocket bridge between Twilio and Gemini Live API.
+"""AI Call Server — FastAPI WebSocket bridge between Twilio and AI voice providers.
+
+Supports multiple AI providers (Gemini Live, OpenAI Realtime) via swappable provider classes.
 
 This server handles:
 1. Creating outbound calls via Twilio
-2. Bridging audio between Twilio Media Streams and Gemini Live API
+2. Bridging audio between Twilio Media Streams and AI voice providers
 3. Broadcasting live transcripts to dashboard WebSocket clients
 4. Supporting barge-in (human takes over from AI)
 
@@ -31,12 +33,15 @@ TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 SERVER_SECRET = os.getenv("GEMINI_CALL_SERVER_SECRET", "")
 SELF_URL = os.getenv("GEMINI_CALL_SERVER_SELF_URL", "http://localhost:8001")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 
-GEMINI_MODEL = "gemini-3.1-flash-live-preview"  # Gemini 3.1 Flash Live
+GEMINI_MODEL = "gemini-3.1-flash-live-preview"
+OPENAI_REALTIME_MODEL = "gpt-realtime"
+OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("gemini-call")
@@ -55,6 +60,306 @@ app.add_middleware(
 _active_calls: Dict[str, dict] = {}
 _transcript_subscribers: Dict[str, Set[WebSocket]] = {}
 _monitor_subscribers: Dict[str, Set[WebSocket]] = {}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  AI PROVIDER ABSTRACTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class GeminiProvider:
+    """Gemini 3.1 Flash Live voice provider."""
+    name = "gemini"
+
+    def __init__(self, call: dict, call_id: str):
+        self._call = call
+        self._call_id = call_id
+        self._session = None
+        self._ctx = None  # context manager
+        self._client = None
+        # Audio conversion state (Gemini needs PCM 16kHz in, outputs PCM 24kHz)
+        self._ratecv_state_up = None
+        self._ratecv_state_down = None
+        self._input_buffer = bytearray()
+        self._CHUNK_20MS = 640  # 16kHz × 2 bytes × 0.020s
+
+    async def connect(self):
+        from google import genai
+        from google.genai import types
+        self._types = types
+
+        self._client = genai.Client(api_key=GEMINI_API_KEY)
+        settings = self._call.get("settings", {})
+
+        _START_SENS = {
+            "LOW": types.StartSensitivity.START_SENSITIVITY_LOW,
+            "DEFAULT": types.StartSensitivity.START_SENSITIVITY_UNSPECIFIED,
+            "HIGH": types.StartSensitivity.START_SENSITIVITY_HIGH,
+        }
+        _END_SENS = {
+            "LOW": types.EndSensitivity.END_SENSITIVITY_LOW,
+            "DEFAULT": types.EndSensitivity.END_SENSITIVITY_UNSPECIFIED,
+            "HIGH": types.EndSensitivity.END_SENSITIVITY_HIGH,
+        }
+        start_sens = _START_SENS.get(settings.get("start_sensitivity", "LOW").upper(),
+                                     types.StartSensitivity.START_SENSITIVITY_LOW)
+        end_sens = _END_SENS.get(settings.get("end_sensitivity", "HIGH").upper(),
+                                 types.EndSensitivity.END_SENSITIVITY_HIGH)
+        silence_ms = int(settings.get("silence_duration_ms", 500))
+
+        config = types.LiveConnectConfig(
+            response_modalities=[types.Modality.AUDIO],
+            system_instruction=types.Content(
+                parts=[types.Part(text=self._call.get("system_instruction", "You are a helpful AI assistant.")
+                       + "\n\nIMPORTANT: You are on a live phone call. Start speaking immediately — introduce yourself right away without waiting for the other person to speak first.")]
+            ),
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name=self._call.get("voice_name", "Kore")
+                    )
+                )
+            ),
+            input_audio_transcription=types.AudioTranscriptionConfig(
+                languageCodes=[settings.get("language", "en")]
+            ),
+            output_audio_transcription=types.AudioTranscriptionConfig(
+                languageCodes=[settings.get("language", "en")]
+            ),
+            realtime_input_config=types.RealtimeInputConfig(
+                turn_coverage="TURN_INCLUDES_ONLY_ACTIVITY",
+                automatic_activity_detection=types.AutomaticActivityDetection(
+                    startOfSpeechSensitivity=start_sens,
+                    endOfSpeechSensitivity=end_sens,
+                    silenceDurationMs=silence_ms,
+                ),
+            ),
+        )
+        log.info(f"[{self._call_id}] Gemini VAD: start={start_sens}, end={end_sens}, silence={silence_ms}ms")
+
+        self._ctx = self._client.aio.live.connect(model=GEMINI_MODEL, config=config)
+        self._session = await self._ctx.__aenter__()
+
+    async def send_audio(self, mulaw_bytes: bytes):
+        """Send mulaw 8kHz audio. Converts to PCM 16kHz with 20ms chunking."""
+        try:
+            import audioop_lts as audioop
+        except ImportError:
+            import audioop
+        types = self._types
+
+        pcm_8k = audioop.ulaw2lin(mulaw_bytes, 2)
+        pcm_16k, self._ratecv_state_up = audioop.ratecv(pcm_8k, 2, 1, 8000, 16000, self._ratecv_state_up)
+
+        self._input_buffer.extend(pcm_16k)
+        while len(self._input_buffer) >= self._CHUNK_20MS:
+            chunk = bytes(self._input_buffer[:self._CHUNK_20MS])
+            del self._input_buffer[:self._CHUNK_20MS]
+            await self._session.send_realtime_input(
+                audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")
+            )
+
+    async def flush_audio(self):
+        """Send remaining buffered audio."""
+        if self._input_buffer:
+            types = self._types
+            await self._session.send_realtime_input(
+                audio=types.Blob(data=bytes(self._input_buffer), mime_type="audio/pcm;rate=16000")
+            )
+            self._input_buffer.clear()
+
+    async def send_text(self, text: str):
+        """Send text trigger to prompt AI to speak."""
+        await self._session.send_realtime_input(text=text)
+
+    async def receive_loop(self, on_audio, on_ai_transcript, on_caller_transcript, on_turn_complete, on_interrupted):
+        """Main receive loop. Calls callbacks with processed data."""
+        try:
+            import audioop_lts as audioop
+        except ImportError:
+            import audioop
+
+        while True:
+            async for response in self._session.receive():
+                if response.go_away:
+                    _log_error(self._call_id, f"Gemini GoAway: {response.go_away}")
+                    return
+                if not response.server_content:
+                    continue
+                sc = response.server_content
+
+                # Audio output → convert PCM 24kHz to mulaw 8kHz
+                if sc.model_turn:
+                    for part in sc.model_turn.parts:
+                        if part.inline_data and part.inline_data.data:
+                            pcm_24k = part.inline_data.data
+                            if len(pcm_24k) == 0:
+                                continue
+                            pcm_8k, self._ratecv_state_down = audioop.ratecv(
+                                pcm_24k, 2, 1, 24000, 8000, self._ratecv_state_down
+                            )
+                            mulaw_8k = audioop.lin2ulaw(pcm_8k, 2)
+                            if len(mulaw_8k) > 0:
+                                await on_audio(mulaw_8k)
+
+                if sc.input_transcription and sc.input_transcription.text:
+                    await on_caller_transcript(sc.input_transcription.text)
+                if sc.output_transcription and sc.output_transcription.text:
+                    await on_ai_transcript(sc.output_transcription.text)
+                if sc.turn_complete:
+                    await on_turn_complete()
+                if sc.interrupted:
+                    await on_interrupted()
+
+            _log_error(self._call_id, "Gemini receive iterator ended, re-entering...")
+
+    async def close(self):
+        if self._ctx:
+            try:
+                await self._ctx.__aexit__(None, None, None)
+            except Exception:
+                pass
+
+
+class OpenAIProvider:
+    """OpenAI Realtime voice provider. Uses g711_ulaw for zero-conversion audio."""
+    name = "openai"
+
+    def __init__(self, call: dict, call_id: str):
+        self._call = call
+        self._call_id = call_id
+        self._ws = None
+        self._ai_transcript_buf = []
+
+    async def connect(self):
+        import websockets
+        url = f"{OPENAI_REALTIME_URL}?model={OPENAI_REALTIME_MODEL}"
+        headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
+
+        self._ws = await websockets.connect(url, additional_headers=headers)
+
+        # Wait for session.created
+        msg = json.loads(await self._ws.recv())
+        if msg.get("type") != "session.created":
+            raise RuntimeError(f"Expected session.created, got {msg.get('type')}: {msg}")
+        log.info(f"[{self._call_id}] OpenAI session created")
+
+        # Configure session
+        settings = self._call.get("settings", {})
+        eagerness_map = {"LOW": "low", "DEFAULT": "medium", "HIGH": "high"}
+        eagerness = eagerness_map.get(settings.get("end_sensitivity", "HIGH").upper(), "medium")
+        language = settings.get("language", "en")
+
+        session_config = {
+            "type": "session.update",
+            "session": {
+                "instructions": self._call.get("system_instruction", "You are a helpful AI assistant.")
+                    + "\n\nIMPORTANT: You are on a live phone call. Start speaking immediately — introduce yourself right away without waiting for the other person to speak first.",
+                "output_modalities": ["audio"],
+                "audio": {
+                    "input": {
+                        "format": {"type": "audio/pcmu"},
+                        "transcription": {
+                            "model": "gpt-4o-transcribe",
+                            "language": language,
+                        },
+                        "turn_detection": {
+                            "type": "semantic_vad",
+                            "eagerness": eagerness,
+                            "create_response": True,
+                            "interrupt_response": True,
+                        }
+                    },
+                    "output": {
+                        "format": {"type": "audio/pcmu"},
+                        "voice": self._call.get("voice_name", "coral"),
+                    }
+                }
+            }
+        }
+        await self._ws.send(json.dumps(session_config))
+
+        # Wait for session.updated
+        msg = json.loads(await self._ws.recv())
+        log.info(f"[{self._call_id}] OpenAI session configured (eagerness={eagerness}, lang={language})")
+
+    async def send_audio(self, mulaw_bytes: bytes):
+        """Send mulaw 8kHz audio directly — OpenAI accepts g711_ulaw natively."""
+        b64 = base64.b64encode(mulaw_bytes).decode("utf-8")
+        await self._ws.send(json.dumps({
+            "type": "input_audio_buffer.append",
+            "audio": b64
+        }))
+
+    async def flush_audio(self):
+        """No buffering needed for OpenAI — audio sent directly."""
+        pass
+
+    async def send_text(self, text: str):
+        """Send text trigger to prompt AI to speak."""
+        await self._ws.send(json.dumps({
+            "type": "conversation.item.create",
+            "item": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": text}]
+            }
+        }))
+        await self._ws.send(json.dumps({"type": "response.create"}))
+
+    async def receive_loop(self, on_audio, on_ai_transcript, on_caller_transcript, on_turn_complete, on_interrupted):
+        """Main receive loop. Parses OpenAI Realtime events."""
+        async for raw in self._ws:
+            event = json.loads(raw)
+            t = event.get("type", "")
+
+            if t == "response.audio.delta":
+                # Audio output — already g711_ulaw, decode base64
+                mulaw_bytes = base64.b64decode(event["delta"])
+                if len(mulaw_bytes) > 0:
+                    await on_audio(mulaw_bytes)
+
+            elif t == "response.audio_transcript.delta":
+                self._ai_transcript_buf.append(event.get("delta", ""))
+
+            elif t == "response.audio_transcript.done":
+                transcript = event.get("transcript", "")
+                if transcript:
+                    await on_ai_transcript(transcript)
+                self._ai_transcript_buf.clear()
+
+            elif t == "conversation.item.input_audio_transcription.completed":
+                transcript = event.get("transcript", "")
+                if transcript:
+                    await on_caller_transcript(transcript)
+
+            elif t == "response.done":
+                await on_turn_complete()
+
+            elif t == "input_audio_buffer.speech_started":
+                await on_interrupted()
+
+            elif t == "error":
+                _log_error(self._call_id, f"OpenAI error: {event.get('error', {})}")
+
+    async def close(self):
+        if self._ws:
+            try:
+                await self._ws.close()
+            except Exception:
+                pass
+
+
+def _create_provider(call: dict, call_id: str):
+    """Factory: create the right AI provider based on call settings."""
+    provider_name = call.get("settings", {}).get("ai_provider", "gemini")
+    if provider_name == "openai":
+        if not OPENAI_API_KEY:
+            raise RuntimeError("OPENAI_API_KEY not configured")
+        return OpenAIProvider(call, call_id)
+    else:
+        if not GEMINI_API_KEY:
+            raise RuntimeError("GEMINI_API_KEY not configured")
+        return GeminiProvider(call, call_id)
 
 
 def _verify_secret(request: Request):
@@ -95,8 +400,26 @@ async def debug_errors(request: Request):
 async def debug_active_calls(request: Request):
     """Show active call state for debugging."""
     _verify_secret(request)
-    return {cid: {k: v for k, v in c.items() if k not in ("gemini_session", "transcript", "twilio_ws")}
-            for cid, c in _active_calls.items()}
+    safe_exclude = {"ai_provider", "transcript", "twilio_ws", "ai_ready", "ai_cancel"}
+    result = {}
+    for cid, c in _active_calls.items():
+        entry = {}
+        for k, v in c.items():
+            if k in safe_exclude:
+                continue
+            if isinstance(v, asyncio.Event):
+                entry[k] = v.is_set()
+            else:
+                try:
+                    json.dumps(v)
+                    entry[k] = v
+                except (TypeError, ValueError):
+                    entry[k] = str(v)
+        # Add provider name
+        if c.get("ai_provider"):
+            entry["ai_provider_name"] = c["ai_provider"].name
+        result[cid] = entry
+    return result
 
 
 @app.get("/debug/test-gemini")
@@ -135,11 +458,16 @@ async def make_call(request: Request):
         raise HTTPException(status_code=400, detail="Invalid NZ phone number.")
     if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
         raise HTTPException(status_code=500, detail="Twilio not configured.")
-    if not GEMINI_API_KEY:
-        raise HTTPException(status_code=500, detail="Gemini API key not configured.")
+
+    # Validate AI provider is configured
+    ai_provider = settings.get("ai_provider", "gemini")
+    if ai_provider == "openai" and not OPENAI_API_KEY:
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured.")
+    if ai_provider != "openai" and not GEMINI_API_KEY:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured.")
 
     call_id = str(uuid.uuid4())[:12]
-    log.info(f"[{call_id}] Making call to {to_number} from {from_number}")
+    log.info(f"[{call_id}] Making call to {to_number} from {from_number} (provider: {ai_provider})")
 
     # Store call state
     _active_calls[call_id] = {
@@ -154,15 +482,15 @@ async def make_call(request: Request):
         "transcript": [],
         "started_at": datetime.now(timezone.utc).isoformat(),
         "barged_in": False,
-        "gemini_session": None,
-        "gemini_ready": asyncio.Event(),
-        "gemini_error": None,
-        "gemini_cancel": asyncio.Event(),
+        "ai_provider": None,
+        "ai_ready": asyncio.Event(),
+        "ai_error": None,
+        "ai_cancel": asyncio.Event(),
     }
     _transcript_subscribers[call_id] = set()
 
-    # Pre-connect to Gemini while the phone is ringing
-    asyncio.create_task(_preconnect_gemini(call_id))
+    # Pre-connect to AI provider while the phone is ringing
+    asyncio.create_task(_preconnect_ai(call_id))
 
     # Create Twilio call
     try:
@@ -294,9 +622,9 @@ async def call_status(request: Request):
             if duration:
                 call["duration_seconds"] = int(duration)
             if status in ("completed", "failed", "busy", "no-answer", "canceled"):
-                # Release pre-connected Gemini session if still waiting
-                if "gemini_cancel" in call:
-                    call["gemini_cancel"].set()
+                # Release pre-connected AI session if still waiting
+                if "ai_cancel" in call:
+                    call["ai_cancel"].set()
                 # Broadcast end to subscribers
                 await _broadcast_transcript(cid, {"type": "status", "status": "ended",
                                                    "timestamp": datetime.now(timezone.utc).isoformat()})
@@ -308,90 +636,42 @@ async def call_status(request: Request):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  GEMINI PRE-CONNECT (starts during ring phase)
+#  AI PROVIDER PRE-CONNECT (starts during ring phase)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def _preconnect_gemini(call_id: str):
-    """Connect to Gemini Live API while the phone is still ringing.
+async def _preconnect_ai(call_id: str):
+    """Connect to AI provider while the phone is still ringing.
 
-    Stores the session in _active_calls so media_stream can use it immediately.
-    Keeps the session alive until gemini_cancel is set (call ends or media_stream takes over).
+    Creates the provider, connects it, stores it in _active_calls for media_stream.
+    Keeps the connection alive until ai_cancel is set.
     """
     call = _active_calls.get(call_id)
     if not call:
         return
 
+    provider = None
     try:
-        from google import genai
-        from google.genai import types
+        provider = _create_provider(call, call_id)
+        _log_error(call_id, f"Pre-connecting to {provider.name} (during ring)...")
+        await provider.connect()
+        _log_error(call_id, f"{provider.name} pre-connected! Waiting for Twilio media stream...")
 
-        gemini_client = genai.Client(api_key=GEMINI_API_KEY)
-        _log_error(call_id, f"Pre-connecting to {GEMINI_MODEL} (during ring)...")
+        call["ai_provider"] = provider
+        call["ai_ready"].set()
 
-        # Build config from call settings
-        _settings = call.get("settings", {})
-
-        _START_SENS_MAP = {
-            "LOW": types.StartSensitivity.START_SENSITIVITY_LOW,
-            "DEFAULT": types.StartSensitivity.START_SENSITIVITY_UNSPECIFIED,
-            "HIGH": types.StartSensitivity.START_SENSITIVITY_HIGH,
-        }
-        _END_SENS_MAP = {
-            "LOW": types.EndSensitivity.END_SENSITIVITY_LOW,
-            "DEFAULT": types.EndSensitivity.END_SENSITIVITY_UNSPECIFIED,
-            "HIGH": types.EndSensitivity.END_SENSITIVITY_HIGH,
-        }
-
-        start_sens = _START_SENS_MAP.get(
-            _settings.get("start_sensitivity", "LOW").upper(),
-            types.StartSensitivity.START_SENSITIVITY_LOW
-        )
-        end_sens = _END_SENS_MAP.get(
-            _settings.get("end_sensitivity", "HIGH").upper(),
-            types.EndSensitivity.END_SENSITIVITY_HIGH
-        )
-        silence_ms = int(_settings.get("silence_duration_ms", 500))
-
-        config = types.LiveConnectConfig(
-            response_modalities=[types.Modality.AUDIO],
-            system_instruction=types.Content(
-                parts=[types.Part(text=call.get("system_instruction", "You are a helpful AI assistant.") + "\n\nIMPORTANT: You are on a live phone call. Start speaking immediately — introduce yourself right away without waiting for the other person to speak first.")]
-            ),
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name=call.get("voice_name", "Kore")
-                    )
-                )
-            ),
-            input_audio_transcription=types.AudioTranscriptionConfig(),
-            output_audio_transcription=types.AudioTranscriptionConfig(),
-            realtime_input_config=types.RealtimeInputConfig(
-                turn_coverage="TURN_INCLUDES_ONLY_ACTIVITY",
-                automatic_activity_detection=types.AutomaticActivityDetection(
-                    startOfSpeechSensitivity=start_sens,
-                    endOfSpeechSensitivity=end_sens,
-                    silenceDurationMs=silence_ms,
-                ),
-            ),
-        )
-        log.info(f"[{call_id}] VAD config: start={start_sens}, end={end_sens}, silence={silence_ms}ms")
-
-        async with gemini_client.aio.live.connect(model=GEMINI_MODEL, config=config) as gemini_session:
-            _log_error(call_id, f"Gemini pre-connected! Waiting for Twilio media stream...")
-            call["gemini_session"] = gemini_session
-            call["gemini_ready"].set()  # Signal that session is ready
-
-            # Keep the context manager alive until the call ends
-            await call["gemini_cancel"].wait()
-            log.info(f"[{call_id}] Gemini pre-connect released")
+        # Keep alive until the call ends
+        await call["ai_cancel"].wait()
+        log.info(f"[{call_id}] AI pre-connect released")
 
     except Exception as e:
-        _log_error(call_id, f"Gemini pre-connect error: {e}")
+        _log_error(call_id, f"AI pre-connect error: {e}")
         import traceback
         _log_error(call_id, traceback.format_exc())
-        call["gemini_error"] = str(e)
-        call["gemini_ready"].set()  # Unblock media_stream so it can see the error
+        call["ai_error"] = str(e)
+        call["ai_ready"].set()
+    finally:
+        if provider:
+            await provider.close()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -421,70 +701,110 @@ async def media_stream(websocket: WebSocket, call_id: str):
             await websocket.close()
             return
 
-    # Wait for pre-connected Gemini session (should already be ready)
+    # Wait for pre-connected AI provider (should already be ready)
     try:
-        _log_error(call_id, "Waiting for pre-connected Gemini session...")
-        await asyncio.wait_for(call["gemini_ready"].wait(), timeout=15)
+        _log_error(call_id, "Waiting for pre-connected AI provider...")
+        await asyncio.wait_for(call["ai_ready"].wait(), timeout=15)
     except asyncio.TimeoutError:
-        _log_error(call_id, "Gemini pre-connect timed out (15s)")
+        _log_error(call_id, "AI pre-connect timed out (15s)")
         await _broadcast_transcript(call_id, {
-            "type": "status", "status": "error", "error": "Gemini connection timed out",
+            "type": "status", "status": "error", "error": "AI connection timed out",
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
-        call["gemini_cancel"].set()
+        call["ai_cancel"].set()
         await websocket.close()
         return
 
-    if call.get("gemini_error"):
-        _log_error(call_id, f"Gemini pre-connect failed: {call['gemini_error']}")
+    if call.get("ai_error"):
+        _log_error(call_id, f"AI pre-connect failed: {call['ai_error']}")
         await _broadcast_transcript(call_id, {
-            "type": "status", "status": "error", "error": call["gemini_error"],
+            "type": "status", "status": "error", "error": call["ai_error"],
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
-        call["gemini_cancel"].set()
+        call["ai_cancel"].set()
         await websocket.close()
         return
 
-    gemini_session = call["gemini_session"]
-    log.info(f"[{call_id}] Using pre-connected Gemini session")
+    provider = call["ai_provider"]
+    log.info(f"[{call_id}] Using pre-connected {provider.name} provider")
 
     try:
-        from google.genai import types
-
         call["status"] = "connected"
         await _broadcast_transcript(call_id, {
             "type": "status", "status": "connected",
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
 
-        # Send text trigger to make Gemini start speaking immediately
+        # Send text trigger to make AI start speaking immediately
         try:
-            await gemini_session.send_realtime_input(
-                text="The phone call has been answered. Start speaking now — greet the caller."
-            )
-            log.info(f"[{call_id}] Text trigger sent to Gemini")
+            await provider.send_text("The phone call has been answered. Start speaking now — greet the caller.")
+            log.info(f"[{call_id}] Text trigger sent to {provider.name}")
         except Exception as e:
-            _log_error(call_id, f"send_realtime_input text trigger failed (non-fatal): {e}")
+            _log_error(call_id, f"Text trigger failed (non-fatal): {e}")
 
-        # Transcript accumulation buffers — collect fragments into sentences
+        # Transcript accumulation buffers
         _ai_transcript_buffer = []
         _caller_transcript_buffer = []
-
-        # Rate conversion state
-        _ratecv_state_up = None    # 8kHz → 16kHz
-        _ratecv_state_down = None  # 24kHz → 8kHz
-
-        # 20ms chunk buffer for consistent input to Gemini
-        # 16kHz × 2 bytes × 0.020s = 640 bytes per 20ms chunk
-        _CHUNK_20MS = 640
-        _input_buffer = bytearray()
-
-        # Performance tracking
         _perf = {"first_audio_in": None, "first_audio_out": None, "turns": 0}
 
-        async def twilio_to_gemini():
-            """Read audio from Twilio, convert to 20ms PCM chunks, send to Gemini."""
-            nonlocal stream_sid, _ratecv_state_up, _input_buffer
+        # ── Callbacks for provider.receive_loop() ──
+        async def on_audio(mulaw_bytes: bytes):
+            """AI audio output → send to Twilio + monitors."""
+            if call.get("barged_in"):
+                return
+            if not _perf["first_audio_out"]:
+                _perf["first_audio_out"] = datetime.now(timezone.utc).isoformat()
+                _log_error(call_id, f"PERF: first audio out at {_perf['first_audio_out']}")
+            if stream_sid and len(mulaw_bytes) > 0:
+                payload_b64 = base64.b64encode(mulaw_bytes).decode("utf-8")
+                asyncio.create_task(_broadcast_monitor(call_id, "ai", payload_b64))
+                try:
+                    await websocket.send_text(json.dumps({
+                        "event": "media",
+                        "streamSid": stream_sid,
+                        "media": {"payload": payload_b64}
+                    }))
+                except Exception:
+                    pass
+
+        async def on_ai_transcript(text: str):
+            _ai_transcript_buffer.append(text)
+
+        async def on_caller_transcript(text: str):
+            _caller_transcript_buffer.append(text)
+
+        async def on_turn_complete():
+            _perf["turns"] += 1
+            _log_error(call_id, f"PERF: turn {_perf['turns']} complete")
+            if _ai_transcript_buffer:
+                full_text = " ".join(_ai_transcript_buffer)
+                ts = datetime.now(timezone.utc).isoformat()
+                call["transcript"].append({"speaker": "ai", "text": full_text, "timestamp": ts})
+                await _broadcast_transcript(call_id, {
+                    "type": "transcript", "speaker": "ai", "text": full_text, "timestamp": ts
+                })
+                _ai_transcript_buffer.clear()
+            if _caller_transcript_buffer:
+                full_text = " ".join(_caller_transcript_buffer)
+                ts = datetime.now(timezone.utc).isoformat()
+                call["transcript"].append({"speaker": "caller", "text": full_text, "timestamp": ts})
+                await _broadcast_transcript(call_id, {
+                    "type": "transcript", "speaker": "caller", "text": full_text, "timestamp": ts
+                })
+                _caller_transcript_buffer.clear()
+
+        async def on_interrupted():
+            if stream_sid:
+                try:
+                    await websocket.send_text(json.dumps({
+                        "event": "clear", "streamSid": stream_sid
+                    }))
+                except Exception:
+                    pass
+
+        # ── Two concurrent tasks: Twilio→AI and AI→Twilio ──
+        async def twilio_to_ai():
+            nonlocal stream_sid
             try:
                 while True:
                     msg = await websocket.receive_text()
@@ -497,158 +817,44 @@ async def media_stream(websocket: WebSocket, call_id: str):
 
                     elif data["event"] == "media":
                         if call.get("barged_in"):
-                            # Still broadcast to monitors even when barged
                             asyncio.create_task(_broadcast_monitor(call_id, "caller", data["media"]["payload"]))
                             continue
 
-                        # Track first audio received
                         if not _perf["first_audio_in"]:
                             _perf["first_audio_in"] = datetime.now(timezone.utc).isoformat()
 
-                        # Broadcast caller audio to monitors (already base64 mulaw)
                         asyncio.create_task(_broadcast_monitor(call_id, "caller", data["media"]["payload"]))
 
-                        # Decode mulaw → PCM 16-bit
-                        payload = base64.b64decode(data["media"]["payload"])
-                        pcm_8k = audioop.ulaw2lin(payload, 2)
-                        # Resample 8kHz → 16kHz
-                        pcm_16k, _ratecv_state_up = audioop.ratecv(
-                            pcm_8k, 2, 1, 8000, 16000, _ratecv_state_up
-                        )
-
-                        # Buffer and send in 20ms chunks (640 bytes at 16kHz 16-bit mono)
-                        _input_buffer.extend(pcm_16k)
-                        while len(_input_buffer) >= _CHUNK_20MS:
-                            chunk = bytes(_input_buffer[:_CHUNK_20MS])
-                            del _input_buffer[:_CHUNK_20MS]
-                            await gemini_session.send_realtime_input(
-                                audio=types.Blob(data=chunk, mime_type="audio/pcm;rate=16000")
-                            )
+                        # Send raw mulaw bytes — provider handles conversion
+                        mulaw_bytes = base64.b64decode(data["media"]["payload"])
+                        await provider.send_audio(mulaw_bytes)
 
                     elif data["event"] == "stop":
-                        # Send remaining buffer
-                        if _input_buffer:
-                            await gemini_session.send_realtime_input(
-                                audio=types.Blob(data=bytes(_input_buffer), mime_type="audio/pcm;rate=16000")
-                            )
-                            _input_buffer.clear()
+                        await provider.flush_audio()
                         log.info(f"[{call_id}] Stream stopped")
                         break
 
             except WebSocketDisconnect:
                 log.info(f"[{call_id}] Twilio WebSocket disconnected")
             except Exception as e:
-                _log_error(call_id, f"Twilio→Gemini error: {e}")
+                _log_error(call_id, f"Twilio→AI error: {e}")
                 import traceback
                 _log_error(call_id, traceback.format_exc())
 
-        async def gemini_to_twilio():
-            """Read audio from Gemini, convert, send to Twilio."""
-            nonlocal _ratecv_state_down
+        async def ai_to_twilio():
             try:
-                # Re-enter receive() in a loop — iterator ends after turn_complete
-                # and must be re-entered to keep listening (per official Google example)
-                while True:
-                    async for response in gemini_session.receive():
-                        # Handle go_away (server asking us to disconnect)
-                        if response.go_away:
-                            _log_error(call_id, f"Gemini GoAway: {response.go_away}")
-                            return
-
-                        if not response.server_content:
-                            continue
-
-                        sc = response.server_content
-
-                        # Handle audio output
-                        if sc.model_turn:
-                            if not _perf["first_audio_out"]:
-                                _perf["first_audio_out"] = datetime.now(timezone.utc).isoformat()
-                                _log_error(call_id, f"PERF: first audio out at {_perf['first_audio_out']}")
-                            for part in sc.model_turn.parts:
-                                if part.inline_data and part.inline_data.data:
-                                    if call.get("barged_in"):
-                                        continue
-
-                                    pcm_24k = part.inline_data.data
-                                    if len(pcm_24k) == 0:
-                                        continue
-                                    pcm_8k, _ratecv_state_down = audioop.ratecv(
-                                        pcm_24k, 2, 1, 24000, 8000, _ratecv_state_down
-                                    )
-                                    mulaw_8k = audioop.lin2ulaw(pcm_8k, 2)
-
-                                    if stream_sid and len(mulaw_8k) > 0:
-                                        payload = base64.b64encode(mulaw_8k).decode("utf-8")
-                                        # Broadcast AI audio to monitors
-                                        asyncio.create_task(_broadcast_monitor(call_id, "ai", payload))
-                                        try:
-                                            await websocket.send_text(json.dumps({
-                                                "event": "media",
-                                                "streamSid": stream_sid,
-                                                "media": {"payload": payload}
-                                            }))
-                                        except Exception:
-                                            return  # Twilio disconnected
-
-                        # Handle input transcription (what the caller says) — accumulate
-                        if sc.input_transcription and sc.input_transcription.text:
-                            _caller_transcript_buffer.append(sc.input_transcription.text)
-
-                        # Handle output transcription (what the AI says) — accumulate
-                        if sc.output_transcription and sc.output_transcription.text:
-                            _ai_transcript_buffer.append(sc.output_transcription.text)
-
-                        # Handle turn complete — flush transcript buffers, log perf, re-enter receive loop
-                        if sc.turn_complete:
-                            _perf["turns"] += 1
-                            _log_error(call_id, f"PERF: turn {_perf['turns']} complete")
-                            # Flush AI buffer
-                            if _ai_transcript_buffer:
-                                full_text = " ".join(_ai_transcript_buffer)
-                                ts = datetime.now(timezone.utc).isoformat()
-                                call["transcript"].append({"speaker": "ai", "text": full_text, "timestamp": ts})
-                                await _broadcast_transcript(call_id, {
-                                    "type": "transcript", "speaker": "ai", "text": full_text, "timestamp": ts
-                                })
-                                _ai_transcript_buffer.clear()
-                            # Flush caller buffer
-                            if _caller_transcript_buffer:
-                                full_text = " ".join(_caller_transcript_buffer)
-                                ts = datetime.now(timezone.utc).isoformat()
-                                call["transcript"].append({"speaker": "caller", "text": full_text, "timestamp": ts})
-                                await _broadcast_transcript(call_id, {
-                                    "type": "transcript", "speaker": "caller", "text": full_text, "timestamp": ts
-                                })
-                                _caller_transcript_buffer.clear()
-
-                        # Handle interrupted (barge-in by caller)
-                        if sc.interrupted:
-                            if stream_sid:
-                                try:
-                                    await websocket.send_text(json.dumps({
-                                        "event": "clear",
-                                        "streamSid": stream_sid
-                                    }))
-                                except Exception:
-                                    return
-
-                    # receive() iterator ended — re-enter
-                    _log_error(call_id, "Gemini receive iterator ended, re-entering...")
-
+                await provider.receive_loop(on_audio, on_ai_transcript, on_caller_transcript, on_turn_complete, on_interrupted)
             except Exception as e:
-                _log_error(call_id, f"Gemini→Twilio error: {e}")
+                _log_error(call_id, f"AI→Twilio error: {e}")
                 import traceback
                 _log_error(call_id, traceback.format_exc())
 
-        # Run both directions concurrently using create_task (per official example)
-        _log_error(call_id, "Gemini Live session connected! Starting audio bridge tasks...")
-        twilio_task = asyncio.create_task(twilio_to_gemini())
-        gemini_task = asyncio.create_task(gemini_to_twilio())
+        _log_error(call_id, f"{provider.name} connected! Starting audio bridge tasks...")
+        twilio_task = asyncio.create_task(twilio_to_ai())
+        ai_task = asyncio.create_task(ai_to_twilio())
 
-        # Wait for either task to finish (usually twilio_to_gemini ends on disconnect)
         done, pending = await asyncio.wait(
-            [twilio_task, gemini_task],
+            [twilio_task, ai_task],
             return_when=asyncio.FIRST_COMPLETED
         )
         for task in done:
@@ -670,8 +876,8 @@ async def media_stream(websocket: WebSocket, call_id: str):
         call["status"] = "ended"
         call.pop("twilio_ws", None)
         call.pop("stream_sid", None)
-        # Release the pre-connected Gemini session
-        call["gemini_cancel"].set()
+        # Release the pre-connected AI session
+        call["ai_cancel"].set()
         log.info(f"[{call_id}] Call ended, saving history")
         # Broadcast ended to transcript subscribers (don't rely on Twilio callback alone)
         await _broadcast_transcript(call_id, {

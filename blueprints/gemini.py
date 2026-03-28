@@ -438,7 +438,7 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
             <span>{{ user_email }}</span>
             <a href="/auth/logout" class="btn btn-red" style="font-size:11px;padding:4px 10px;"><i class="fa-solid fa-right-from-bracket"></i> Sign out</a>
             <button class="btn" style="font-size:11px;padding:4px 10px;background:#6c757d;" onclick="openDebug()"><i class="fa-solid fa-bug"></i> Debug</button>
-            <span style="font-size:10px;color:#666;"><i class="fa-solid fa-code-branch"></i> {{ git_version }}</span>
+            <span style="font-size:10px;color:#aab;"><i class="fa-solid fa-code-branch"></i> {{ git_version }}</span>
         </div>
     </div>
 
@@ -487,6 +487,21 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
     <div class="card" id="settings-panel" style="display:none;">
         <h2><i class="fa-solid fa-sliders"></i> Call Settings</h2>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div>
+                <label class="form-label">AI Provider</label>
+                <select id="set-ai-provider" style="width:100%;" onchange="onProviderChange()">
+                    <option value="gemini" selected>Gemini 3.1 Flash Live</option>
+                    <option value="openai">OpenAI Realtime (GPT)</option>
+                </select>
+                <span style="font-size:10px;color:#888;">Which AI model handles the voice conversation. Different providers have different voices, latency, and capabilities.</span>
+            </div>
+            <div>
+                <label class="form-label">Voice</label>
+                <select id="set-voice" style="width:100%;">
+                    <!-- Populated dynamically by onProviderChange() -->
+                </select>
+                <span style="font-size:10px;color:#888;">The AI voice used for the call. Available voices depend on the selected provider.</span>
+            </div>
             <div>
                 <label class="form-label">Language</label>
                 <select id="set-language" style="width:100%;">
@@ -761,6 +776,7 @@ function toggleSettings() {
 
 function getCallSettings() {
     return {
+        ai_provider: document.getElementById('set-ai-provider').value,
         language: document.getElementById('set-language').value,
         thinking_level: document.getElementById('set-thinking').value,
         include_thoughts: document.getElementById('set-include-thoughts').checked,
@@ -770,6 +786,38 @@ function getCallSettings() {
     };
 }
 
+var _PROVIDER_VOICES = {
+    gemini: [
+        {value: 'Kore', label: 'Kore (default)'},
+        {value: 'Charon', label: 'Charon'},
+        {value: 'Fenrir', label: 'Fenrir'},
+        {value: 'Aoede', label: 'Aoede'},
+        {value: 'Puck', label: 'Puck'},
+    ],
+    openai: [
+        {value: 'coral', label: 'Coral (default)'},
+        {value: 'alloy', label: 'Alloy'},
+        {value: 'ash', label: 'Ash'},
+        {value: 'echo', label: 'Echo'},
+        {value: 'nova', label: 'Nova'},
+        {value: 'sage', label: 'Sage'},
+        {value: 'shimmer', label: 'Shimmer'},
+        {value: 'marin', label: 'Marin'},
+        {value: 'cedar', label: 'Cedar'},
+    ]
+};
+
+function onProviderChange() {
+    var provider = document.getElementById('set-ai-provider').value;
+    var voiceSelect = document.getElementById('set-voice');
+    var voices = _PROVIDER_VOICES[provider] || _PROVIDER_VOICES.gemini;
+    voiceSelect.innerHTML = voices.map(function(v) {
+        return '<option value="' + v.value + '">' + v.label + '</option>';
+    }).join('');
+}
+// Init voice dropdown on load
+onProviderChange();
+
 function makeCall() {
     var number = document.getElementById('call-number').value.trim();
     if (!number) { alert('Enter a phone number.'); return; }
@@ -778,7 +826,9 @@ function makeCall() {
     if (!confirm('Call ' + number + '?')) return;
 
     showStatus('Initiating call...', '');
-    var payload = {to_number: number, knowledge_base_id: kbId ? parseInt(kbId) : null, settings: getCallSettings()};
+    var settings = getCallSettings();
+    var voice = document.getElementById('set-voice').value;
+    var payload = {to_number: number, knowledge_base_id: kbId ? parseInt(kbId) : null, voice_name: voice, settings: settings};
     fetch('/api/gemini/make-call', {method:'POST', headers:{'Content-Type':'application/json'},
         body:JSON.stringify(payload)
     }).then(r=>r.json()).then(d=>{
