@@ -10,8 +10,6 @@ This server handles:
 
 Run: uvicorn gemini_call_server:app --host 0.0.0.0 --port 8001
 """
-SERVER_VERSION = "2026-03-28 20:18"
-
 import os
 import re
 import json
@@ -21,6 +19,7 @@ import base64
 import asyncio
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, Set
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
@@ -42,6 +41,7 @@ SERVER_SECRET = os.getenv("GEMINI_CALL_SERVER_SECRET", "")
 SELF_URL = os.getenv("GEMINI_CALL_SERVER_SELF_URL", "http://localhost:8001")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+SERVER_VERSION = datetime.fromtimestamp(Path(__file__).stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 GEMINI_MODEL = "gemini-3.1-flash-live-preview"
 
