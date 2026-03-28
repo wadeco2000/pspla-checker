@@ -8418,6 +8418,7 @@ tr:last-child td{border-bottom:none}
         <label><input type="checkbox" id="add-perm-actuate"> Actuate</label>
         <label><input type="checkbox" id="add-perm-shelly"> Shelly</label>
         <label><input type="checkbox" id="add-perm-club_fitness"> CF</label>
+        <label><input type="checkbox" id="add-perm-gemini"> Gemini</label>
       </div>
     </div>
     <div id="users-loading" class="loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading...</div>
@@ -8486,8 +8487,8 @@ function loadUsers() {
             var avatarHtml = u.avatar_url
                 ? '<img src="' + u.avatar_url + '" style="width:24px;height:24px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:6px">'
                 : '<i class="fa-solid fa-user-circle" style="font-size:22px;color:#ccc;vertical-align:middle;margin-right:6px"></i>';
-            var perms = u.permissions || {searches:true,database:true,history:true,utilities:true,actuate:false,shelly:false,club_fitness:false};
-            var permLabels = {searches:'Sea',database:'Dat',history:'His',utilities:'Uti',actuate:'Act',shelly:'She',club_fitness:'CF'};
+            var perms = u.permissions || {searches:true,database:true,history:true,utilities:true,actuate:false,shelly:false,club_fitness:false,gemini:false};
+            var permLabels = {searches:'Sea',database:'Dat',history:'His',utilities:'Uti',actuate:'Act',shelly:'She',club_fitness:'CF',gemini:'Gem'};
             var permCol = '';
             if (u.is_admin) {
                 permCol = '<span style="font-size:11px;color:#8e44ad">All (admin)</span>';
@@ -8528,7 +8529,8 @@ function addUser() {
         utilities: document.getElementById('add-perm-utilities').checked,
         actuate: document.getElementById('add-perm-actuate').checked,
         shelly: document.getElementById('add-perm-shelly').checked,
-        club_fitness: document.getElementById('add-perm-club_fitness').checked
+        club_fitness: document.getElementById('add-perm-club_fitness').checked,
+        gemini: document.getElementById('add-perm-gemini').checked
     };
     fetch('/api/allowed-users', {method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({email: email, name: name, permissions: perms})
