@@ -901,16 +901,10 @@ async def handle_inbound_call(request: Request):
             content='<?xml version="1.0" encoding="UTF-8"?><Response><Say>Sorry, this number is not currently accepting calls. Please try again later.</Say></Response>',
             media_type="application/xml")
 
-    # Load knowledge base
+    # Load knowledge base (for RAG documents only — inbound prompt comes from config, not KB)
     kb_id = config.get("knowledge_base_id")
     kb = _load_kb(kb_id) if kb_id else None
-    # Use system_prompt from config; if KB selected, append KB content as context
     system_instruction = config.get("system_prompt", "")
-    if kb and kb.get("content"):
-        if system_instruction:
-            system_instruction += "\n\n" + kb["content"]
-        else:
-            system_instruction = kb["content"]
     if not system_instruction:
         system_instruction = "You are a helpful AI assistant answering phone calls."
 

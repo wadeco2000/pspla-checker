@@ -1559,10 +1559,11 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                     </select>
                 </div>
                 <div>
-                    <label class="form-label">Knowledge Base</label>
+                    <label class="form-label">Documents (RAG)</label>
                     <select id="inbound-kb" style="width:100%;">
                         <option value="">— None —</option>
                     </select>
+                    <span style="font-size:10px;color:#888;">Only the attached documents are used — the KB's prompt is ignored. Use the System Prompt field below instead.</span>
                 </div>
                 <div>
                     <label class="form-label">Voice</label>
