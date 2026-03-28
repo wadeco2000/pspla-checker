@@ -877,6 +877,8 @@ def rag_test_search():
     kb_id = data.get("kb_id")
     if not query:
         return jsonify({"ok": False, "error": "Query is required"}), 400
+    if not kb_id:
+        return jsonify({"ok": False, "error": "Select a knowledge base first"}), 400
 
     api_key = os.getenv("OPENAI_API_KEY", "")
     if not api_key:
@@ -890,11 +892,10 @@ def rag_test_search():
 
         payload = {
             "query_embedding": query_embedding,
+            "match_kb_id": kb_id,
             "match_threshold": 0.2,
             "match_count": 5,
         }
-        if kb_id:
-            payload["match_kb_id"] = kb_id
 
         r = _requests.post(f"{SUPABASE_URL}/rest/v1/rpc/match_rag_chunks",
             json=payload, headers=_sb_headers(), timeout=10)
