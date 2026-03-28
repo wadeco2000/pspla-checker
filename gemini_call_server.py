@@ -438,29 +438,19 @@ class ElevenLabsProvider:
         self._ws = await websockets.connect(signed_url)
         log.info(f"[{self._call_id}] ElevenLabs WebSocket connected")
 
-        # Send conversation config — only override fields the agent allows
-        # Voice and prompt are configured in the ElevenLabs dashboard per agent
-        settings = self._call.get("settings", {})
-        language = settings.get("language", "en")
+        # Send initiation — don't override agent config (voice, prompt, language
+        # are all set in the ElevenLabs dashboard per agent). Overrides cause
+        # policy violations unless explicitly enabled in agent settings.
+        # We can pass dynamic_variables to inject context without overriding.
         system_instruction = self._call.get("system_instruction", "")
 
-        config = {
-            "type": "conversation_initiation_client_data",
-        }
+        config = {"type": "conversation_initiation_client_data"}
 
-        # Only send overrides if we have a knowledge base prompt to inject
-        overrides = {}
+        # Use dynamic_variables to pass context (doesn't require override permission)
         if system_instruction:
-            overrides["agent"] = {
-                "prompt": {
-                    "prompt": system_instruction
-                        + "\n\nIMPORTANT: You are on a live phone call. Start speaking immediately."
-                        + "\n\nWhen the conversation is naturally over, say goodbye clearly."
-                },
-                "language": language,
+            config["dynamic_variables"] = {
+                "context": system_instruction
             }
-        if overrides:
-            config["conversation_config_override"] = overrides
 
         await self._ws.send(json.dumps(config))
 
