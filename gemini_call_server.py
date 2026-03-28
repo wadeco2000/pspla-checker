@@ -1049,6 +1049,21 @@ async def handle_inbound_call(request: Request):
         <Stream url="{ws_url}/media-stream/{call_id}" />
     </Connect>
 </Response>"""
+
+    # Start recording via REST API (can't use <Record> with <Connect><Stream>)
+    try:
+        from twilio.rest import Client
+        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+        recording_callback = f"{SELF_URL}/api/recording-status/{call_id}"
+        client.calls(call_sid).recordings.create(
+            recording_status_callback=recording_callback,
+            recording_status_callback_event=["completed"],
+            recording_channels="dual",
+        )
+        log.info(f"[{call_id}] Started recording for inbound call {call_sid}")
+    except Exception as e:
+        _log_error(call_id, f"Failed to start inbound recording: {e}")
+
     return Response(content=xml, media_type="application/xml")
 
 
