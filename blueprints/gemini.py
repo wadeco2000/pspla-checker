@@ -1516,6 +1516,15 @@ function _savePrefs() {
         document.getElementById('set-voice').value);
     var elAgent = document.getElementById('set-elevenlabs-agent');
     if (elAgent && elAgent.value) localStorage.setItem('gemini_elevenlabs_agent', elAgent.value);
+    // Persist all settings
+    localStorage.setItem('gemini_language', document.getElementById('set-language').value);
+    localStorage.setItem('gemini_end_sensitivity', document.getElementById('set-end-sensitivity').value);
+    localStorage.setItem('gemini_thinking', document.getElementById('set-thinking').value);
+    localStorage.setItem('gemini_start_sensitivity', document.getElementById('set-start-sensitivity').value);
+    localStorage.setItem('gemini_silence_ms', document.getElementById('set-silence-ms').value);
+    localStorage.setItem('gemini_include_thoughts', document.getElementById('set-include-thoughts').checked);
+    var ragSource = document.querySelector('input[name="el-rag-source"]:checked');
+    if (ragSource) localStorage.setItem('gemini_el_rag_source', ragSource.value);
 }
 
 function _restorePrefs() {
@@ -1530,6 +1539,25 @@ function _restorePrefs() {
         var radio = document.querySelector('input[name="el-prompt-source"][value="' + savedPromptSource + '"]');
         if (radio) radio.checked = true;
     }
+    // Restore ElevenLabs RAG source
+    var savedRagSource = localStorage.getItem('gemini_el_rag_source');
+    if (savedRagSource) {
+        var rr = document.querySelector('input[name="el-rag-source"][value="' + savedRagSource + '"]');
+        if (rr) rr.checked = true;
+    }
+    // Restore remaining settings
+    var savedLang = localStorage.getItem('gemini_language');
+    if (savedLang) document.getElementById('set-language').value = savedLang;
+    var savedEndSens = localStorage.getItem('gemini_end_sensitivity');
+    if (savedEndSens) document.getElementById('set-end-sensitivity').value = savedEndSens;
+    var savedThinking = localStorage.getItem('gemini_thinking');
+    if (savedThinking) document.getElementById('set-thinking').value = savedThinking;
+    var savedStartSens = localStorage.getItem('gemini_start_sensitivity');
+    if (savedStartSens) document.getElementById('set-start-sensitivity').value = savedStartSens;
+    var savedSilence = localStorage.getItem('gemini_silence_ms');
+    if (savedSilence) document.getElementById('set-silence-ms').value = savedSilence;
+    var savedThoughts = localStorage.getItem('gemini_include_thoughts');
+    if (savedThoughts === 'true') document.getElementById('set-include-thoughts').checked = true;
 }
 _restorePrefs();
 
