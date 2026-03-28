@@ -407,7 +407,9 @@ class OpenAIProvider:
 
 
 class ElevenLabsProvider:
-    """ElevenLabs Conversational AI voice provider. Audio: ulaw 8kHz (zero conversion)."""
+    """ElevenLabs Conversational AI voice provider.
+    Input: mulaw 8kHz → PCM 16kHz (conversion needed).
+    Output: ulaw 8kHz → Twilio (zero conversion)."""
     name = "elevenlabs"
 
     def __init__(self, call: dict, call_id: str):
@@ -415,6 +417,7 @@ class ElevenLabsProvider:
         self._call_id = call_id
         self._ws = None
         self._initiated = False
+        self._ratecv_state_up = None  # 8kHz → 16kHz for input
 
     async def connect(self):
         import websockets
@@ -440,8 +443,14 @@ class ElevenLabsProvider:
         log.info(f"[{self._call_id}] ElevenLabs WebSocket connected (init deferred until media stream ready)")
 
     async def send_audio(self, mulaw_bytes: bytes):
-        """Send mulaw 8kHz audio directly — agent configured for ulaw_8000."""
-        b64 = base64.b64encode(mulaw_bytes).decode("utf-8")
+        """Send mulaw 8kHz audio — convert to PCM 16kHz for ElevenLabs input."""
+        try:
+            import audioop_lts as audioop
+        except ImportError:
+            import audioop
+        pcm_8k = audioop.ulaw2lin(mulaw_bytes, 2)
+        pcm_16k, self._ratecv_state_up = audioop.ratecv(pcm_8k, 2, 1, 8000, 16000, self._ratecv_state_up)
+        b64 = base64.b64encode(pcm_16k).decode("utf-8")
         await self._ws.send(json.dumps({"user_audio_chunk": b64}))
 
     async def flush_audio(self):
