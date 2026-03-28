@@ -679,14 +679,25 @@ def _verify_twilio_signature(request: Request, form: dict):
 #  API ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_error_log = []  # In-memory error log for debugging
+_error_log = []  # In-memory error log (also persisted to Supabase)
 
 def _log_error(call_id, msg):
     entry = f"[{datetime.now(timezone.utc).isoformat()[:19]}] [{call_id}] {msg}"
     _error_log.append(entry)
-    if len(_error_log) > 100:
+    if len(_error_log) > 200:
         _error_log.pop(0)
     log.error(f"[{call_id}] {msg}")
+    # Persist to Supabase (fire-and-forget, don't block)
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            import requests as _req
+            _req.post(f"{SUPABASE_URL}/rest/v1/gemini_call_logs",
+                json={"call_id": str(call_id), "message": msg[:2000]},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                         "Content-Type": "application/json", "Prefer": "return=minimal"},
+                timeout=2)
+        except Exception:
+            pass  # Don't let logging failures break calls
 
 
 @app.get("/health")
@@ -697,7 +708,24 @@ async def health():
 @app.get("/debug/errors")
 async def debug_errors(request: Request):
     _verify_secret(request)
-    return {"errors": _error_log[-50:]}
+    # Combine in-memory (current session) + Supabase (persisted across restarts)
+    persisted = []
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        try:
+            import requests as _req
+            r = _req.get(f"{SUPABASE_URL}/rest/v1/gemini_call_logs",
+                params={"select": "call_id,message,created_at", "order": "created_at.desc", "limit": "100"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                timeout=5)
+            if r.ok:
+                for row in reversed(r.json()):
+                    ts = row.get("created_at", "")[:19]
+                    persisted.append(f"[{ts}] [{row.get('call_id','')}] {row.get('message','')}")
+        except Exception:
+            pass
+    # Merge: persisted first, then in-memory (may overlap but that's fine)
+    all_errors = persisted[-100:]
+    return {"errors": all_errors}
 
 
 @app.get("/debug/active-calls")
