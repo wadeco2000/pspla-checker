@@ -166,17 +166,33 @@ class GeminiProvider:
                                  types.EndSensitivity.END_SENSITIVITY_HIGH)
         silence_ms = int(settings.get("silence_duration_ms", 500))
 
-        # Add language hint to system instruction (Gemini doesn't support languageCodes on AudioTranscriptionConfig)
+        # Add language/accent hint to system instruction
         lang = settings.get("language", "en")
-        lang_hint = f"\n\nThe caller is speaking {lang}. Listen and respond in this language." if lang != "en" else ""
+        _accent_hints = {
+            "en-NZ": "The caller has a New Zealand accent. Interpret words accordingly (e.g. 'fush and chups' = fish and chips, 'six' may sound like 'sux', 'pen' like 'pin').",
+            "en-AU": "The caller has an Australian accent. Interpret words accordingly (e.g. 'today' may sound like 'to-die', rising intonation on statements is normal).",
+            "en-GB": "The caller has a British accent.",
+            "en-US": "The caller has an American accent.",
+        }
+        if lang in _accent_hints:
+            lang_hint = "\n\n" + _accent_hints[lang]
+        elif lang != "en":
+            lang_hint = f"\n\nThe caller is speaking {lang}. Listen and respond in this language."
+        else:
+            lang_hint = ""
+
+        strict_hint = ""
+        if settings.get("strict_mode"):
+            strict_hint = "\n\nSTRICT MODE: You must ONLY use information from the reference documents and knowledge base provided above. If the caller asks something not covered in your reference materials, say 'I don't have that information in my reference materials.' Do NOT use general knowledge to answer questions."
 
         config = types.LiveConnectConfig(
             response_modalities=[types.Modality.AUDIO],
             system_instruction=types.Content(
                 parts=[types.Part(text=self._call.get("system_instruction", "You are a helpful AI assistant.")
                        + "\n\nIMPORTANT: You are on a live phone call. Start speaking immediately — introduce yourself right away without waiting for the other person to speak first."
-                       + "\n\nCRITICAL TRANSCRIPTION RULES: This is a phone call over 8kHz telephony audio. The caller is speaking English. ALL transcription MUST be in English/Latin script only — NEVER output Chinese, Japanese, Korean, Arabic, or other non-Latin characters in transcriptions. If audio is unclear, transcribe your best guess in English or mark as [inaudible]. Prefer common English names and words over unusual interpretations (e.g. 'John' not 'jump', 'Tuesday' not random syllables)."
-                       + lang_hint)]
+                       + "\n\nCRITICAL TRANSCRIPTION RULES: This is a phone call over 8kHz telephony audio. ALL transcription MUST be in English/Latin script only — NEVER output Chinese, Japanese, Korean, Arabic, or other non-Latin characters in transcriptions. If audio is unclear, transcribe your best guess in English or mark as [inaudible]. Prefer common English names and words over unusual interpretations (e.g. 'John' not 'jump', 'Tuesday' not random syllables)."
+                       + lang_hint
+                       + strict_hint)]
             ),
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
@@ -331,12 +347,17 @@ class OpenAIProvider:
                      "de": "German", "zh": "Chinese", "ja": "Japanese", "ko": "Korean", "hi": "Hindi"
                      }.get(language, "English")
 
+        strict_hint = ""
+        if settings.get("strict_mode"):
+            strict_hint = "\n\nSTRICT MODE: You must ONLY use information from the reference documents and knowledge base provided above. If the caller asks something not covered in your reference materials, say 'I don't have that information in my reference materials.' Do NOT use general knowledge to answer questions."
+
         session_config = {
             "type": "session.update",
             "session": {
                 "instructions": self._call.get("system_instruction", "You are a helpful AI assistant.")
                     + f"\n\nIMPORTANT: You are on a live phone call. You MUST speak in {lang_name} only. Start speaking immediately — introduce yourself right away without waiting for the other person to speak first."
-                    + "\n\nALL transcription MUST be in English/Latin script only — NEVER output non-Latin characters.",
+                    + "\n\nALL transcription MUST be in English/Latin script only — NEVER output non-Latin characters."
+                    + strict_hint,
                 "modalities": ["audio", "text"],
                 "voice": self._call.get("voice_name", "coral"),
                 "input_audio_format": "g711_ulaw",
@@ -520,7 +541,10 @@ class ElevenLabsProvider:
 
             # Use knowledge base prompt if selected, otherwise agent's own prompt
             if prompt_source == "knowledgebase" and system_instruction:
-                overrides["agent"]["prompt"] = {"prompt": system_instruction}
+                strict_suffix = ""
+                if settings.get("strict_mode"):
+                    strict_suffix = "\n\nSTRICT MODE: You must ONLY use information from the reference documents and knowledge base provided above. If the caller asks something not covered in your reference materials, say 'I don't have that information in my reference materials.' Do NOT use general knowledge to answer questions."
+                overrides["agent"]["prompt"] = {"prompt": system_instruction + strict_suffix}
                 overrides["agent"]["language"] = language
 
             if not has_agent:

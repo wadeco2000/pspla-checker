@@ -185,7 +185,7 @@ def gemini_make_call():
                 use_rag = kb.get("rag_enabled", False)
                 ai_provider = settings.get("ai_provider", "gemini")
                 if ai_provider == "elevenlabs":
-                    el_rag_mode = kb.get("elevenlabs_rag_mode", "elevenlabs")
+                    el_rag_mode = settings.get("elevenlabs_rag_source") or kb.get("elevenlabs_rag_mode", "elevenlabs")
                     if el_rag_mode != "inhouse":
                         use_rag = False  # ElevenLabs handles its own KB
 
@@ -206,6 +206,17 @@ def gemini_make_call():
     # Pass RAG info to call server for multi-turn search
     if kb_id and use_rag:
         settings["rag_kb_id"] = kb_id
+
+    # Log RAG status for debugging
+    _rag_debug = {
+        "rag_enabled": use_rag,
+        "rag_source": settings.get("elevenlabs_rag_source", "n/a") if settings.get("ai_provider") == "elevenlabs" else "inhouse",
+        "precomputed_context_chars": len(data.get("rag_context", "") or ""),
+        "rag_kb_id": settings.get("rag_kb_id"),
+        "strict_mode": settings.get("strict_mode", False),
+    }
+    import logging as _logging
+    _logging.getLogger(__name__).info(f"RAG debug: {_rag_debug}")
 
     # Call the FastAPI server to initiate the call
     try:
@@ -235,7 +246,7 @@ def gemini_make_call():
                     "knowledge_base_id": kb_id,
                     "status": "initiated",
                     "triggered_by": session.get("email", "unknown"),
-                    "notes": json.dumps({"ai_provider": settings.get("ai_provider", "gemini")}),
+                    "notes": json.dumps({"ai_provider": settings.get("ai_provider", "gemini"), "rag": _rag_debug}),
                 },
                 headers={**_sb_headers(), "Prefer": "return=minimal"}, timeout=10)
         except Exception:
@@ -1115,6 +1126,13 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                 </label>
                 <span style="font-size:10px;color:#888;">When enabled, the AI's internal reasoning is included in the live transcript. Useful for debugging knowledge base prompts but adds noise to the transcript.</span>
             </div>
+            <div>
+                <label class="form-label">Strict Mode</label>
+                <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;">
+                    <input type="checkbox" id="set-strict-mode"> Only answer from reference documents
+                </label>
+                <span style="font-size:10px;color:#888;">When enabled, the AI will only use information from the knowledge base and uploaded documents. It will decline to answer questions not covered by your materials.</span>
+            </div>
         </div>
         <div data-provider="gemini" style="margin-top:12px;padding:8px;background:#fff3cd;border-radius:6px;font-size:11px;color:#856404;">
             <i class="fa-solid fa-info-circle"></i> <strong>Affective Dialog</strong> and <strong>Proactive Audio</strong> require Gemini 2.5 Flash Live (not available on 3.1). These features will be added when model support is confirmed.
@@ -1422,6 +1440,7 @@ function getCallSettings() {
         start_sensitivity: document.getElementById('set-start-sensitivity').value,
         end_sensitivity: document.getElementById('set-end-sensitivity').value,
         silence_duration_ms: parseInt(document.getElementById('set-silence-ms').value) || 500,
+        strict_mode: document.getElementById('set-strict-mode').checked,
     };
     // Add ElevenLabs agent ID and prompt source if selected
     if (settings.ai_provider === 'elevenlabs') {
@@ -1429,6 +1448,8 @@ function getCallSettings() {
         if (agentId) settings.elevenlabs_agent_id = agentId;
         var promptSource = document.querySelector('input[name="el-prompt-source"]:checked');
         settings.elevenlabs_prompt_source = promptSource ? promptSource.value : 'agent';
+        var ragSource = document.querySelector('input[name="el-rag-source"]:checked');
+        settings.elevenlabs_rag_source = ragSource ? ragSource.value : 'elevenlabs';
     }
     return settings;
 }
@@ -1523,6 +1544,7 @@ function _savePrefs() {
     localStorage.setItem('gemini_start_sensitivity', document.getElementById('set-start-sensitivity').value);
     localStorage.setItem('gemini_silence_ms', document.getElementById('set-silence-ms').value);
     localStorage.setItem('gemini_include_thoughts', document.getElementById('set-include-thoughts').checked);
+    localStorage.setItem('gemini_strict_mode', document.getElementById('set-strict-mode').checked);
     var ragSource = document.querySelector('input[name="el-rag-source"]:checked');
     if (ragSource) localStorage.setItem('gemini_el_rag_source', ragSource.value);
 }
@@ -1558,6 +1580,8 @@ function _restorePrefs() {
     if (savedSilence) document.getElementById('set-silence-ms').value = savedSilence;
     var savedThoughts = localStorage.getItem('gemini_include_thoughts');
     if (savedThoughts === 'true') document.getElementById('set-include-thoughts').checked = true;
+    var savedStrict = localStorage.getItem('gemini_strict_mode');
+    if (savedStrict === 'true') document.getElementById('set-strict-mode').checked = true;
 }
 _restorePrefs();
 
