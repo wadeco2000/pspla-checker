@@ -939,12 +939,19 @@ async def handle_inbound_call(request: Request):
     if kb and kb.get("rag_enabled"):
         settings["rag_kb_id"] = kb_id
 
+    # Add greeting instruction
+    greeting = config.get("greeting", "").strip()
+    if greeting:
+        system_instruction += f"\n\nIMPORTANT: You are receiving an inbound phone call. When the call connects, immediately say: \"{greeting}\" — then wait for the caller to respond."
+    else:
+        system_instruction += "\n\nIMPORTANT: You are receiving an inbound phone call. Greet the caller warmly and ask how you can help."
+
     # Add strict mode to prompt
     if config.get("strict_mode"):
         system_instruction += "\n\nSTRICT MODE: You must ONLY use information from the reference documents and knowledge base provided above. If the caller asks something not covered in your reference materials, say 'I don't have that information in my reference materials.' Do NOT use general knowledge to answer questions."
 
     call_id = str(uuid.uuid4())[:12]
-    _log_error(call_id, f"Inbound call from {caller} — provider: {settings['ai_provider']}, kb: {kb_id}")
+    _log_error(call_id, f"Inbound call from {caller} — provider: {settings['ai_provider']}, kb: {kb_id}, rag_enabled: {kb.get('rag_enabled') if kb else False}, greeting: {greeting[:50] if greeting else 'none'}, prompt_len: {len(system_instruction)}")
 
     # Create call state (same structure as outbound)
     _active_calls[call_id] = {
