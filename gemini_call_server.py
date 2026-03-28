@@ -285,11 +285,16 @@ class OpenAIProvider:
         eagerness = eagerness_map.get(settings.get("end_sensitivity", "HIGH").upper(), "medium")
         language = settings.get("language", "en")
 
+        lang_name = {"en": "English", "en-NZ": "English", "en-AU": "English", "en-GB": "English",
+                     "en-US": "English", "mi": "Te Reo Māori", "es": "Spanish", "fr": "French",
+                     "de": "German", "zh": "Chinese", "ja": "Japanese", "ko": "Korean", "hi": "Hindi"
+                     }.get(language, "English")
+
         session_config = {
             "type": "session.update",
             "session": {
                 "instructions": self._call.get("system_instruction", "You are a helpful AI assistant.")
-                    + "\n\nIMPORTANT: You are on a live phone call. Start speaking immediately — introduce yourself right away without waiting for the other person to speak first."
+                    + f"\n\nIMPORTANT: You are on a live phone call. You MUST speak in {lang_name} only. Start speaking immediately — introduce yourself right away without waiting for the other person to speak first."
                     + "\n\nALL transcription MUST be in English/Latin script only — NEVER output non-Latin characters.",
                 "modalities": ["audio", "text"],
                 "voice": self._call.get("voice_name", "coral"),

@@ -565,7 +565,7 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                 <span style="font-size:10px;color:#888;">When enabled, the AI's internal reasoning is included in the live transcript. Useful for debugging knowledge base prompts but adds noise to the transcript.</span>
             </div>
         </div>
-        <div style="margin-top:12px;padding:8px;background:#fff3cd;border-radius:6px;font-size:11px;color:#856404;">
+        <div data-provider="gemini" style="margin-top:12px;padding:8px;background:#fff3cd;border-radius:6px;font-size:11px;color:#856404;">
             <i class="fa-solid fa-info-circle"></i> <strong>Affective Dialog</strong> and <strong>Proactive Audio</strong> require Gemini 2.5 Flash Live (not available on 3.1). These features will be added when model support is confirmed.
         </div>
     </div>
