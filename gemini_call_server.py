@@ -407,15 +407,13 @@ class OpenAIProvider:
 
 
 class ElevenLabsProvider:
-    """ElevenLabs Conversational AI voice provider. Audio: PCM 16kHz in/out."""
+    """ElevenLabs Conversational AI voice provider. Audio: ulaw 8kHz (zero conversion)."""
     name = "elevenlabs"
 
     def __init__(self, call: dict, call_id: str):
         self._call = call
         self._call_id = call_id
         self._ws = None
-        self._ratecv_state_up = None    # 8kHz → 16kHz
-        self._ratecv_state_down = None  # 16kHz → 8kHz
 
     async def connect(self):
         import websockets
@@ -483,15 +481,8 @@ class ElevenLabsProvider:
             _log_error(self._call_id, f"ElevenLabs unexpected first message: {json.dumps(msg)[:200]}")
 
     async def send_audio(self, mulaw_bytes: bytes):
-        """Send mulaw 8kHz audio — convert to PCM 16kHz for ElevenLabs."""
-        try:
-            import audioop_lts as audioop
-        except ImportError:
-            import audioop
-        # mulaw 8kHz → PCM 16-bit 8kHz → resample to 16kHz
-        pcm_8k = audioop.ulaw2lin(mulaw_bytes, 2)
-        pcm_16k, self._ratecv_state_up = audioop.ratecv(pcm_8k, 2, 1, 8000, 16000, self._ratecv_state_up)
-        b64 = base64.b64encode(pcm_16k).decode("utf-8")
+        """Send mulaw 8kHz audio directly — agent configured for ulaw_8000."""
+        b64 = base64.b64encode(mulaw_bytes).decode("utf-8")
         await self._ws.send(json.dumps({"user_audio_chunk": b64}))
 
     async def flush_audio(self):
@@ -510,11 +501,6 @@ class ElevenLabsProvider:
 
     async def receive_loop(self, on_audio, on_ai_transcript, on_caller_transcript, on_turn_complete, on_interrupted):
         """Main receive loop. Parses ElevenLabs Conversational AI events."""
-        try:
-            import audioop_lts as audioop
-        except ImportError:
-            import audioop
-
         _first_audio = False
         async for raw in self._ws:
             event = json.loads(raw)
@@ -526,13 +512,10 @@ class ElevenLabsProvider:
                     if not _first_audio:
                         _first_audio = True
                         _log_error(self._call_id, "PERF: first ElevenLabs audio received")
-                    # PCM 16kHz from ElevenLabs → resample to 8kHz → mulaw for Twilio
-                    pcm_16k = base64.b64decode(audio_b64)
-                    if len(pcm_16k) > 0:
-                        pcm_8k, self._ratecv_state_down = audioop.ratecv(pcm_16k, 2, 1, 16000, 8000, self._ratecv_state_down)
-                        mulaw_8k = audioop.lin2ulaw(pcm_8k, 2)
-                        if len(mulaw_8k) > 0:
-                            await on_audio(mulaw_8k)
+                    # Already ulaw 8kHz — pass straight through to Twilio
+                    mulaw_bytes = base64.b64decode(audio_b64)
+                    if len(mulaw_bytes) > 0:
+                        await on_audio(mulaw_bytes)
 
             elif t == "user_transcript":
                 transcript = event.get("user_transcription_event", {}).get("user_transcript", "")
