@@ -440,36 +440,37 @@ class ElevenLabsProvider:
         self._ws = await websockets.connect(signed_url)
         log.info(f"[{self._call_id}] ElevenLabs WebSocket connected")
 
-        # Send initiation with overrides (now enabled in agent dashboard)
+        # Send initiation — when agent is selected, send NO overrides
+        # (let the agent use its own voice, prompt, language from dashboard).
+        # Only override when no agent or when knowledge base provides a prompt.
         system_instruction = self._call.get("system_instruction", "")
         settings = self._call.get("settings", {})
-        language = settings.get("language", "en")
-
-        config = {"type": "conversation_initiation_client_data"}
-        overrides = {}
-
-        # Override prompt if knowledge base selected
-        if system_instruction:
-            overrides["agent"] = {
-                "prompt": {"prompt": system_instruction},
-                "language": language,
-            }
-
-        # Only override voice if NO agent is selected (agent has its own voice)
         has_agent = bool(settings.get("elevenlabs_agent_id"))
-        voice_id = self._call.get("voice_name", "")
-        if not has_agent and voice_id and len(voice_id) > 15:
-            overrides["tts"] = {"voice_id": voice_id}
 
-        if overrides:
-            config["conversation_config_override"] = overrides
+        # Minimal init — no overrides = agent uses its own config
+        config = {"type": "conversation_initiation_client_data"}
 
-        # Pass context as dynamic variables too
+        if not has_agent:
+            # No agent selected — override voice and prompt from our UI
+            language = settings.get("language", "en")
+            overrides = {}
+            voice_id = self._call.get("voice_name", "")
+            if voice_id and len(voice_id) > 15:
+                overrides["tts"] = {"voice_id": voice_id}
+            if system_instruction:
+                overrides["agent"] = {
+                    "prompt": {"prompt": system_instruction},
+                    "language": language,
+                }
+            if overrides:
+                config["conversation_config_override"] = overrides
+
+        # Dynamic variables work without triggering override issues
         if system_instruction:
             config["dynamic_variables"] = {"context": system_instruction}
 
+        _log_error(self._call_id, f"ElevenLabs init: has_agent={has_agent}, has_overrides={'conversation_config_override' in config}")
         await self._ws.send(json.dumps(config))
-        _log_error(self._call_id, f"ElevenLabs init sent: voice_id={voice_id}, has_prompt={bool(system_instruction)}")
 
         # Wait for conversation_initiation_metadata
         msg = json.loads(await self._ws.recv())
