@@ -773,11 +773,17 @@ async def media_stream(websocket: WebSocket, call_id: str):
             _ai_transcript_buffer.append(text)
 
         async def on_caller_transcript(text: str):
-            _caller_transcript_buffer.append(text)
+            """Caller transcript — flush immediately for faster display."""
+            ts = datetime.now(timezone.utc).isoformat()
+            call["transcript"].append({"speaker": "caller", "text": text, "timestamp": ts})
+            await _broadcast_transcript(call_id, {
+                "type": "transcript", "speaker": "caller", "text": text, "timestamp": ts
+            })
 
         async def on_turn_complete():
             _perf["turns"] += 1
             _log_error(call_id, f"PERF: turn {_perf['turns']} complete")
+            # Only AI transcript is buffered (arrives as fragments) — flush it now
             if _ai_transcript_buffer:
                 full_text = " ".join(_ai_transcript_buffer)
                 ts = datetime.now(timezone.utc).isoformat()
@@ -786,14 +792,6 @@ async def media_stream(websocket: WebSocket, call_id: str):
                     "type": "transcript", "speaker": "ai", "text": full_text, "timestamp": ts
                 })
                 _ai_transcript_buffer.clear()
-            if _caller_transcript_buffer:
-                full_text = " ".join(_caller_transcript_buffer)
-                ts = datetime.now(timezone.utc).isoformat()
-                call["transcript"].append({"speaker": "caller", "text": full_text, "timestamp": ts})
-                await _broadcast_transcript(call_id, {
-                    "type": "transcript", "speaker": "caller", "text": full_text, "timestamp": ts
-                })
-                _caller_transcript_buffer.clear()
 
         async def on_interrupted():
             if stream_sid:

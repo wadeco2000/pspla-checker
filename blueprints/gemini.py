@@ -1160,10 +1160,15 @@ function showTranscript(callSid) {
         var html = '';
         if (typeof transcript === 'string') { try { transcript = JSON.parse(transcript); } catch(e) { transcript = []; } }
         if (Array.isArray(transcript) && transcript.length) {
+            // Sort by timestamp (oldest first)
+            transcript.sort(function(a, b) {
+                return (a.timestamp || '').localeCompare(b.timestamp || '');
+            });
             transcript.forEach(function(t){
                 var cls = t.speaker === 'ai' ? 'ai' : 'caller';
                 var label = t.speaker === 'ai' ? '🤖 AI' : '👤 Caller';
-                html += '<div class="transcript-line ' + cls + '"><span class="speaker">' + label + ':</span>' + esc(t.text||'') + '</div>';
+                var time = t.timestamp ? new Date(t.timestamp).toLocaleTimeString('en-NZ', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '';
+                html += '<div class="transcript-line ' + cls + '"><span class="time">' + time + '</span><span class="speaker">' + label + ':</span>' + esc(t.text||'') + '</div>';
             });
         } else {
             html = '<div class="empty-state" style="color:#666;">No transcript available.</div>';
