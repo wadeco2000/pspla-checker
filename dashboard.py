@@ -18673,11 +18673,11 @@ setTimeout(function(){
             if (sel.options[i].value === '{{ default_payment_link }}') {
                 sel.value = '{{ default_payment_link }}';
                 onLinkChange();
-                fetchSignups();
+                loadStored('{{ default_payment_link }}');
                 return;
             }
         }
-        fetchSignups();
+        loadStored('{{ default_payment_link }}');
     }
 }, 500);
 {% endif %}
