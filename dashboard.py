@@ -16697,6 +16697,22 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         .btn-row-edit:hover{background:#3498db;color:white;} .btn-row-del:hover{background:#e74c3c;color:white;}
         .col-actions{position:sticky;right:0;background:#fff;box-shadow:-2px 0 4px rgba(0,0,0,0.05);z-index:1;}
         .data-row:hover .col-actions{background:#f8f9fa;}
+        #signups-table{table-layout:fixed;width:100%;}
+        #signups-table th,#signups-table td{overflow:hidden;text-overflow:ellipsis;padding:6px 4px;}
+        #signups-table th:nth-child(1){width:30px;}
+        #signups-table th:nth-child(2){width:85px;}
+        #signups-table th:nth-child(3){width:80px;}
+        #signups-table th:nth-child(4){width:130px;}
+        #signups-table th:nth-child(5){width:90px;}
+        #signups-table th:nth-child(6){width:100px;}
+        #signups-table th:nth-child(7){width:45px;}
+        #signups-table th:nth-child(8){width:80px;}
+        #signups-table th:nth-child(9){width:70px;}
+        #signups-table th:nth-child(10){width:70px;}
+        #signups-table th:nth-child(11){width:70px;}
+        #signups-table th:nth-child(12){width:80px;}
+        #signups-table th:nth-child(13){width:55px;}
+        #signups-table td{white-space:normal;word-wrap:break-word;font-size:11px;}
         .btn-campaign{background:#c0392b;color:white;}
         .campaign-panel{display:none;background:white;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.08);padding:18px;margin-bottom:18px;}
         .campaign-panel.active{display:block;}
