@@ -15074,6 +15074,38 @@ def _validate_payment_link(pl):
     return None
 
 
+@app.route("/api/club-fitness/send-booking-email", methods=["POST"])
+def club_fitness_send_booking_email():
+    """Send a booking reminder email to a challenge signup."""
+    data = request.json or {}
+    to_email = data.get("email", "").strip()
+    subject = data.get("subject", "").strip()
+    body = data.get("body", "").strip()
+    if not to_email or not subject or not body:
+        return jsonify({"ok": False, "error": "Email, subject, and body required"}), 400
+    if not CF_SMTP_USER or not CF_SMTP_PASS:
+        return jsonify({"ok": False, "error": "CF_SMTP not configured"}), 500
+    try:
+        import smtplib
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = f"{CF_SMTP_FROM_NAME} <{CF_SMTP_USER}>"
+        msg["To"] = to_email
+        msg.attach(MIMEText(body, "plain"))
+        html_body = body.replace("\n", "<br>")
+        msg.attach(MIMEText(f"<html><body style='font-family:Arial,sans-serif;font-size:14px;color:#333;'>{html_body}</body></html>", "html"))
+        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(CF_SMTP_USER, CF_SMTP_PASS)
+            server.sendmail(CF_SMTP_USER, to_email, msg.as_string())
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 @app.route("/api/club-fitness/signups")
 def club_fitness_signups():
     """Fetch signups from Stripe, auto-sync to Supabase, return merged data with custom columns preserved."""
@@ -17168,16 +17200,16 @@ function toggleCharts() { updateCharts(); }
 var _unmatchedAppts = [];
 
 function renderApptCell(r) {
-    if (!r.bookafy_match_type) return '<button class="appt-match-btn" onclick="event.stopPropagation();showManualMatch(\'' + esc(r.stripe_session_id) + '\',\'' + esc(r.card_name||'').replace(/'/g,"\\'") + '\')"><i class="fa-solid fa-calendar-plus"></i> Match</button>';
+    if (!r.bookafy_match_type) return '<button class="appt-match-btn" onclick="event.stopPropagation();showManualMatch(\'' + esc(r.stripe_session_id) + '\',\'' + esc(r.card_name||'').replace(/'/g,"\\'") + '\',\'' + esc(r.customer_email||'').replace(/'/g,"\\'") + '\',\'' + esc(r.customer_phone||'').replace(/'/g,"\\'") + '\')"><i class="fa-solid fa-calendar-plus"></i> Match</button>';
     var dt = r.bookafy_appointment_date ? new Date(r.bookafy_appointment_date).toLocaleString('en-NZ', {dateStyle:'medium',timeStyle:'short'}) : '';
     if (r.bookafy_match_type === 'email') {
         return '<span class="appt-match appt-email" title="Email match"><i class="fa-solid fa-circle-check"></i> ' + esc(dt) + '</span>';
     } else if (r.bookafy_match_type === 'ai') {
         return '<span class="appt-match appt-ai" title="AI match"><i class="fa-solid fa-robot"></i> ' + esc(dt) +
-               '</span><span class="appt-change" onclick="event.stopPropagation();showManualMatch(\'' + esc(r.stripe_session_id) + '\',\'' + esc(r.card_name||'') + '\')">change</span>';
+               '</span><span class="appt-change" onclick="event.stopPropagation();showManualMatch(\'' + esc(r.stripe_session_id) + '\',\'' + esc(r.card_name||'') + '\',\'' + esc(r.customer_email||'') + '\',\'' + esc(r.customer_phone||'') + '\')">change</span>';
     } else if (r.bookafy_match_type === 'manual') {
         return '<span class="appt-match appt-manual" title="Manual match"><i class="fa-solid fa-user-check"></i> ' + esc(dt) +
-               '</span><span class="appt-change" onclick="event.stopPropagation();showManualMatch(\'' + esc(r.stripe_session_id) + '\',\'' + esc(r.card_name||'') + '\')">change</span>';
+               '</span><span class="appt-change" onclick="event.stopPropagation();showManualMatch(\'' + esc(r.stripe_session_id) + '\',\'' + esc(r.card_name||'') + '\',\'' + esc(r.customer_email||'') + '\',\'' + esc(r.customer_phone||'') + '\')">change</span>';
     }
     return '';
 }
@@ -17208,9 +17240,14 @@ function checkBookings() {
     }).catch(function(e){ msg('Error: ' + e); });
 }
 
-function showManualMatch(sid, name) {
+function showManualMatch(sid, name, email, phone) {
     var html = '<h3><i class="fa-solid fa-calendar-check" style="color:#e67e22"></i> Match Appointment</h3>';
     html += '<p style="font-size:13px;color:#555;">Matching: <strong>' + esc(name.replace('[CASH] ','')) + '</strong></p>';
+    if (email) html += '<p style="font-size:12px;color:#555;margin:2px 0;"><i class="fa-solid fa-envelope" style="color:#888;width:16px;"></i> ' + esc(email) + '</p>';
+    if (phone) html += '<p style="font-size:12px;color:#555;margin:2px 0;"><i class="fa-solid fa-phone" style="color:#888;width:16px;"></i> ' + esc(phone) + '</p>';
+    if (email) {
+        html += '<button class="btn" style="background:#3498db;color:white;font-size:11px;margin:8px 0;" onclick="showBookingEmail(\'' + esc(email).replace(/'/g,"\\'") + '\',\'' + esc(name.replace('[CASH] ','')).replace(/'/g,"\\'") + '\')"><i class="fa-solid fa-envelope"></i> Send Booking Reminder</button>';
+    }
     html += '<button class="btn btn-sm" style="background:#e74c3c;color:white;margin-bottom:12px;font-size:11px;" onclick="clearBookingMatch(\'' + esc(sid) + '\')"><i class="fa-solid fa-times"></i> Remove Match</button>';
     if (!_unmatchedAppts.length) {
         html += '<p style="color:#888;font-size:12px;">No unmatched appointments available. Run Check Bookings first.</p>';
@@ -17227,6 +17264,37 @@ function showManualMatch(sid, name) {
     html += '<div class="modal-btns"><button class="btn btn-cancel" onclick="closeModal(\'match-modal\')">Cancel</button></div>';
     document.getElementById('match-modal-content').innerHTML = html;
     document.getElementById('match-modal').classList.add('active');
+}
+
+function showBookingEmail(email, name) {
+    var firstName = name.split(' ')[0];
+    var defaultSubject = 'Book your Fit3D Scan - Health Challenge';
+    var defaultBody = 'Hey ' + firstName + ',\\n\\nI see you\\'ve signed on for our challenge, but I can\\'t see that you\\'ve booked your first Fit3D Scan. You can do this here: https://clubfitnessnz.bookafy.com/mat-health-challenges?locale=en\\n\\nCheers!';
+    var html = '<h3><i class="fa-solid fa-envelope" style="color:#3498db"></i> Send Email</h3>';
+    html += '<p style="font-size:12px;color:#555;">To: <strong>' + esc(email) + '</strong></p>';
+    html += '<div style="margin-bottom:8px;"><label style="font-size:11px;font-weight:600;color:#555;">Subject:</label>';
+    html += '<input type="text" id="booking-email-subject" value="' + esc(defaultSubject) + '" style="width:100%;font-size:12px;"></div>';
+    html += '<div style="margin-bottom:8px;"><label style="font-size:11px;font-weight:600;color:#555;">Message:</label>';
+    html += '<textarea id="booking-email-body" rows="6" style="width:100%;font-size:12px;">' + defaultBody.replace(/\\n/g, '\n') + '</textarea></div>';
+    html += '<div class="modal-btns">';
+    html += '<button class="btn btn-cancel" onclick="closeModal(\'match-modal\')">Cancel</button>';
+    html += '<button class="btn" style="background:#27ae60;color:white;" onclick="sendBookingEmail(\'' + esc(email).replace(/'/g,"\\'") + '\')"><i class="fa-solid fa-paper-plane"></i> Send</button>';
+    html += '</div>';
+    document.getElementById('match-modal-content').innerHTML = html;
+}
+
+function sendBookingEmail(email) {
+    var subject = document.getElementById('booking-email-subject').value;
+    var body = document.getElementById('booking-email-body').value;
+    if (!subject || !body) { alert('Subject and message required.'); return; }
+    fetch('/api/club-fitness/send-booking-email', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({email: email, subject: subject, body: body})
+    }).then(r=>r.json()).then(function(d) {
+        if (!d.ok) { alert('Error: ' + (d.error||'Unknown')); return; }
+        msg('Email sent to ' + email);
+        closeModal('match-modal');
+    }).catch(function(e) { alert('Failed: ' + e); });
 }
 
 function saveManualMatch(sid, aid, apptDate) {
