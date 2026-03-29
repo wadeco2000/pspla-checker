@@ -123,10 +123,11 @@ def gemini_knowledge_bases():
         voice_name = "Kore"
 
     rag_enabled = bool(data.get("rag_enabled", False))
+    ai_provider = data.get("ai_provider") or None
 
     try:
         payload = {"name": name, "content": content, "voice_name": voice_name,
-                   "rag_enabled": rag_enabled,
+                   "rag_enabled": rag_enabled, "ai_provider": ai_provider,
                    "updated_at": datetime.now(timezone.utc).isoformat()}
         headers = {**_sb_headers(), "Prefer": "return=representation"}
         if kb_id:
@@ -2029,6 +2030,15 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                 <input type="text" id="kb-name" placeholder="e.g. Alarm Monitoring Script">
             </div>
             <div class="form-row">
+                <span class="form-label">AI Provider:</span>
+                <select id="kb-ai-provider" style="min-width:180px;">
+                    <option value="">— Use default from Settings —</option>
+                    <option value="gemini">Google Gemini</option>
+                    <option value="openai">OpenAI Realtime</option>
+                    <option value="elevenlabs">ElevenLabs Conversational AI</option>
+                </select>
+            </div>
+            <div class="form-row">
                 <span class="form-label">Voice:</span>
                 <select id="kb-voice">
                     <option value="Kore">Kore (female, calm)</option>
@@ -2206,6 +2216,7 @@ function showKbModal(editing) {
     document.getElementById('kb-name').value = '';
     document.getElementById('kb-content').value = '';
     document.getElementById('kb-voice').value = 'Kore';
+    document.getElementById('kb-ai-provider').value = '';
 
     document.getElementById('kb-rag-enabled').checked = false;
     loadKbDocChecklist(null);
@@ -2219,6 +2230,7 @@ function showKbModal(editing) {
         document.getElementById('kb-name').value = kb.name;
         document.getElementById('kb-content').value = kb.content;
         document.getElementById('kb-voice').value = kb.voice_name;
+        document.getElementById('kb-ai-provider').value = kb.ai_provider || '';
         document.getElementById('kb-rag-enabled').checked = kb.rag_enabled || false;
         loadKbDocChecklist(kb.id);
     }
@@ -2232,6 +2244,7 @@ function saveKb() {
         name: document.getElementById('kb-name').value,
         content: document.getElementById('kb-content').value,
         voice_name: document.getElementById('kb-voice').value,
+        ai_provider: document.getElementById('kb-ai-provider').value || null,
         rag_enabled: document.getElementById('kb-rag-enabled').checked,
     };
     if (_editingKbId) payload.id = _editingKbId;
@@ -2433,6 +2446,13 @@ function makeCall() {
     showStatus('Initiating call...', '');
     _savePrefs();
     var settings = getCallSettings();
+    // KB-level AI provider override
+    if (kbId) {
+        var kb = _knowledgeBases.find(function(k){ return k.id == kbId; });
+        if (kb && kb.ai_provider) {
+            settings.ai_provider = kb.ai_provider;
+        }
+    }
     var voice = document.getElementById('set-voice').value;
     var payload = {to_number: number, knowledge_base_id: kbId ? parseInt(kbId) : null, voice_name: voice, settings: settings};
     if (_cachedRagContext) payload.rag_context = _cachedRagContext;
