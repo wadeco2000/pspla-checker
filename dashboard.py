@@ -18040,23 +18040,31 @@ function showCleanModal() {
         _storedMappings = mapData.mappings || [];
         var gymMap = {}, goalMap = {};
         _storedMappings.forEach(function(m){ if(m.field==='gym') gymMap[m.raw_value]=m.clean_value; if(m.field==='goal') goalMap[m.raw_value]=m.clean_value; });
+        var unmappedGymCount = (valData.gyms||[]).filter(function(g){ return !gymMap[g.value]; }).length;
+        var unmappedGoalCount = (valData.goals||[]).filter(function(g){ return !goalMap[g.value]; }).length;
         var html = '<div class="mapping-section"><h4><i class="fa-solid fa-location-dot" style="color:#3498db"></i> Gym Names</h4>';
+        if (unmappedGymCount < (valData.gyms||[]).length) {
+            html += '<label class="filter-check" style="margin-bottom:8px;"><input type="checkbox" id="show-mapped-gyms" onchange="document.querySelectorAll(\'.gym-mapped-row\').forEach(function(el){el.style.display=document.getElementById(\'show-mapped-gyms\').checked?\'\':\'none\';})"> Show already mapped (' + ((valData.gyms||[]).length - unmappedGymCount) + ')</label>';
+        }
         (valData.gyms||[]).forEach(function(g,i){
             var existing = gymMap[g.value] || '';
             var suggested = existing || suggestGym(g.value);
             var isMapped = !!existing;
-            html += '<div class="mapping-row"><span class="mr-count">' + g.count + 'x</span><span class="mr-raw">' + esc(g.value) + '</span><span class="mr-arrow">→</span>';
+            html += '<div class="mapping-row' + (isMapped ? ' gym-mapped-row' : '') + '"' + (isMapped ? ' style="display:none"' : '') + '><span class="mr-count">' + g.count + 'x</span><span class="mr-raw">' + esc(g.value) + '</span><span class="mr-arrow">→</span>';
             html += '<span class="mr-clean"><input type="text" id="gym-map-' + i + '" data-raw="' + esc(g.value).replace(/"/g,'&quot;') + '" value="' + esc(suggested).replace(/"/g,'&quot;') + '" list="gym-suggestions"' + (isMapped ? ' class="mapped"' : '') + '></span></div>';
         });
         html += '<datalist id="gym-suggestions">';
         _knownGyms.forEach(function(g){ html += '<option value="' + esc(g) + '">'; });
         html += '</datalist></div>';
         html += '<div class="mapping-section"><h4><i class="fa-solid fa-weight-scale" style="color:#e67e22"></i> Weight Loss Goals</h4>';
+        if (unmappedGoalCount < (valData.goals||[]).length) {
+            html += '<label class="filter-check" style="margin-bottom:8px;"><input type="checkbox" id="show-mapped-goals" onchange="document.querySelectorAll(\'.goal-mapped-row\').forEach(function(el){el.style.display=document.getElementById(\'show-mapped-goals\').checked?\'\':\'none\';})"> Show already mapped (' + ((valData.goals||[]).length - unmappedGoalCount) + ')</label>';
+        }
         (valData.goals||[]).forEach(function(g,i){
             var existing = goalMap[g.value] || '';
             var suggested = existing || suggestGoal(g.value);
             var isMapped = !!existing;
-            html += '<div class="mapping-row"><span class="mr-count">' + g.count + 'x</span><span class="mr-raw">' + esc(g.value) + '</span><span class="mr-arrow">→</span>';
+            html += '<div class="mapping-row' + (isMapped ? ' goal-mapped-row' : '') + '"' + (isMapped ? ' style="display:none"' : '') + '><span class="mr-count">' + g.count + 'x</span><span class="mr-raw">' + esc(g.value) + '</span><span class="mr-arrow">→</span>';
             html += '<span class="mr-clean"><input type="text" id="goal-map-' + i + '" data-raw="' + esc(g.value).replace(/"/g,'&quot;') + '" value="' + esc(suggested).replace(/"/g,'&quot;') + '"' + (isMapped ? ' class="mapped"' : '') + '></span></div>';
         });
         html += '</div>';
