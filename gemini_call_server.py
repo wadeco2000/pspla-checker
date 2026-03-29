@@ -969,6 +969,17 @@ def _save_inbound_to_history(call_id, call_sid, caller, called, config):
         log.error(f"[{call_id}] Failed to save inbound history: {e}")
 
 
+@app.api_route("/api/inbound-fallback", methods=["GET", "POST"])
+async def inbound_fallback(request: Request):
+    """Fallback when the primary inbound handler fails."""
+    _log_error("fallback", "Inbound fallback triggered — primary handler failed")
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say voice="Polly.Amy">We are sorry, we are experiencing technical difficulties at the moment. Please try calling back shortly, or contact us during business hours. Thank you for your patience.</Say>
+</Response>"""
+    return Response(content=xml, media_type="application/xml")
+
+
 @app.api_route("/api/inbound-call", methods=["GET", "POST"])
 async def handle_inbound_call(request: Request):
     """Twilio webhook for incoming calls. Returns TwiML to connect to AI."""
