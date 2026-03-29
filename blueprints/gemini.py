@@ -1667,13 +1667,14 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- Outbound Call Settings -->
-    <div class="card settings-card">
-        <h2 class="settings-header" onclick="toggleSettingsCard('outbound')">
-            <i class="fa-solid fa-phone"></i> Outbound Call Settings
-            <i class="fa-solid fa-chevron-down collapse-icon" id="outbound-collapse-icon"></i>
-        </h2>
-        <div class="settings-body" id="outbound-settings-body">
+    <!-- Call Settings (Outbound + Inbound) -->
+    <div class="card">
+        <div style="display:flex;gap:8px;align-items:center;">
+            <button class="btn" id="btn-tab-outbound" style="background:#3498db;color:white;" onclick="showSettingsTab('outbound')"><i class="fa-solid fa-phone"></i> Outbound Settings</button>
+            <button class="btn" id="btn-tab-inbound" style="background:#95a5a6;color:white;" onclick="showSettingsTab('inbound')"><i class="fa-solid fa-phone-flip"></i> Inbound Settings <span id="inbound-status-badge" style="margin-left:4px;"></span></button>
+            <span id="settings-tab-label" style="margin-left:auto;font-size:11px;color:#888;"></span>
+        </div>
+        <div id="outbound-settings-body" style="display:none;margin-top:12px;">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
             <div>
                 <label class="form-label">AI Provider</label>
@@ -1806,8 +1807,7 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
         <div data-provider="gemini" style="margin-top:12px;padding:8px;background:#fff3cd;border-radius:6px;font-size:11px;color:#856404;">
             <i class="fa-solid fa-info-circle"></i> <strong>Affective Dialog</strong> and <strong>Proactive Audio</strong> require Gemini 2.5 Flash Live (not available on 3.1). These features will be added when model support is confirmed.
         </div>
-        </div><!-- /settings-body -->
-    </div><!-- /settings-card -->
+        </div><!-- /outbound-settings-body -->
 
     <!-- Active Call Panel (hidden until call active) -->
     <div class="card" id="active-call-panel" style="display:none;">
@@ -1882,14 +1882,7 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- Inbound Call Settings -->
-    <div class="card settings-card">
-        <h2 class="settings-header" onclick="toggleSettingsCard('inbound')">
-            <i class="fa-solid fa-phone-flip"></i> Inbound Call Settings
-            <span id="inbound-status-badge" style="margin-left:8px;"></span>
-            <i class="fa-solid fa-chevron-down collapse-icon" id="inbound-collapse-icon"></i>
-        </h2>
-        <div class="settings-body" id="inbound-settings-body">
+        <div id="inbound-settings-body" style="display:none;margin-top:12px;">
         <span style="font-size:11px;color:#888;">Configure how the AI handles incoming phone calls to your Twilio number.</span>
         <div id="inbound-config-container" style="margin-top:12px;">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px;">
@@ -1981,8 +1974,8 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                 <button class="btn" style="background:#27ae60;" onclick="saveInboundConfig()"><i class="fa-solid fa-save"></i> Save Inbound Config</button>
             </div>
         </div>
-        </div><!-- /settings-body -->
-    </div><!-- /settings-card -->
+        </div><!-- /inbound-settings-body -->
+    </div><!-- /combined settings card -->
 
     <!-- Document Library -->
     <div class="card">
@@ -2300,30 +2293,26 @@ function deleteKb() {
 }
 
 // ── Call Management ──
-function toggleSettingsCard(section) {
-    var body = document.getElementById(section + '-settings-body');
-    var icon = document.getElementById(section + '-collapse-icon');
-    if (!body || !icon) return;
-    var header = icon.parentElement;
-    var isOpen = body.classList.contains('open');
-    if (isOpen) {
-        body.classList.remove('open');
-        header.classList.remove('open');
+function showSettingsTab(tab) {
+    var outBody = document.getElementById('outbound-settings-body');
+    var inBody = document.getElementById('inbound-settings-body');
+    var outBtn = document.getElementById('btn-tab-outbound');
+    var inBtn = document.getElementById('btn-tab-inbound');
+    if (!outBody || !inBody) return;
+    if (tab === 'outbound') {
+        var isOpen = outBody.style.display !== 'none';
+        outBody.style.display = isOpen ? 'none' : 'block';
+        inBody.style.display = 'none';
+        outBtn.style.background = isOpen ? '#95a5a6' : '#3498db';
+        inBtn.style.background = '#95a5a6';
     } else {
-        body.classList.add('open');
-        header.classList.add('open');
+        var isOpen = inBody.style.display !== 'none';
+        inBody.style.display = isOpen ? 'none' : 'block';
+        outBody.style.display = 'none';
+        inBtn.style.background = isOpen ? '#95a5a6' : '#8e44ad';
+        outBtn.style.background = '#95a5a6';
     }
-    localStorage.setItem('gemini_' + section + '_settings_open', !isOpen);
 }
-// Restore collapse state on load
-['outbound', 'inbound'].forEach(function(s) {
-    if (localStorage.getItem('gemini_' + s + '_settings_open') === 'true') {
-        var body = document.getElementById(s + '-settings-body');
-        var icon = document.getElementById(s + '-collapse-icon');
-        if (body) body.classList.add('open');
-        if (icon) icon.parentElement.classList.add('open');
-    }
-});
 
 function getCallSettings() {
     var settings = {
