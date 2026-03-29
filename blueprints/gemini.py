@@ -1359,7 +1359,7 @@ def rag_import_gdrive():
     try:
         service = _get_drive_service()
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "error": _safe_error(e)}), 500
 
     # Determine if folder or single doc
     is_folder = "/folders/" in url
@@ -2303,6 +2303,7 @@ function deleteKb() {
 function toggleSettingsCard(section) {
     var body = document.getElementById(section + '-settings-body');
     var icon = document.getElementById(section + '-collapse-icon');
+    if (!body || !icon) return;
     var header = icon.parentElement;
     var isOpen = body.classList.contains('open');
     if (isOpen) {
@@ -2337,7 +2338,8 @@ function getCallSettings() {
     };
     // Add ElevenLabs agent ID and prompt source if selected
     if (settings.ai_provider === 'elevenlabs') {
-        var agentId = document.getElementById('set-elevenlabs-agent').value;
+        var agentEl = document.getElementById('set-elevenlabs-agent');
+        var agentId = agentEl ? agentEl.value : '';
         if (agentId) settings.elevenlabs_agent_id = agentId;
         var promptSource = document.querySelector('input[name="el-prompt-source"]:checked');
         settings.elevenlabs_prompt_source = promptSource ? promptSource.value : 'agent';
@@ -2399,12 +2401,14 @@ function onProviderChange() {
 }
 
 function onElPromptSourceChange() {
-    var source = document.querySelector('input[name="el-prompt-source"]:checked').value;
-    localStorage.setItem('gemini_el_prompt_source', source);
+    var radio = document.querySelector('input[name="el-prompt-source"]:checked');
+    if (!radio) return;
+    localStorage.setItem('gemini_el_prompt_source', radio.value);
 }
 
 function loadElevenLabsAgents() {
     var select = document.getElementById('set-elevenlabs-agent');
+    if (!select) return;
     select.innerHTML = '<option value="">Loading...</option>';
     fetch('/api/gemini/elevenlabs-agents').then(r=>r.json()).then(function(d) {
         if (!d.ok || !d.agents.length) {
@@ -3596,7 +3600,8 @@ var _inboundConfigId = null;
 
 function onInboundProviderChange() {
     var p = document.getElementById('inbound-provider').value;
-    document.getElementById('inbound-el-agent-row').style.display = p === 'elevenlabs' ? '' : 'none';
+    var elRow = document.getElementById('inbound-el-agent-row');
+    if (elRow) elRow.style.display = p === 'elevenlabs' ? '' : 'none';
     // Update voice options
     var voiceSelect = document.getElementById('inbound-voice');
     var voices = _PROVIDER_VOICES[p] || _PROVIDER_VOICES.gemini;
