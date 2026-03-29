@@ -18030,7 +18030,7 @@ function renderTable(rows) {
             '<td>' + esc(r.customer_phone||'') + '</td>' +
             '<td>' + esc(r.custom_field_1||'') + '</td>' +
             '<td>' + esc(r.custom_field_2||'') + '</td>' +
-            '<td>' + (_gymLogos[r.custom_field_3] ? '<img src="' + esc(_gymLogos[r.custom_field_3]) + '" style="height:20px;vertical-align:middle;margin-right:4px;border-radius:3px;">' : '') + esc(r.custom_field_3||'') + '</td>' +
+            '<td style="text-align:center;">' + (_gymLogos[r.custom_field_3] ? '<img src="' + esc(_gymLogos[r.custom_field_3]) + '" style="height:22px;display:block;margin:0 auto 2px;border-radius:3px;">' : '') + '<span style="font-size:10px;">' + esc(r.custom_field_3||'') + '</span></td>' +
             '<td><input type="text" class="wt-input" value="' + esc(r.gym_scales_weight||'') + '" data-sid="' + esc(sid) + '" data-field="gym_scales_weight" onchange="saveWeight(this)" onclick="event.stopPropagation()"></td>' +
             '<td><input type="text" class="wt-input" value="' + esc(r.final_weight||'') + '" data-sid="' + esc(sid) + '" data-field="final_weight" onchange="saveWeight(this)" onclick="event.stopPropagation()"></td>' +
             '<td>' + renderApptCell(r) + '</td>' +
@@ -18548,7 +18548,7 @@ function updateCharts() {
     var goalTotal = Object.values(goalCounts).reduce(function(a,b){return a+b;},0);
     document.getElementById('gym-chart-total').textContent = '(' + gymTotal + ' total)';
     document.getElementById('goal-chart-total').textContent = '(' + goalTotal + ' total)';
-    renderPie('gym-chart', gymCounts, '_gymChart');
+    renderPie('gym-chart', gymCounts, '_gymChart', _gymLogos);
     // Build custom gym legend with logos
     var gymLabels = Object.keys(gymCounts).sort(function(a,b){ return gymCounts[b]-gymCounts[a]; });
     var legendHtml = '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
@@ -18613,22 +18613,76 @@ function renderGenderBar(male, female, unknown) {
     });
 }
 
-function renderPie(canvasId, counts, chartVar) {
+// Pre-load logo images for chart rendering
+var _gymLogoImages = {};
+function _preloadGymLogos() {
+    Object.keys(_gymLogos).forEach(function(name) {
+        if (!_gymLogoImages[name]) {
+            var img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.src = _gymLogos[name];
+            _gymLogoImages[name] = img;
+        }
+    });
+}
+
+function renderPie(canvasId, counts, chartVar, logos) {
     var labels = Object.keys(counts).sort(function(a,b){ return counts[b]-counts[a]; });
     var data = labels.map(function(l){ return counts[l]; });
+    var total = data.reduce(function(a,b){return a+b;},0);
     var ctx = document.getElementById(canvasId).getContext('2d');
     if (window[chartVar]) window[chartVar].destroy();
+
+    var plugins = [];
+    if (logos) {
+        _preloadGymLogos();
+        plugins.push({
+            id: 'pieLogos',
+            afterDraw: function(chart) {
+                var meta = chart.getDatasetMeta(0);
+                var top3 = Math.min(3, meta.data.length);
+                for (var i = 0; i < top3; i++) {
+                    var arc = meta.data[i];
+                    var label = labels[i];
+                    var img = _gymLogoImages[label];
+                    var pct = Math.round(data[i] / total * 100);
+                    // Calculate position at center of arc
+                    var midAngle = (arc.startAngle + arc.endAngle) / 2;
+                    var radius = (arc.outerRadius + arc.innerRadius) / 2 * 0.65;
+                    var cx = arc.x + Math.cos(midAngle) * radius;
+                    var cy = arc.y + Math.sin(midAngle) * radius;
+                    var drawCtx = chart.ctx;
+                    // Draw logo if loaded
+                    if (img && img.complete && img.naturalWidth) {
+                        var s = 24;
+                        drawCtx.drawImage(img, cx - s/2, cy - s/2 - 6, s, s);
+                    }
+                    // Draw % and count below
+                    drawCtx.save();
+                    drawCtx.fillStyle = '#fff';
+                    drawCtx.font = 'bold 11px Arial';
+                    drawCtx.textAlign = 'center';
+                    drawCtx.fillText(pct + '%', cx, cy + 14);
+                    drawCtx.font = '9px Arial';
+                    drawCtx.fillText('(' + data[i] + ')', cx, cy + 24);
+                    drawCtx.restore();
+                }
+            }
+        });
+    }
+
     window[chartVar] = new Chart(ctx, {
         type: 'pie',
         data: {
             labels: labels,
             datasets: [{data: data, backgroundColor: _chartColors.slice(0, labels.length)}]
         },
+        plugins: plugins,
         options: {
             responsive: true,
             plugins: {
                 legend: {position: 'right', labels: {font: {size: 11}, boxWidth: 12}},
-                tooltip: {callbacks: {label: function(c){ return c.label + ': ' + c.raw + ' (' + Math.round(c.raw/data.reduce(function(a,b){return a+b;},0)*100) + '%)'; }}}
+                tooltip: {callbacks: {label: function(c){ return c.label + ': ' + c.raw + ' (' + Math.round(c.raw/total*100) + '%)'; }}}
             }
         }
     });
