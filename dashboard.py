@@ -17448,16 +17448,16 @@ function toggleCharts() { updateCharts(); }
 var _unmatchedAppts = [];
 
 function renderApptCell(r) {
-    if (!r.bookafy_match_type) return '<button class="appt-match-btn" onclick="event.stopPropagation();showManualMatch(\'' + esc(r.stripe_session_id) + '\',\'' + esc(r.card_name||'').replace(/'/g,"\\'") + '\',\'' + esc(r.customer_email||'').replace(/'/g,"\\'") + '\',\'' + esc(r.customer_phone||'').replace(/'/g,"\\'") + '\')"><i class="fa-solid fa-calendar-plus"></i> Match</button>';
+    if (!r.bookafy_match_type) return '<button class="appt-match-btn" onclick="event.stopPropagation();showManualMatch(\'' + esc(r.stripe_session_id) + '\',\'' + esc(r.custom_field_1||r.card_name||'').replace(/'/g,"\\'") + '\',\'' + esc(r.customer_email||'').replace(/'/g,"\\'") + '\',\'' + esc(r.customer_phone||'').replace(/'/g,"\\'") + '\')"><i class="fa-solid fa-calendar-plus"></i> Match</button>';
     var dt = r.bookafy_appointment_date ? new Date(r.bookafy_appointment_date).toLocaleString('en-NZ', {dateStyle:'medium',timeStyle:'short'}) : '';
     if (r.bookafy_match_type === 'email') {
         return '<span class="appt-match appt-email" title="Email match"><i class="fa-solid fa-circle-check"></i> ' + esc(dt) + '</span>';
     } else if (r.bookafy_match_type === 'ai') {
         return '<span class="appt-match appt-ai" title="AI match"><i class="fa-solid fa-robot"></i> ' + esc(dt) +
-               '</span><span class="appt-change" onclick="event.stopPropagation();showManualMatch(\'' + esc(r.stripe_session_id) + '\',\'' + esc(r.card_name||'') + '\',\'' + esc(r.customer_email||'') + '\',\'' + esc(r.customer_phone||'') + '\')">change</span>';
+               '</span><span class="appt-change" onclick="event.stopPropagation();showManualMatch(\'' + esc(r.stripe_session_id) + '\',\'' + esc(r.custom_field_1||r.card_name||'') + '\',\'' + esc(r.customer_email||'') + '\',\'' + esc(r.customer_phone||'') + '\')">change</span>';
     } else if (r.bookafy_match_type === 'manual') {
         return '<span class="appt-match appt-manual" title="Manual match"><i class="fa-solid fa-user-check"></i> ' + esc(dt) +
-               '</span><span class="appt-change" onclick="event.stopPropagation();showManualMatch(\'' + esc(r.stripe_session_id) + '\',\'' + esc(r.card_name||'') + '\',\'' + esc(r.customer_email||'') + '\',\'' + esc(r.customer_phone||'') + '\')">change</span>';
+               '</span><span class="appt-change" onclick="event.stopPropagation();showManualMatch(\'' + esc(r.stripe_session_id) + '\',\'' + esc(r.custom_field_1||r.card_name||'') + '\',\'' + esc(r.customer_email||'') + '\',\'' + esc(r.customer_phone||'') + '\')">change</span>';
     }
     return '';
 }
