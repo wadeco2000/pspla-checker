@@ -536,8 +536,11 @@ class ElevenLabsProvider:
             prompt_source = settings.get("elevenlabs_prompt_source", "agent")
             language = settings.get("language", "en")
 
-            # Override first_message to empty — wait for caller to speak first
-            overrides = {"agent": {"first_message": ""}}
+            # For inbound: use greeting as first_message so AI speaks immediately
+            # For outbound: empty first_message — wait for caller to answer
+            is_inbound = self._call.get("is_inbound", False)
+            inbound_greeting = self._call.get("greeting", "") if is_inbound else ""
+            overrides = {"agent": {"first_message": inbound_greeting or ("" if not is_inbound else "Hello, how can I help you?")}}
 
             # Use knowledge base prompt if selected, otherwise agent's own prompt
             if prompt_source == "knowledgebase" and system_instruction:
@@ -1105,6 +1108,7 @@ async def handle_inbound_call(request: Request):
         "ai_error": None,
         "ai_cancel": asyncio.Event(),
         "is_inbound": True,
+        "greeting": greeting,
         "ws_token": ws_token,
     }
     _transcript_subscribers[call_id] = set()
