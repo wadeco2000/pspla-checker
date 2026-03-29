@@ -17176,17 +17176,16 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
     <div class="modal">
         <h3><i class="fa-solid fa-money-bill-wave" style="color:#2ecc71"></i> Add Cash Entry</h3>
         <label>Name <span style="color:#e74c3c">*</span></label>
-        <input type="text" id="cash-name" placeholder="Full name">
+        <input type="text" id="cash-name" placeholder="Full name" oninput="document.getElementById('cash-cf1').value=this.value">
         <label>Email <span style="color:#e74c3c">*</span></label>
         <input type="text" id="cash-email" placeholder="email@example.com">
         <label>Phone <span style="color:#e74c3c">*</span></label>
         <input type="text" id="cash-phone" placeholder="021 123 4567">
-        <label id="cash-cf1-label" style="display:none">Custom Field 1</label>
-        <input type="text" id="cash-cf1" style="display:none">
-        <label id="cash-cf2-label" style="display:none">Custom Field 2</label>
-        <input type="text" id="cash-cf2" style="display:none">
-        <label id="cash-cf3-label" style="display:none">Custom Field 3</label>
-        <input type="text" id="cash-cf3" style="display:none">
+        <input type="hidden" id="cash-cf1">
+        <label id="cash-cf2-label" style="display:none">Goal</label>
+        <select id="cash-cf2" style="display:none;width:100%;padding:8px;font-size:13px;border:1px solid #ddd;border-radius:4px;"></select>
+        <label id="cash-cf3-label" style="display:none">Gym Member</label>
+        <select id="cash-cf3" style="display:none;width:100%;padding:8px;font-size:13px;border:1px solid #ddd;border-radius:4px;"></select>
         <div class="modal-btns">
             <button class="btn btn-cancel" onclick="closeModal('cash-modal')">Cancel</button>
             <button class="btn btn-cash" onclick="saveCashEntry()"><i class="fa-solid fa-plus"></i> Add Entry</button>
@@ -18015,15 +18014,24 @@ function showCashModal() {
     document.getElementById('cash-cf2').value = '';
     document.getElementById('cash-cf3').value = '';
     // Show custom field inputs if we know the labels
-    var cf1Label = _currentLink && _currentLink.col_1_name ? _currentLink.col_1_name : (_allRows.length && _allRows[0].custom_field_1_label ? _allRows[0].custom_field_1_label : '');
     var cf2Label = _currentLink && _currentLink.col_2_name ? _currentLink.col_2_name : (_allRows.length && _allRows[0].custom_field_2_label ? _allRows[0].custom_field_2_label : '');
     var cf3Label = _currentLink && _currentLink.col_3_name ? _currentLink.col_3_name : (_allRows.length && _allRows[0].custom_field_3_label ? _allRows[0].custom_field_3_label : '');
-    if (cf1Label) { document.getElementById('cash-cf1-label').textContent = cf1Label; document.getElementById('cash-cf1-label').style.display = ''; document.getElementById('cash-cf1').style.display = ''; }
-    else { document.getElementById('cash-cf1-label').style.display = 'none'; document.getElementById('cash-cf1').style.display = 'none'; }
-    if (cf2Label) { document.getElementById('cash-cf2-label').textContent = cf2Label; document.getElementById('cash-cf2-label').style.display = ''; document.getElementById('cash-cf2').style.display = ''; }
-    else { document.getElementById('cash-cf2-label').style.display = 'none'; document.getElementById('cash-cf2').style.display = 'none'; }
-    if (cf3Label) { document.getElementById('cash-cf3-label').textContent = cf3Label; document.getElementById('cash-cf3-label').style.display = ''; document.getElementById('cash-cf3').style.display = ''; }
-    else { document.getElementById('cash-cf3-label').style.display = 'none'; document.getElementById('cash-cf3').style.display = 'none'; }
+    if (cf2Label) {
+        document.getElementById('cash-cf2-label').textContent = cf2Label;
+        document.getElementById('cash-cf2-label').style.display = '';
+        var cf2Sel = document.getElementById('cash-cf2');
+        cf2Sel.style.display = '';
+        cf2Sel.innerHTML = '<option value="">— Select —</option>';
+        ['Under 5kg','5-10kg','10-15kg','15kg+'].forEach(function(g){ cf2Sel.innerHTML += '<option value="' + g + '">' + g + '</option>'; });
+    } else { document.getElementById('cash-cf2-label').style.display = 'none'; document.getElementById('cash-cf2').style.display = 'none'; }
+    if (cf3Label) {
+        document.getElementById('cash-cf3-label').textContent = cf3Label;
+        document.getElementById('cash-cf3-label').style.display = '';
+        var cf3Sel = document.getElementById('cash-cf3');
+        cf3Sel.style.display = '';
+        cf3Sel.innerHTML = '<option value="">— Select —</option>';
+        _knownGyms.forEach(function(g){ cf3Sel.innerHTML += '<option value="' + g + '">' + g + '</option>'; });
+    } else { document.getElementById('cash-cf3-label').style.display = 'none'; document.getElementById('cash-cf3').style.display = 'none'; }
     document.getElementById('cash-modal').classList.add('active');
 }
 
