@@ -17277,10 +17277,12 @@ function updateStripeStatus() {
 }
 
 function loadStored(pl) {
-    if (!pl) return;
+    if (!pl) { console.log('loadStored: no pl'); return; }
+    console.log('loadStored: fetching for', pl);
     showSpinner();
     fetch('/api/club-fitness/stored?payment_link=' + encodeURIComponent(pl))
-        .then(r=>r.json()).then(d=>{
+        .then(r=>{ console.log('loadStored: HTTP', r.status); return r.json(); }).then(d=>{
+            console.log('loadStored: ok=', d.ok, 'count=', (d.signups||[]).length, 'error=', d.error);
             if (!d.ok || !d.signups.length) { msg('No stored entries yet. Click Fetch Signups to import from Stripe.'); _allRows = []; applyFiltersAndRender(); return; }
             _allRows = d.signups;
             applyFiltersAndRender();
