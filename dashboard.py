@@ -15074,6 +15074,75 @@ def _validate_payment_link(pl):
     return None
 
 
+@app.route("/api/club-fitness/gym-logos", methods=["GET"])
+def club_fitness_gym_logos():
+    """Return all gym name → logo URL mappings."""
+    try:
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/challenge_gym_logos",
+            params={"select": "gym_name,logo_url"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+            timeout=10)
+        logos = {}
+        if r.ok:
+            for row in r.json():
+                logos[row["gym_name"]] = row["logo_url"]
+        return jsonify({"ok": True, "logos": logos})
+    except Exception as e:
+        return jsonify({"ok": False, "logos": {}}), 502
+
+
+@app.route("/api/club-fitness/gym-logo", methods=["POST"])
+def club_fitness_upload_gym_logo():
+    """Upload a logo for a gym. Admin only."""
+    if not _is_admin():
+        return jsonify({"ok": False, "error": "Admin access required"}), 403
+    gym_name = request.form.get("gym_name", "").strip()
+    if not gym_name:
+        return jsonify({"ok": False, "error": "Gym name required"}), 400
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"ok": False, "error": "No file uploaded"}), 400
+    # Validate file type
+    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
+    if ext not in ("png", "jpg", "jpeg", "webp"):
+        return jsonify({"ok": False, "error": "Only PNG, JPG, WEBP allowed"}), 400
+    file_bytes = f.read()
+    if len(file_bytes) > 512000:
+        return jsonify({"ok": False, "error": "File too large (max 500KB)"}), 400
+    # Sanitize filename from gym name
+    import re as _re
+    slug = _re.sub(r'[^a-z0-9]+', '-', gym_name.lower()).strip('-')
+    filename = f"{slug}.{ext}"
+    mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}[ext]
+    try:
+        # Upload to Supabase Storage
+        r = requests.put(
+            f"{SUPABASE_URL}/storage/v1/object/gym-logos/{filename}",
+            data=file_bytes,
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                     "Content-Type": mime, "x-upsert": "true"},
+            timeout=15)
+        if not r.ok:
+            return jsonify({"ok": False, "error": f"Storage error: {r.status_code}"}), 502
+        logo_url = f"{SUPABASE_URL}/storage/v1/object/public/gym-logos/{filename}"
+        # Save mapping to table (upsert)
+        requests.patch(f"{SUPABASE_URL}/rest/v1/challenge_gym_logos",
+            params={"gym_name": f"eq.{gym_name}"},
+            json={"gym_name": gym_name, "logo_url": logo_url},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                     "Content-Type": "application/json", "Prefer": "return=minimal"},
+            timeout=10)
+        # Insert if patch didn't match
+        requests.post(f"{SUPABASE_URL}/rest/v1/challenge_gym_logos",
+            json={"gym_name": gym_name, "logo_url": logo_url},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                     "Content-Type": "application/json", "Prefer": "return=minimal"},
+            timeout=10)
+        return jsonify({"ok": True, "logo_url": logo_url})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
 @app.route("/api/club-fitness/email-template", methods=["GET", "POST"])
 def club_fitness_email_template():
     """GET: fetch email template. POST: update it."""
@@ -16928,6 +16997,7 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         <button class="btn" style="background:#3498db;color:white;" onclick="showQuickEntry()"><i class="fa-solid fa-mobile-screen"></i> Quick Weigh In</button>
         <button class="btn btn-fetch" id="btn-fetch" onclick="fetchSignups()" title="Download latest entries from Stripe"><i class="fa-brands fa-stripe-s"></i> Stripe Download</button>
         {% if is_admin %}<button class="btn" style="background:#2c3e50;color:white;" onclick="snapshotWeights()" title="Backup all weights to database"><i class="fa-solid fa-database"></i> Backup Weights</button>
+        <button class="btn" style="background:#8e44ad;color:white;" onclick="showGymLogosModal()"><i class="fa-solid fa-image"></i> Gym Logos</button>
         <button class="btn btn-export" onclick="exportCSV()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
         <button class="btn btn-clean" onclick="showCleanModal()"><i class="fa-solid fa-broom"></i> Clean Data</button>{% endif %}
         <button class="btn btn-booking" onclick="checkBookings()"><i class="fa-solid fa-calendar-check"></i> Check Bookings</button>
@@ -17942,7 +18012,7 @@ function renderTable(rows) {
             '<td>' + esc(r.customer_phone||'') + '</td>' +
             '<td>' + esc(r.custom_field_1||'') + '</td>' +
             '<td>' + esc(r.custom_field_2||'') + '</td>' +
-            '<td>' + esc(r.custom_field_3||'') + '</td>' +
+            '<td>' + (_gymLogos[r.custom_field_3] ? '<img src="' + esc(_gymLogos[r.custom_field_3]) + '" style="height:20px;vertical-align:middle;margin-right:4px;border-radius:3px;">' : '') + esc(r.custom_field_3||'') + '</td>' +
             '<td><input type="text" class="wt-input" value="' + esc(r.gym_scales_weight||'') + '" data-sid="' + esc(sid) + '" data-field="gym_scales_weight" onchange="saveWeight(this)" onclick="event.stopPropagation()"></td>' +
             '<td><input type="text" class="wt-input" value="' + esc(r.final_weight||'') + '" data-sid="' + esc(sid) + '" data-field="final_weight" onchange="saveWeight(this)" onclick="event.stopPropagation()"></td>' +
             '<td>' + renderApptCell(r) + '</td>' +
@@ -18549,6 +18619,57 @@ function snapshotWeights() {
     }).catch(function(e) { alert('Failed: ' + e); });
 }
 
+// ── Gym Logos ──
+var _gymLogos = {};
+function loadGymLogos() {
+    fetch('/api/club-fitness/gym-logos').then(r=>r.json()).then(function(d) {
+        if (d.ok) _gymLogos = d.logos || {};
+    });
+}
+loadGymLogos();
+
+function showGymLogosModal() {
+    var html = '';
+    _knownGyms.forEach(function(gym) {
+        var logo = _gymLogos[gym];
+        html += '<div style="display:flex;align-items:center;gap:12px;padding:8px;border-bottom:1px solid #eee;">';
+        html += '<div style="width:40px;height:40px;border-radius:6px;background:#f5f5f5;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;">';
+        if (logo) {
+            html += '<img src="' + esc(logo) + '" style="max-width:40px;max-height:40px;object-fit:contain;">';
+        } else {
+            html += '<i class="fa-solid fa-dumbbell" style="color:#ccc;"></i>';
+        }
+        html += '</div>';
+        html += '<span style="flex:1;font-weight:600;font-size:13px;">' + esc(gym) + '</span>';
+        html += '<label class="btn" style="background:#3498db;color:white;font-size:11px;padding:4px 10px;cursor:pointer;margin:0;">';
+        html += '<i class="fa-solid fa-upload"></i> ' + (logo ? 'Change' : 'Upload');
+        html += '<input type="file" accept="image/png,image/jpeg,image/webp" style="display:none;" onchange="uploadGymLogo(this,\'' + esc(gym).replace(/'/g,"\\'") + '\')">';
+        html += '</label>';
+        html += '</div>';
+    });
+    document.getElementById('gym-logos-content').innerHTML = html;
+    document.getElementById('gym-logos-modal').classList.add('active');
+}
+
+function uploadGymLogo(input, gymName) {
+    if (!input.files.length) return;
+    var file = input.files[0];
+    if (file.size > 512000) { alert('File too large (max 500KB)'); return; }
+    var formData = new FormData();
+    formData.append('gym_name', gymName);
+    formData.append('file', file);
+    // Find the row and show spinner
+    var label = input.parentElement;
+    label.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    fetch('/api/club-fitness/gym-logo', {method: 'POST', body: formData})
+    .then(r=>r.json()).then(function(d) {
+        if (!d.ok) { alert('Error: ' + (d.error||'Unknown')); showGymLogosModal(); return; }
+        _gymLogos[gymName] = d.logo_url;
+        showGymLogosModal(); // Refresh modal
+        applyFiltersAndRender(); // Refresh table to show new logos
+    }).catch(function(e) { alert('Upload failed: ' + e); showGymLogosModal(); });
+}
+
 // ── Quick Entry ──
 function showQuickEntry() {
     if (!_allRows.length) { alert('Load signups first (select a payment link).'); return; }
@@ -18594,7 +18715,7 @@ function qeSearch() {
             var name = (r.custom_field_1 || r.card_name || '').replace('[CASH] ','');
             html += '<div class="qe-card" onclick="qeSelectPerson(\'' + esc(r.stripe_session_id) + '\')">';
             html += '<div><div class="qe-name">' + esc(name) + '</div>';
-            html += '<div class="qe-sub">' + esc(r.custom_field_3||'') + (r.custom_field_2 ? ' · ' + esc(r.custom_field_2) : '') + '</div></div>';
+            html += '<div class="qe-sub">' + (_gymLogos[r.custom_field_3] ? '<img src="' + esc(_gymLogos[r.custom_field_3]) + '" style="height:16px;vertical-align:middle;margin-right:4px;border-radius:2px;">' : '') + esc(r.custom_field_3||'') + (r.custom_field_2 ? ' · ' + esc(r.custom_field_2) : '') + '</div></div>';
             html += '<div class="qe-weight-status">' + statusHtml + '</div>';
             html += '</div>';
         });
@@ -18610,7 +18731,7 @@ function qeSelectPerson(sid) {
     h += '<div class="qe-person-name">' + esc(name) + '</div>';
     if (r.customer_phone) h += '<div class="qe-info"><i class="fa-solid fa-phone" style="width:20px;color:#888;"></i> ' + esc(r.customer_phone) + '</div>';
     if (r.customer_email) h += '<div class="qe-info"><i class="fa-solid fa-envelope" style="width:20px;color:#888;"></i> ' + esc(r.customer_email) + '</div>';
-    if (r.custom_field_3) h += '<div class="qe-info"><i class="fa-solid fa-dumbbell" style="width:20px;color:#888;"></i> ' + esc(r.custom_field_3) + '</div>';
+    if (r.custom_field_3) h += '<div class="qe-info">' + (_gymLogos[r.custom_field_3] ? '<img src="' + esc(_gymLogos[r.custom_field_3]) + '" style="height:20px;vertical-align:middle;margin-right:6px;border-radius:3px;">' : '<i class="fa-solid fa-dumbbell" style="width:20px;color:#888;"></i> ') + esc(r.custom_field_3) + '</div>';
     if (r.custom_field_2) h += '<div class="qe-info"><i class="fa-solid fa-bullseye" style="width:20px;color:#888;"></i> ' + esc(r.custom_field_2) + '</div>';
     h += '<div class="qe-weight-group">';
     h += '<div class="qe-weight-label">Starting Weight (kg)</div>';
@@ -18682,6 +18803,15 @@ function qeSave(sid, force) {
 loadLinks();
 // Auto-load handled inside loadLinks() — no separate timeout needed
 </script>
+
+<!-- Gym Logos Modal -->
+<div class="modal-bg" id="gym-logos-modal">
+    <div class="modal" style="width:600px;">
+        <h3><i class="fa-solid fa-image" style="color:#8e44ad"></i> Gym Logos</h3>
+        <div id="gym-logos-content"><div class="empty-state"><span class="spinner"></span> Loading...</div></div>
+        <div class="modal-btns"><button class="btn btn-cancel" onclick="closeModal('gym-logos-modal')">Close</button></div>
+    </div>
+</div>
 
 <!-- Quick Entry Overlay -->
 <div class="qe-overlay" id="qe-overlay">
