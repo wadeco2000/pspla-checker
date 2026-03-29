@@ -1682,229 +1682,51 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
             <span id="settings-tab-label" style="margin-left:auto;font-size:11px;color:#888;"></span>
         </div>
         <div id="outbound-settings-body" style="display:none;margin-top:12px;">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-            <div>
-                <label class="form-label">AI Provider</label>
-                <select id="set-ai-provider" style="width:100%;" onchange="onProviderChange()">
-                    <option value="gemini" selected>Gemini 3.1 Flash Live</option>
-                    <option value="openai">OpenAI Realtime (GPT)</option>
-                    <option value="elevenlabs">ElevenLabs Conversational AI</option>
-                </select>
-                <span style="font-size:10px;color:#888;">Which AI model handles the voice conversation. Different providers have different voices, latency, and capabilities.</span>
-            </div>
-            <div>
-                <label class="form-label">Voice</label>
-                <select id="set-voice" style="width:100%;">
-                    <!-- Populated dynamically by onProviderChange() -->
-                </select>
-                <span style="font-size:10px;color:#888;">The AI voice used for the call. Available voices depend on the selected provider.</span>
-            </div>
-            <div data-provider="elevenlabs" style="grid-column:1/-1;">
-                <label class="form-label">ElevenLabs Agent</label>
-                <div style="display:flex;gap:8px;align-items:center;">
-                    <select id="set-elevenlabs-agent" style="flex:1;">
-                        <option value="">Loading agents...</option>
-                    </select>
-                    <button class="btn btn-grey" style="font-size:11px;padding:4px 10px;" onclick="loadElevenLabsAgents()"><i class="fa-solid fa-rotate"></i></button>
-                </div>
-                <span style="font-size:10px;color:#888;">Select which ElevenLabs agent handles the call. Agents are configured in the ElevenLabs dashboard with their own voice, prompt, and tools. The voice dropdown above is ignored when an agent is selected (agent has its own voice).</span>
-            </div>
-            <div data-provider="elevenlabs" style="grid-column:1/-1;">
-                <label class="form-label">Prompt Source</label>
-                <div style="display:flex;align-items:center;gap:12px;margin-top:4px;">
-                    <label style="font-weight:normal;display:flex;align-items:center;gap:6px;cursor:pointer;">
-                        <input type="radio" name="el-prompt-source" value="agent" checked onchange="onElPromptSourceChange()"> Use agent's prompt (from ElevenLabs dashboard)
-                    </label>
-                    <label style="font-weight:normal;display:flex;align-items:center;gap:6px;cursor:pointer;">
-                        <input type="radio" name="el-prompt-source" value="knowledgebase" onchange="onElPromptSourceChange()"> Use knowledge base prompt (from this page)
-                    </label>
-                </div>
-                <span style="font-size:10px;color:#888;">Choose whether the AI uses the prompt configured on the ElevenLabs agent, or the knowledge base content selected above.</span>
-            </div>
-            <div data-provider="elevenlabs" style="grid-column:1/-1;">
-                <label class="form-label">Document Knowledge (RAG)</label>
-                <div style="display:flex;align-items:center;gap:12px;margin-top:4px;">
-                    <label style="font-weight:normal;display:flex;align-items:center;gap:6px;cursor:pointer;">
-                        <input type="radio" name="el-rag-source" value="elevenlabs" checked> Use ElevenLabs knowledge base (managed in ElevenLabs dashboard)
-                    </label>
-                    <label style="font-weight:normal;display:flex;align-items:center;gap:6px;cursor:pointer;">
-                        <input type="radio" name="el-rag-source" value="inhouse"> Use in-house document library (managed on this page)
-                    </label>
-                </div>
-                <span style="font-size:10px;color:#888;">Choose where the AI looks up reference documents during calls. In-house RAG uses documents you upload to the Document Library below.</span>
-            </div>
-            <div>
-                <label class="form-label">Language</label>
-                <select id="set-language" style="width:100%;">
-                    <option value="en" selected>English</option>
-                    <option value="en-NZ">English (NZ)</option>
-                    <option value="en-AU">English (AU)</option>
-                    <option value="en-GB">English (UK)</option>
-                    <option value="en-US">English (US)</option>
-                    <option value="mi">Te Reo Māori</option>
-                    <option value="es">Spanish</option>
-                    <option value="fr">French</option>
-                    <option value="de">German</option>
-                    <option value="zh">Chinese</option>
-                    <option value="ja">Japanese</option>
-                    <option value="ko">Korean</option>
-                    <option value="hi">Hindi</option>
-                </select>
-                <span style="font-size:10px;color:#888;">The language the AI will speak and listen in. The caller can still speak another language but transcription accuracy may be reduced.</span>
-            </div>
-            <div data-provider="gemini">
-                <label class="form-label">Thinking Level</label>
-                <select id="set-thinking" style="width:100%;opacity:0.5;" disabled>
-                    <option value="minimal" selected>Minimal (fastest)</option>
-                </select>
-                <span style="font-size:10px;color:#f39c12;">Not available for real-time voice calls. Thinking modes require the Gemini batch API, not the Live streaming API used for phone calls.</span>
-            </div>
-            <div data-provider="gemini">
-                <label class="form-label">Start of Speech Sensitivity</label>
-                <select id="set-start-sensitivity" style="width:100%;">
-                    <option value="low" selected>Low</option>
-                    <option value="default">Default</option>
-                    <option value="high">High</option>
-                </select>
-                <span style="font-size:10px;color:#888;">How easily the caller's voice interrupts the AI. Low means background noise, coughs, and "hmm" sounds won't interrupt. High means the AI stops at the slightest sound. Low is recommended for phone calls.</span>
-            </div>
-            <div>
-                <label class="form-label">End of Speech Sensitivity</label>
-                <select id="set-end-sensitivity" style="width:100%;">
-                    <option value="low">Low</option>
-                    <option value="default">Default</option>
-                    <option value="high" selected>High</option>
-                </select>
-                <span style="font-size:10px;color:#888;">How quickly the AI decides the caller has finished speaking. Low waits longer for the caller to continue (good for slow or thoughtful speakers). High responds quickly after any pause (good for fast-paced conversations).</span>
-            </div>
-            <div data-provider="gemini">
-                <label class="form-label">Silence Duration (ms)</label>
-                <input type="number" id="set-silence-ms" value="500" min="100" max="5000" step="100" style="width:100%;">
-                <span style="font-size:10px;color:#888;">How many milliseconds of silence before the AI considers the caller's turn finished and starts responding. Lower values (300ms) feel snappier but may cut people off. Higher values (1000ms+) give the caller more time to pause and continue.</span>
-            </div>
-            <div data-provider="gemini">
-                <label class="form-label">Include AI Thoughts</label>
-                <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;opacity:0.5;">
-                    <input type="checkbox" id="set-include-thoughts" disabled> Show AI reasoning in transcript
-                </label>
-                <span style="font-size:10px;color:#f39c12;">Not available. Gemini Live responses don't include internal reasoning in real-time voice mode.</span>
-            </div>
-            <div>
-                <label class="form-label">Strict Mode</label>
-                <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;">
-                    <input type="checkbox" id="set-strict-mode"> Only answer from reference documents
-                </label>
-                <span style="font-size:10px;color:#888;">When enabled, the AI will only use information from the knowledge base and uploaded documents. It will decline to answer questions not covered by your materials.</span>
-            </div>
-            <div>
-                <label class="form-label">RAG Pre-load</label>
-                <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;">
-                    <input type="checkbox" id="set-rag-preload"> Pre-load document chunks at call start
-                </label>
-                <span style="font-size:10px;color:#888;">Loads reference material into the AI's context before the call starts, so it can answer from the first question.</span>
-            </div>
-            <div>
-                <label class="form-label">Thinking Phrases</label>
-                <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;">
-                    <input type="checkbox" id="set-thinking-phrases"> AI says filler while searching documents
-                </label>
-                <span style="font-size:10px;color:#888;">The AI says "Let me check that..." while RAG searches run, giving time for results to arrive before answering.</span>
-            </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div><label class="form-label">AI Provider</label><select id="set-ai-provider" style="width:100%;" onchange="onProviderChange()"><option value="gemini" selected>Google Gemini</option><option value="openai">OpenAI Realtime</option><option value="elevenlabs">ElevenLabs</option></select></div>
+            <div><label class="form-label">Voice</label><select id="set-voice" style="width:100%;"></select></div>
+            <div><label class="form-label">Language</label><select id="set-language" style="width:100%;"><option value="en" selected>English</option><option value="en-NZ">English (NZ)</option><option value="en-AU">English (AU)</option><option value="en-GB">English (UK)</option><option value="en-US">English (US)</option><option value="mi">Te Reo Māori</option><option value="es">Spanish</option><option value="fr">French</option><option value="de">German</option><option value="zh">Chinese</option><option value="ja">Japanese</option><option value="ko">Korean</option><option value="hi">Hindi</option></select></div>
+            <div><label class="form-label">End of Speech Sensitivity</label><select id="set-end-sensitivity" style="width:100%;"><option value="low">Low</option><option value="default">Default</option><option value="high" selected>High</option></select></div>
+            <div data-provider="gemini"><label class="form-label">Start of Speech Sensitivity</label><select id="set-start-sensitivity" style="width:100%;"><option value="low" selected>Low</option><option value="default">Default</option><option value="high">High</option></select></div>
+            <div data-provider="gemini"><label class="form-label">Silence Duration (ms)</label><input type="number" id="set-silence-ms" value="500" min="100" max="5000" step="100" style="width:100%;"></div>
+            <div data-provider="elevenlabs" style="grid-column:1/-1;"><label class="form-label">ElevenLabs Agent</label><div style="display:flex;gap:8px;align-items:center;"><select id="set-elevenlabs-agent" style="flex:1;"><option value="">Loading...</option></select><button class="btn btn-grey" style="font-size:11px;padding:4px 8px;" onclick="loadElevenLabsAgents()"><i class="fa-solid fa-rotate"></i></button></div></div>
+            <div data-provider="elevenlabs" style="grid-column:1/-1;"><label class="form-label">Prompt Source</label><div style="display:flex;gap:16px;margin-top:4px;"><label style="font-weight:normal;display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;"><input type="radio" name="el-prompt-source" value="agent" checked onchange="onElPromptSourceChange()"> Agent's prompt (ElevenLabs)</label><label style="font-weight:normal;display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;"><input type="radio" name="el-prompt-source" value="knowledgebase" onchange="onElPromptSourceChange()"> Knowledge base prompt (this page)</label></div></div>
+            <div data-provider="elevenlabs" style="grid-column:1/-1;"><label class="form-label">Document Knowledge (RAG)</label><div style="display:flex;gap:16px;margin-top:4px;"><label style="font-weight:normal;display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;"><input type="radio" name="el-rag-source" value="elevenlabs" checked> ElevenLabs knowledge base</label><label style="font-weight:normal;display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;"><input type="radio" name="el-rag-source" value="inhouse"> In-house document library</label></div></div>
         </div>
-        <div data-provider="gemini" style="margin-top:12px;padding:8px;background:#fff3cd;border-radius:6px;font-size:11px;color:#856404;">
-            <i class="fa-solid fa-info-circle"></i> <strong>Affective Dialog</strong> and <strong>Proactive Audio</strong> require Gemini 2.5 Flash Live (not available on 3.1). These features will be added when model support is confirmed.
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid #e2e8f0;">
+            <label style="font-weight:normal;display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" id="set-strict-mode"> Strict Mode</label>
+            <label style="font-weight:normal;display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" id="set-rag-preload"> RAG Pre-load</label>
+            <label style="font-weight:normal;display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" id="set-thinking-phrases"> Thinking Phrases</label>
         </div>
         </div><!-- /outbound-settings-body -->
         <div id="inbound-settings-body" style="display:none;margin-top:12px;">
-        <span style="font-size:11px;color:#888;">Configure how the AI handles incoming phone calls to your Twilio number.</span>
-        <div id="inbound-config-container" style="margin-top:12px;">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px;">
-                <div>
-                    <label class="form-label">Enabled</label>
-                    <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;">
-                        <input type="checkbox" id="inbound-enabled" checked> Accept inbound calls
-                    </label>
-                </div>
-                <div>
-                    <label class="form-label">AI Provider</label>
-                    <select id="inbound-provider" style="width:100%;" onchange="onInboundProviderChange()">
-                        <option value="gemini">Google Gemini</option>
-                        <option value="openai">OpenAI Realtime</option>
-                        <option value="elevenlabs">ElevenLabs Conversational AI</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="form-label">Documents (RAG)</label>
-                    <select id="inbound-kb" style="width:100%;">
-                        <option value="">— None —</option>
-                    </select>
-                    <span style="font-size:10px;color:#888;">Only the attached documents are used — the KB's prompt is ignored. Use the System Prompt field below instead.</span>
-                </div>
-                <div>
-                    <label class="form-label">Voice</label>
-                    <select id="inbound-voice" style="width:100%;"></select>
-                </div>
-                <div>
-                    <label class="form-label">Language</label>
-                    <select id="inbound-language" style="width:100%;">
-                        <option value="en">English</option>
-                        <option value="en-NZ">English (NZ)</option>
-                        <option value="en-AU">English (AU)</option>
-                        <option value="en-GB">English (UK)</option>
-                        <option value="en-US">English (US)</option>
-                        <option value="mi">Te Reo Māori</option>
-                        <option value="es">Spanish</option>
-                        <option value="fr">French</option>
-                        <option value="de">German</option>
-                        <option value="zh">Chinese</option>
-                        <option value="ja">Japanese</option>
-                        <option value="ko">Korean</option>
-                        <option value="hi">Hindi</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="form-label">End of Speech Sensitivity</label>
-                    <select id="inbound-end-sensitivity" style="width:100%;">
-                        <option value="low">Low</option>
-                        <option value="default">Default</option>
-                        <option value="high" selected>High</option>
-                    </select>
-                </div>
-                <div id="inbound-el-agent-row" style="display:none;">
-                    <label class="form-label">ElevenLabs Agent</label>
-                    <select id="inbound-el-agent" style="width:100%;"><option value="">— None —</option></select>
-                </div>
-                <div>
-                    <label class="form-label">Strict Mode</label>
-                    <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;">
-                        <input type="checkbox" id="inbound-strict"> Only answer from reference documents
-                    </label>
-                </div>
-                <div>
-                    <label class="form-label">RAG Pre-load</label>
-                    <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;">
-                        <input type="checkbox" id="inbound-rag-preload"> Pre-load document chunks at call start
-                    </label>
-                </div>
-                <div>
-                    <label class="form-label">Thinking Phrases</label>
-                    <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;">
-                        <input type="checkbox" id="inbound-thinking-phrases"> AI says filler while searching
-                    </label>
-                </div>
+        <div id="inbound-config-container">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div><label class="form-label">Enabled</label><label style="font-weight:normal;display:flex;align-items:center;gap:6px;font-size:12px;margin-top:4px;"><input type="checkbox" id="inbound-enabled" checked> Accept inbound calls</label></div>
+                <div><label class="form-label">AI Provider</label><select id="inbound-provider" style="width:100%;" onchange="onInboundProviderChange()"><option value="gemini">Google Gemini</option><option value="openai">OpenAI Realtime</option><option value="elevenlabs">ElevenLabs</option></select></div>
+                <div><label class="form-label">Voice</label><select id="inbound-voice" style="width:100%;"></select></div>
+                <div><label class="form-label">Language</label><select id="inbound-language" style="width:100%;"><option value="en">English</option><option value="en-NZ">English (NZ)</option><option value="en-AU">English (AU)</option><option value="en-GB">English (UK)</option><option value="en-US">English (US)</option><option value="mi">Te Reo Māori</option><option value="es">Spanish</option><option value="fr">French</option><option value="de">German</option><option value="zh">Chinese</option><option value="ja">Japanese</option><option value="ko">Korean</option><option value="hi">Hindi</option></select></div>
+                <div><label class="form-label">End of Speech Sensitivity</label><select id="inbound-end-sensitivity" style="width:100%;"><option value="low">Low</option><option value="default">Default</option><option value="high" selected>High</option></select></div>
+                <div><label class="form-label">Documents (RAG)</label><select id="inbound-kb" style="width:100%;"><option value="">— None —</option></select><span style="font-size:10px;color:#888;">Attached documents only — KB prompt ignored.</span></div>
+                <div id="inbound-el-agent-row" style="display:none;grid-column:1/-1;"><label class="form-label">ElevenLabs Agent</label><select id="inbound-el-agent" style="width:100%;"><option value="">— None —</option></select></div>
+                <div id="inbound-el-prompt-row" style="display:none;grid-column:1/-1;"><label class="form-label">Prompt Source</label><div style="display:flex;gap:16px;margin-top:4px;"><label style="font-weight:normal;display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;"><input type="radio" name="inbound-el-prompt-source" value="agent" checked> Agent's prompt (ElevenLabs)</label><label style="font-weight:normal;display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;"><input type="radio" name="inbound-el-prompt-source" value="knowledgebase"> System prompt (below)</label></div></div>
+                <div id="inbound-el-rag-row" style="display:none;grid-column:1/-1;"><label class="form-label">Document Knowledge (RAG)</label><div style="display:flex;gap:16px;margin-top:4px;"><label style="font-weight:normal;display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;"><input type="radio" name="inbound-el-rag-source" value="elevenlabs" checked> ElevenLabs knowledge base</label><label style="font-weight:normal;display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;"><input type="radio" name="inbound-el-rag-source" value="inhouse"> In-house document library</label></div></div>
             </div>
-            <div style="margin-top:12px;">
+            <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid #e2e8f0;">
+                <label style="font-weight:normal;display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" id="inbound-strict"> Strict Mode</label>
+                <label style="font-weight:normal;display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" id="inbound-rag-preload"> RAG Pre-load</label>
+                <label style="font-weight:normal;display:flex;align-items:center;gap:6px;font-size:12px;"><input type="checkbox" id="inbound-thinking-phrases"> Thinking Phrases</label>
+            </div>
+            <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e2e8f0;">
                 <label class="form-label">System Prompt</label>
-                <textarea id="inbound-prompt" rows="5" placeholder="You are a helpful receptionist for Alarm Watch. You answer questions about our alarm systems and services. Be friendly and professional." style="width:100%;"></textarea>
-                <span style="font-size:10px;color:#888;">Tell the AI who it is and how to behave. If a Knowledge Base is also selected, this prompt is used and the KB's reference documents are added as context.</span>
+                <textarea id="inbound-prompt" rows="4" placeholder="You are a helpful receptionist for Alarm Watch..." style="width:100%;font-size:12px;"></textarea>
             </div>
-            <div style="margin-top:12px;">
-                <label class="form-label">Greeting (what the AI says first)</label>
-                <input type="text" id="inbound-greeting" placeholder="Hello, thank you for calling. How can I help you today?" style="width:100%;">
-                <span style="font-size:10px;color:#888;">Leave blank to let the AI decide its own greeting based on the system prompt.</span>
+            <div style="margin-top:8px;">
+                <label class="form-label">Greeting</label>
+                <input type="text" id="inbound-greeting" placeholder="Hello, thank you for calling. How can I help you today?" style="width:100%;font-size:12px;">
             </div>
             <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;">
-                <button class="btn" style="background:#27ae60;" onclick="saveInboundConfig()"><i class="fa-solid fa-save"></i> Save Inbound Config</button>
+                <button class="btn" style="background:#27ae60;" onclick="saveInboundConfig()"><i class="fa-solid fa-save"></i> Save</button>
             </div>
         </div>
         </div><!-- /inbound-settings-body -->
@@ -3607,8 +3429,11 @@ var _inboundConfigId = null;
 
 function onInboundProviderChange() {
     var p = document.getElementById('inbound-provider').value;
-    var elRow = document.getElementById('inbound-el-agent-row');
-    if (elRow) elRow.style.display = p === 'elevenlabs' ? '' : 'none';
+    var isEL = p === 'elevenlabs';
+    ['inbound-el-agent-row','inbound-el-prompt-row','inbound-el-rag-row'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.style.display = isEL ? '' : 'none';
+    });
     // Load ElevenLabs agents if needed
     if (p === 'elevenlabs') {
         var agentSel = document.getElementById('inbound-el-agent');
@@ -3656,6 +3481,15 @@ function loadInboundConfig() {
         document.getElementById('inbound-strict').checked = c.strict_mode || false;
         document.getElementById('inbound-rag-preload').checked = c.rag_preload || false;
         document.getElementById('inbound-thinking-phrases').checked = c.thinking_phrases || false;
+        // ElevenLabs radio buttons
+        if (c.elevenlabs_prompt_source) {
+            var r = document.querySelector('input[name="inbound-el-prompt-source"][value="' + c.elevenlabs_prompt_source + '"]');
+            if (r) r.checked = true;
+        }
+        if (c.elevenlabs_rag_source) {
+            var r = document.querySelector('input[name="inbound-el-rag-source"][value="' + c.elevenlabs_rag_source + '"]');
+            if (r) r.checked = true;
+        }
         document.getElementById('inbound-prompt').value = c.system_prompt || '';
         document.getElementById('inbound-greeting').value = c.greeting || '';
         if (c.elevenlabs_agent_id) {
@@ -3691,6 +3525,8 @@ function saveInboundConfig() {
         system_prompt: document.getElementById('inbound-prompt').value,
         greeting: document.getElementById('inbound-greeting').value,
         elevenlabs_agent_id: document.getElementById('inbound-el-agent').value || null,
+        elevenlabs_prompt_source: (document.querySelector('input[name="inbound-el-prompt-source"]:checked') || {}).value || 'agent',
+        elevenlabs_rag_source: (document.querySelector('input[name="inbound-el-rag-source"]:checked') || {}).value || 'elevenlabs',
     };
     if (_inboundConfigId) payload.id = _inboundConfigId;
     fetch('/api/gemini/inbound-config', {
