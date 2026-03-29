@@ -15256,7 +15256,7 @@ def club_fitness_add_cash():
 
 @app.route("/api/club-fitness/save-weight", methods=["POST"])
 def club_fitness_save_weight():
-    """Save gym_scales_weight or final_weight for a signup entry."""
+    """Save gym_scales_weight or final_weight for a signup entry. Logs all changes to audit table."""
     data = request.json or {}
     sid = (data.get("stripe_session_id") or "").strip()
     if not sid:
@@ -15265,6 +15265,27 @@ def club_fitness_save_weight():
     if field not in ("gym_scales_weight", "final_weight"):
         return jsonify({"ok": False, "error": "Invalid field."}), 400
     value = (data.get("value") or "").strip()
+    force = data.get("force", False)
+
+    # Fetch current value for audit log + overwrite check
+    old_value = ""
+    try:
+        cur = requests.get(
+            f"{SUPABASE_URL}/rest/v1/challenge_signups",
+            params={"stripe_session_id": f"eq.{sid}", "select": field},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+            timeout=10
+        )
+        if cur.ok and cur.json():
+            old_value = (cur.json()[0].get(field) or "").strip()
+    except Exception:
+        pass
+
+    # Overwrite protection — if there's an existing value and it's different, require confirmation
+    if old_value and value != old_value and not force:
+        return jsonify({"ok": False, "confirm_overwrite": True, "old_value": old_value,
+                        "error": f"This will overwrite '{old_value}' with '{value}'"})
+
     try:
         r = requests.patch(
             f"{SUPABASE_URL}/rest/v1/challenge_signups",
@@ -15278,7 +15299,49 @@ def club_fitness_save_weight():
             },
             timeout=10
         )
+        # Audit log
+        if r.ok and value != old_value:
+            try:
+                requests.post(
+                    f"{SUPABASE_URL}/rest/v1/challenge_weight_audit",
+                    json={"stripe_session_id": sid, "field": field, "old_value": old_value or None,
+                          "new_value": value or None, "changed_by": session.get("email", "unknown")},
+                    headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                             "Content-Type": "application/json", "Prefer": "return=minimal"},
+                    timeout=5
+                )
+            except Exception:
+                pass
         return jsonify({"ok": r.ok})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/club-fitness/weight-snapshot", methods=["POST"])
+def club_fitness_weight_snapshot():
+    """Save a daily snapshot of all weights for backup/recovery."""
+    try:
+        from datetime import date
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/challenge_signups",
+            params={"select": "stripe_session_id,card_name,gym_scales_weight,final_weight,payment_link",
+                    "or": "(gym_scales_weight.neq.,final_weight.neq.)", "limit": "2000"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+            timeout=30
+        )
+        if not r.ok:
+            return jsonify({"ok": False, "error": f"HTTP {r.status_code}"}), 502
+        rows = r.json()
+        if not rows:
+            return jsonify({"ok": True, "count": 0, "message": "No weights to snapshot"})
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/challenge_weight_snapshots",
+            json={"snapshot_date": str(date.today()), "data": rows},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                     "Content-Type": "application/json", "Prefer": "return=minimal"},
+            timeout=15
+        )
+        return jsonify({"ok": True, "count": len(rows), "date": str(date.today())})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
@@ -16853,7 +16916,8 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         <button class="btn btn-cash" onclick="showCashModal()" title="Add a walk-in cash payment"><i class="fa-solid fa-money-bill-wave"></i> Add Cash Entry</button>
         <button class="btn" style="background:#3498db;color:white;" onclick="showQuickEntry()"><i class="fa-solid fa-mobile-screen"></i> Quick Entry</button>
         <button class="btn btn-fetch" id="btn-fetch" onclick="fetchSignups()" title="Download latest entries from Stripe"><i class="fa-brands fa-stripe-s"></i> Stripe Download</button>
-        {% if is_admin %}<button class="btn btn-export" onclick="exportCSV()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
+        {% if is_admin %}<button class="btn" style="background:#2c3e50;color:white;" onclick="snapshotWeights()" title="Backup all weights to database"><i class="fa-solid fa-database"></i> Backup Weights</button>
+        <button class="btn btn-export" onclick="exportCSV()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
         <button class="btn btn-clean" onclick="showCleanModal()"><i class="fa-solid fa-broom"></i> Clean Data</button>{% endif %}
         <button class="btn btn-booking" onclick="checkBookings()"><i class="fa-solid fa-calendar-check"></i> Check Bookings</button>
         {% if is_admin %}<button class="btn" style="background:#9b59b6;color:white;" onclick="guessGender()"><i class="fa-solid fa-venus-mars"></i> Guess Gender</button>
@@ -17913,17 +17977,25 @@ function toggleDetail(sid, rowEl) {
 }
 
 /* ── Sync / Export ── */
-function saveWeight(el) {
+function saveWeight(el, force) {
     var sid = el.getAttribute('data-sid');
     var field = el.getAttribute('data-field');
     var value = el.value.trim();
     el.style.borderColor = '#f0ad4e';
     fetch('/api/club-fitness/save-weight', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({stripe_session_id: sid, field: field, value: value})
+        body: JSON.stringify({stripe_session_id: sid, field: field, value: value, force: !!force})
     }).then(r=>r.json()).then(d=>{
+        if (d.confirm_overwrite) {
+            if (confirm('Overwrite existing value "' + d.old_value + '" with "' + value + '"?')) {
+                saveWeight(el, true);
+            } else {
+                el.value = d.old_value;
+                el.style.borderColor = '#ddd';
+            }
+            return;
+        }
         el.style.borderColor = d.ok ? '#27ae60' : '#e74c3c';
         setTimeout(function(){ el.style.borderColor = '#ddd'; }, 1500);
-        // Update local data too
         if (d.ok) {
             var row = _allRows.find(function(r){ return r.stripe_session_id === sid; });
             if (row) row[field] = value;
@@ -18443,6 +18515,15 @@ function guessGender() {
     });
 }
 
+// ── Weight Backup ──
+function snapshotWeights() {
+    if (!confirm('Save a backup snapshot of all current weights?')) return;
+    fetch('/api/club-fitness/weight-snapshot', {method:'POST'}).then(r=>r.json()).then(function(d) {
+        if (!d.ok) { alert('Error: ' + (d.error||'Unknown')); return; }
+        msg('Weight snapshot saved: ' + d.count + ' entries backed up (' + d.date + ')');
+    }).catch(function(e) { alert('Failed: ' + e); });
+}
+
 // ── Quick Entry ──
 function showQuickEntry() {
     if (!_allRows.length) { alert('Load signups first (select a payment link).'); return; }
@@ -18518,7 +18599,7 @@ function qeSelectPerson(sid) {
     h += '</div>';
     document.getElementById('qe-body').innerHTML = h;
 }
-function qeSave(sid) {
+function qeSave(sid, force) {
     var startEl = document.getElementById('qe-start-' + sid);
     var finalEl = document.getElementById('qe-final-' + sid);
     var startVal = startEl.value.trim();
@@ -18530,11 +18611,11 @@ function qeSave(sid) {
     var row = _allRows.find(function(r){ return r.stripe_session_id === sid; });
     if (startVal !== (row.gym_scales_weight||'')) {
         saves.push(fetch('/api/club-fitness/save-weight', {method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({stripe_session_id: sid, field: 'gym_scales_weight', value: startVal})}).then(r=>r.json()));
+            body: JSON.stringify({stripe_session_id: sid, field: 'gym_scales_weight', value: startVal, force: !!force})}).then(r=>r.json()));
     }
     if (finalVal !== (row.final_weight||'')) {
         saves.push(fetch('/api/club-fitness/save-weight', {method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({stripe_session_id: sid, field: 'final_weight', value: finalVal})}).then(r=>r.json()));
+            body: JSON.stringify({stripe_session_id: sid, field: 'final_weight', value: finalVal, force: !!force})}).then(r=>r.json()));
     }
     if (!saves.length) {
         btn.innerHTML = '<i class="fa-solid fa-check"></i> No changes';
@@ -18542,6 +18623,21 @@ function qeSave(sid) {
         return;
     }
     Promise.all(saves).then(function(results) {
+        var needsConfirm = results.some(function(d){ return d.confirm_overwrite; });
+        if (needsConfirm) {
+            var msgs = results.filter(function(d){ return d.confirm_overwrite; }).map(function(d){ return d.error; });
+            if (confirm(msgs.join('\n') + '\n\nOverwrite?')) {
+                qeSave(sid, true);
+            } else {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-save"></i> Save';
+                // Restore old values
+                results.forEach(function(d){ if (d.old_value !== undefined && d.confirm_overwrite) {
+                    if (startVal && d.old_value) startEl.value = d.old_value;
+                }});
+            }
+            return;
+        }
         var allOk = results.every(function(d){ return d.ok; });
         if (allOk) {
             if (row) { row.gym_scales_weight = startVal; row.final_weight = finalVal; }
