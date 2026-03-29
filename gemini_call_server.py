@@ -17,7 +17,9 @@ import uuid
 import hmac
 import base64
 import asyncio
+import math
 import logging
+import collections
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Set
@@ -41,6 +43,7 @@ SERVER_SECRET = os.getenv("GEMINI_CALL_SERVER_SECRET", "")
 SELF_URL = os.getenv("GEMINI_CALL_SERVER_SELF_URL", "http://localhost:8001")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 SERVER_VERSION = datetime.fromtimestamp(Path(__file__).stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 GEMINI_MODEL = "gemini-3.1-flash-live-preview"
@@ -1051,6 +1054,9 @@ async def handle_inbound_call(request: Request):
             settings["elevenlabs_agent_id"] = config["elevenlabs_agent_id"]
         settings["elevenlabs_prompt_source"] = config.get("elevenlabs_prompt_source", "knowledgebase")
         settings["elevenlabs_rag_source"] = config.get("elevenlabs_rag_source", "inhouse")
+    # Sentiment detection toggles
+    settings["sentiment_llm_enabled"] = config.get("sentiment_llm_enabled", False)
+    settings["sentiment_tone_enabled"] = config.get("sentiment_tone_enabled", False)
     # Multi-turn RAG
     if kb and kb.get("rag_enabled"):
         settings["rag_kb_id"] = kb_id
@@ -1366,6 +1372,77 @@ def _analyze_sentiment(text, current_sentiment, turns_since_negative):
     return current_sentiment, turns
 
 
+def _llm_sentiment_sync(recent_lines):
+    """Analyze sentiment via Claude Haiku. Runs in thread executor.
+    Returns 'neutral', 'frustrated', or 'angry', or None on failure."""
+    if not ANTHROPIC_API_KEY:
+        return None
+    try:
+        from anthropic import Anthropic
+        client = Anthropic(api_key=ANTHROPIC_API_KEY)
+        transcript_text = "\n".join(
+            f"{ln['speaker'].title()}: {ln['text']}" for ln in recent_lines
+        )
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=10,
+            messages=[{"role": "user", "content": (
+                "Based on this phone call transcript, what is the caller's current emotional state? "
+                "Consider tone, word choice, repetition, and context — not just explicit keywords. "
+                "Reply with exactly one word: neutral, frustrated, or angry.\n\n"
+                f"{transcript_text}"
+            )}],
+        )
+        result = resp.content[0].text.strip().lower()
+        if result in ("neutral", "frustrated", "angry"):
+            return result
+    except Exception as e:
+        log.error(f"LLM sentiment error: {e}")
+    return None
+
+
+# Mulaw decoding table (ITU-T G.711)
+_MULAW_DECODE = []
+for _i in range(256):
+    _i = ~_i
+    _sign = _i & 0x80
+    _exponent = (_i >> 4) & 0x07
+    _mantissa = _i & 0x0F
+    _sample = ((_mantissa << 3) + 0x84) << _exponent
+    _sample -= 0x84
+    _MULAW_DECODE.append(-_sample if _sign else _sample)
+
+
+def _analyze_audio_volume(mulaw_bytes, volume_state):
+    """Check audio volume for raised voice. Returns True if shouting detected.
+    volume_state is a dict with 'samples' (deque) and 'consecutive_loud' (int)."""
+    try:
+        # Decode mulaw to linear PCM and calculate RMS
+        total = 0
+        for b in mulaw_bytes:
+            s = _MULAW_DECODE[b]
+            total += s * s
+        n = len(mulaw_bytes)
+        if n == 0:
+            return False
+        rms = math.sqrt(total / n)
+        samples = volume_state["samples"]
+        samples.append(rms)
+        if len(samples) < 5:
+            return False  # Not enough baseline yet
+        avg = sum(samples) / len(samples)
+        if avg < 100:
+            return False  # Silence / very quiet — skip
+        if rms > avg * 2.5:
+            volume_state["consecutive_loud"] += 1
+        else:
+            volume_state["consecutive_loud"] = 0
+        # Sustained loud: 3+ consecutive chunks (~0.4s at 8kHz mulaw)
+        return volume_state["consecutive_loud"] >= 3
+    except Exception:
+        return False
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  TWILIO MEDIA STREAM ↔ GEMINI LIVE API BRIDGE
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1467,7 +1544,10 @@ async def media_stream(websocket: WebSocket, call_id: str):
         # RAG: check if multi-turn search is enabled for this call
         _rag_kb_id = call.get("settings", {}).get("rag_kb_id")
         _last_rag_query = {"text": ""}  # avoid duplicate searches
-        _sentiment_state = {"turns_since_negative": 0}
+        _sentiment_state = {"turns_since_negative": 0, "caller_turns": 0}
+        _sentiment_llm_enabled = call.get("settings", {}).get("sentiment_llm_enabled", False)
+        _sentiment_tone_enabled = call.get("settings", {}).get("sentiment_tone_enabled", False)
+        _volume_state = {"samples": collections.deque(maxlen=20), "consecutive_loud": 0}
         call["sentiment"] = "neutral"
         call["peak_sentiment"] = "neutral"  # Track worst sentiment reached
 
@@ -1503,7 +1583,7 @@ async def media_stream(websocket: WebSocket, call_id: str):
                         _log_error(call_id, f"RAG search error: {e}")
                 asyncio.create_task(_do_rag_search(text.strip()))
 
-            # Sentiment analysis
+            # Sentiment analysis (keyword-based — always active)
             new_sentiment, _sentiment_state["turns_since_negative"] = _analyze_sentiment(
                 text, call.get("sentiment", "neutral"), _sentiment_state["turns_since_negative"]
             )
@@ -1519,6 +1599,32 @@ async def media_stream(websocket: WebSocket, call_id: str):
                 })
                 if new_sentiment in ("frustrated", "angry"):
                     _log_error(call_id, f"Sentiment: {new_sentiment} — caller said: '{text.strip()[:80]}'")
+
+            # LLM sentiment analysis — runs every 3 caller turns (fire-and-forget)
+            _sentiment_state["caller_turns"] += 1
+            if _sentiment_llm_enabled and _sentiment_state["caller_turns"] % 3 == 0:
+                recent = [e for e in call.get("transcript", [])[-10:]]
+                async def _do_llm_sentiment(lines):
+                    try:
+                        loop = asyncio.get_event_loop()
+                        result = await loop.run_in_executor(None, _llm_sentiment_sync, lines)
+                        if not result:
+                            return
+                        _sev = {"neutral": 0, "positive": 0, "frustrated": 1, "angry": 2}
+                        cur = call.get("sentiment", "neutral")
+                        # Only upgrade severity — LLM can't downgrade below keyword result
+                        if _sev.get(result, 0) > _sev.get(cur, 0):
+                            call["sentiment"] = result
+                            if _sev[result] > _sev.get(call.get("peak_sentiment", "neutral"), 0):
+                                call["peak_sentiment"] = result
+                            await _broadcast_transcript(call_id, {
+                                "type": "sentiment", "value": result,
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            })
+                            _log_error(call_id, f"Sentiment (LLM): {result}")
+                    except Exception as e:
+                        _log_error(call_id, f"LLM sentiment task error: {e}")
+                asyncio.create_task(_do_llm_sentiment(recent))
 
         async def _auto_hangup_after_delay():
             """Wait 5 seconds after AI goodbye, then disconnect."""
@@ -1615,6 +1721,28 @@ async def media_stream(websocket: WebSocket, call_id: str):
                         # Send raw mulaw bytes — provider handles conversion
                         mulaw_bytes = base64.b64decode(data["media"]["payload"])
                         await provider.send_audio(mulaw_bytes)
+
+                        # Voice tone detection — check for raised voice / shouting
+                        if _sentiment_tone_enabled and _analyze_audio_volume(mulaw_bytes, _volume_state):
+                            _sev = {"neutral": 0, "positive": 0, "frustrated": 1, "angry": 2}
+                            cur = call.get("sentiment", "neutral")
+                            # Escalate: neutral→frustrated, frustrated→angry
+                            if cur in ("neutral", "positive"):
+                                tone_sentiment = "frustrated"
+                            elif cur == "frustrated":
+                                tone_sentiment = "angry"
+                            else:
+                                tone_sentiment = None
+                            if tone_sentiment and _sev.get(tone_sentiment, 0) > _sev.get(cur, 0):
+                                call["sentiment"] = tone_sentiment
+                                if _sev[tone_sentiment] > _sev.get(call.get("peak_sentiment", "neutral"), 0):
+                                    call["peak_sentiment"] = tone_sentiment
+                                asyncio.create_task(_broadcast_transcript(call_id, {
+                                    "type": "sentiment", "value": tone_sentiment,
+                                    "timestamp": datetime.now(timezone.utc).isoformat()
+                                }))
+                                _log_error(call_id, f"Sentiment (tone): {tone_sentiment} — raised voice detected")
+                                _volume_state["consecutive_loud"] = 0  # Reset after escalation
 
                     elif data["event"] == "stop":
                         await provider.flush_audio()

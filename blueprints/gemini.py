@@ -665,6 +665,8 @@ def save_inbound_config():
         "greeting": data.get("greeting", ""),
         "rag_preload": data.get("rag_preload", False),
         "thinking_phrases": data.get("thinking_phrases", False),
+        "sentiment_llm_enabled": data.get("sentiment_llm_enabled", False),
+        "sentiment_tone_enabled": data.get("sentiment_tone_enabled", False),
         "updated_at": "now()",
     }
     try:
@@ -1777,6 +1779,18 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
             </div>
         </div><!-- /documents-settings-body -->
         <div id="global-settings-body" style="display:none;margin-top:12px;">
+            <h4 style="font-size:13px;color:#555;margin-bottom:10px;"><i class="fa-solid fa-brain"></i> Sentiment Detection Methods</h4>
+            <p style="font-size:11px;color:#888;margin-bottom:10px;">These run alongside keyword matching. Keywords are always active.</p>
+            <div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid #e2e8f0;">
+                <label style="font-weight:normal;display:flex;align-items:flex-start;gap:6px;font-size:12px;max-width:320px;">
+                    <input type="checkbox" id="sentiment-llm-enabled" style="margin-top:2px;" onchange="saveSentimentToggles()">
+                    <span><strong>LLM Analysis</strong><br><span style="color:#888;font-size:11px;">Sends last few transcript lines to AI every 3 caller turns to detect subtle frustration that keywords miss.</span></span>
+                </label>
+                <label style="font-weight:normal;display:flex;align-items:flex-start;gap:6px;font-size:12px;max-width:320px;">
+                    <input type="checkbox" id="sentiment-tone-enabled" style="margin-top:2px;" onchange="saveSentimentToggles()">
+                    <span><strong>Voice Tone Detection</strong><br><span style="color:#888;font-size:11px;">Monitors audio volume for raised voice or shouting. Escalates sentiment when caller gets loud.</span></span>
+                </label>
+            </div>
             <h4 style="font-size:13px;color:#555;margin-bottom:10px;"><i class="fa-solid fa-shield-halved"></i> Sentiment Triggers</h4>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
                 <div>
@@ -2163,6 +2177,9 @@ function getCallSettings() {
         var ragSource = document.querySelector('input[name="el-rag-source"]:checked');
         settings.elevenlabs_rag_source = ragSource ? ragSource.value : 'elevenlabs';
     }
+    // Sentiment detection toggles (shared with inbound config)
+    settings.sentiment_llm_enabled = document.getElementById('sentiment-llm-enabled').checked;
+    settings.sentiment_tone_enabled = document.getElementById('sentiment-tone-enabled').checked;
     return settings;
 }
 
@@ -3506,6 +3523,9 @@ function loadInboundConfig() {
                 kbSel.value = c.knowledge_base_id;
             }
         }
+        // Sentiment detection toggles (shown on Global tab, saved with inbound config)
+        document.getElementById('sentiment-llm-enabled').checked = c.sentiment_llm_enabled || false;
+        document.getElementById('sentiment-tone-enabled').checked = c.sentiment_tone_enabled || false;
         if (c.enabled !== false) {
             badge.innerHTML = '<span class="badge badge-green">Active</span>';
             statusText.textContent = 'Inbound calls to your Twilio number will be answered by AI';
@@ -3532,6 +3552,8 @@ function saveInboundConfig() {
         elevenlabs_agent_id: document.getElementById('inbound-el-agent').value || null,
         elevenlabs_prompt_source: (document.querySelector('input[name="inbound-el-prompt-source"]:checked') || {}).value || 'agent',
         elevenlabs_rag_source: (document.querySelector('input[name="inbound-el-rag-source"]:checked') || {}).value || 'elevenlabs',
+        sentiment_llm_enabled: document.getElementById('sentiment-llm-enabled').checked,
+        sentiment_tone_enabled: document.getElementById('sentiment-tone-enabled').checked,
     };
     if (_inboundConfigId) payload.id = _inboundConfigId;
     fetch('/api/gemini/inbound-config', {
@@ -3543,6 +3565,25 @@ function saveInboundConfig() {
         if (d.config) _inboundConfigId = d.config.id;
         showStatus('Inbound config saved.', 'success');
         loadInboundConfig();
+    });
+}
+
+function saveSentimentToggles() {
+    if (!_inboundConfigId) { showStatus('Save inbound config first before enabling sentiment detection.', 'error'); return; }
+    var payload = {
+        id: _inboundConfigId,
+        sentiment_llm_enabled: document.getElementById('sentiment-llm-enabled').checked,
+        sentiment_tone_enabled: document.getElementById('sentiment-tone-enabled').checked,
+    };
+    fetch('/api/gemini/inbound-config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+    }).then(r=>r.json()).then(function(d) {
+        if (!d.ok) { alert('Error: ' + (d.error||'Unknown')); return; }
+        var llm = document.getElementById('sentiment-llm-enabled').checked;
+        var tone = document.getElementById('sentiment-tone-enabled').checked;
+        showStatus('Sentiment detection: LLM ' + (llm ? 'ON' : 'OFF') + ', Tone ' + (tone ? 'ON' : 'OFF'), 'success');
     });
 }
 
