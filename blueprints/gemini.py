@@ -1673,12 +1673,44 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- Call Settings (Outbound + Inbound) -->
+    <!-- Active Call Panel (hidden until call active) -->
+    <div class="card" id="active-call-panel" style="display:none;">
+        <h2>
+            <i class="fa-solid fa-phone-volume" style="color:#27ae60;"></i> Active Call
+            <span id="call-timer" class="call-timer" style="margin-left:auto;">00:00</span>
+        </h2>
+        <div class="call-controls">
+            <button class="btn btn-red btn-lg" onclick="hangUp()"><i class="fa-solid fa-phone-slash"></i> Hang Up</button>
+            <button class="btn btn-orange" onclick="toggleMonitor()" id="btn-monitor"><i class="fa-solid fa-headphones"></i> Monitor</button>
+            <button class="btn btn-purple" onclick="toggleBarge()" id="btn-barge"><i class="fa-solid fa-microphone"></i> Barge In</button>
+            <span id="call-status" style="font-size:12px;color:#888;margin-left:auto;"></span>
+        </div>
+        <div style="margin-top:12px;">
+            <strong style="font-size:12px;color:#555;"><i class="fa-solid fa-file-lines"></i> Live Transcript</strong>
+            <div class="transcript-panel" id="transcript-panel">
+                <div class="empty-state" style="color:#666;">Waiting for call to connect...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Supervisor: Active Calls -->
     <div class="card">
-        <div style="display:flex;gap:8px;align-items:center;">
+        <h2><i class="fa-solid fa-headset"></i> Active Calls
+            <span id="active-calls-count" class="badge badge-grey" style="margin-left:8px;">0</span>
+            <span id="active-calls-poll-dot" style="margin-left:auto;width:8px;height:8px;border-radius:50%;background:#27ae60;display:inline-block;" title="Polling active"></span>
+        </h2>
+        <div id="supervisor-calls-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:12px;margin-top:8px;">
+            <div class="empty-state" style="font-size:12px;color:#888;">No active calls</div>
+        </div>
+    </div>
+
+    <!-- Call Settings (Outbound + Inbound + Documents + Global) -->
+    <div class="card">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <button class="btn" id="btn-tab-outbound" style="background:#95a5a6;color:white;" onclick="showSettingsTab('outbound')"><i class="fa-solid fa-phone"></i> Outbound</button>
             <button class="btn" id="btn-tab-inbound" style="background:#95a5a6;color:white;" onclick="showSettingsTab('inbound')"><i class="fa-solid fa-phone-flip"></i> Inbound <span id="inbound-status-badge" style="margin-left:4px;"></span></button>
             <button class="btn" id="btn-tab-documents" style="background:#95a5a6;color:white;" onclick="showSettingsTab('documents')"><i class="fa-solid fa-book"></i> Documents</button>
+            <button class="btn" id="btn-tab-global" style="background:#95a5a6;color:white;" onclick="showSettingsTab('global')"><i class="fa-solid fa-gear"></i> Global</button>
             <span id="settings-tab-label" style="margin-left:auto;font-size:11px;color:#888;"></span>
         </div>
         <div id="outbound-settings-body" style="display:none;margin-top:12px;">
@@ -1740,80 +1772,40 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                 <div class="empty-state">Loading...</div>
             </div>
         </div><!-- /documents-settings-body -->
+        <div id="global-settings-body" style="display:none;margin-top:12px;">
+            <h4 style="font-size:13px;color:#555;margin-bottom:10px;"><i class="fa-solid fa-shield-halved"></i> Sentiment Triggers</h4>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+                <div>
+                    <h4 style="font-size:12px;color:#f39c12;margin-bottom:6px;"><span class="sentiment-dot frustrated"></span> Frustrated</h4>
+                    <div id="triggers-frustrated" style="font-size:11px;max-height:150px;overflow-y:auto;"></div>
+                </div>
+                <div>
+                    <h4 style="font-size:12px;color:#e74c3c;margin-bottom:6px;"><span class="sentiment-dot angry"></span> Angry</h4>
+                    <div id="triggers-angry" style="font-size:11px;max-height:150px;overflow-y:auto;"></div>
+                </div>
+                <div>
+                    <h4 style="font-size:12px;color:#27ae60;margin-bottom:6px;"><span class="sentiment-dot positive"></span> Positive</h4>
+                    <div id="triggers-positive" style="font-size:11px;max-height:150px;overflow-y:auto;"></div>
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:10px;">
+                <select id="new-trigger-level" style="min-width:120px;">
+                    <option value="frustrated">Frustrated</option>
+                    <option value="angry">Angry</option>
+                    <option value="positive">Positive</option>
+                </select>
+                <input type="text" id="new-trigger-phrase" placeholder="Add a trigger phrase..." style="flex:1;" onkeydown="if(event.key==='Enter')addTrigger()">
+                <button class="btn" style="background:#27ae60;font-size:11px;" onclick="addTrigger()"><i class="fa-solid fa-plus"></i> Add</button>
+            </div>
+            <h4 style="font-size:13px;color:#555;margin:16px 0 10px;padding-top:12px;border-top:1px solid #e2e8f0;"><i class="fa-solid fa-comment-dots"></i> Thinking Phrases</h4>
+            <span style="font-size:10px;color:#888;">Phrases the AI says while looking up reference documents.</span>
+            <div id="thinking-phrases-list" style="font-size:11px;max-height:150px;overflow-y:auto;margin:8px 0;"></div>
+            <div style="display:flex;gap:8px;">
+                <input type="text" id="new-thinking-phrase" placeholder="Add a thinking phrase..." style="flex:1;" onkeydown="if(event.key==='Enter')addThinkingPhrase()">
+                <button class="btn" style="background:#8e44ad;font-size:11px;" onclick="addThinkingPhrase()"><i class="fa-solid fa-plus"></i> Add</button>
+            </div>
+        </div><!-- /global-settings-body -->
     </div><!-- /combined settings card -->
-
-    <!-- Active Call Panel (hidden until call active) -->
-    <div class="card" id="active-call-panel" style="display:none;">
-        <h2>
-            <i class="fa-solid fa-phone-volume" style="color:#27ae60;"></i> Active Call
-            <span id="call-timer" class="call-timer" style="margin-left:auto;">00:00</span>
-        </h2>
-        <div class="call-controls">
-            <button class="btn btn-red btn-lg" onclick="hangUp()"><i class="fa-solid fa-phone-slash"></i> Hang Up</button>
-            <button class="btn btn-orange" onclick="toggleMonitor()" id="btn-monitor"><i class="fa-solid fa-headphones"></i> Monitor</button>
-            <button class="btn btn-purple" onclick="toggleBarge()" id="btn-barge"><i class="fa-solid fa-microphone"></i> Barge In</button>
-            <span id="call-status" style="font-size:12px;color:#888;margin-left:auto;"></span>
-        </div>
-        <div style="margin-top:12px;">
-            <strong style="font-size:12px;color:#555;"><i class="fa-solid fa-file-lines"></i> Live Transcript</strong>
-            <div class="transcript-panel" id="transcript-panel">
-                <div class="empty-state" style="color:#666;">Waiting for call to connect...</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Supervisor: Active Calls -->
-    <div class="card">
-        <h2><i class="fa-solid fa-headset"></i> Active Calls
-            <span id="active-calls-count" class="badge badge-grey" style="margin-left:8px;">0</span>
-            <span id="active-calls-poll-dot" style="margin-left:auto;width:8px;height:8px;border-radius:50%;background:#27ae60;display:inline-block;" title="Polling active"></span>
-        </h2>
-        <div id="supervisor-calls-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:12px;margin-top:8px;">
-            <div class="empty-state" style="font-size:12px;color:#888;">No active calls</div>
-        </div>
-        <div style="margin-top:12px;border-top:1px solid #e2e8f0;padding-top:10px;">
-            <button class="btn btn-grey" style="font-size:11px;" onclick="document.getElementById('sentiment-editor').style.display=document.getElementById('sentiment-editor').style.display==='none'?'block':'none'">
-                <i class="fa-solid fa-gear"></i> Edit Sentiment Triggers
-            </button>
-            <button class="btn btn-grey" style="font-size:11px;margin-left:6px;" onclick="document.getElementById('thinking-editor').style.display=document.getElementById('thinking-editor').style.display==='none'?'block':'none'">
-                <i class="fa-solid fa-comment-dots"></i> Edit Thinking Phrases
-            </button>
-            <div id="sentiment-editor" style="display:none;margin-top:10px;">
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
-                    <div>
-                        <h4 style="font-size:12px;color:#f39c12;margin-bottom:6px;"><span class="sentiment-dot frustrated"></span> Frustrated</h4>
-                        <div id="triggers-frustrated" style="font-size:11px;max-height:150px;overflow-y:auto;"></div>
-                    </div>
-                    <div>
-                        <h4 style="font-size:12px;color:#e74c3c;margin-bottom:6px;"><span class="sentiment-dot angry"></span> Angry</h4>
-                        <div id="triggers-angry" style="font-size:11px;max-height:150px;overflow-y:auto;"></div>
-                    </div>
-                    <div>
-                        <h4 style="font-size:12px;color:#27ae60;margin-bottom:6px;"><span class="sentiment-dot positive"></span> Positive</h4>
-                        <div id="triggers-positive" style="font-size:11px;max-height:150px;overflow-y:auto;"></div>
-                    </div>
-                </div>
-                <div style="display:flex;gap:8px;margin-top:10px;">
-                    <select id="new-trigger-level" style="min-width:120px;">
-                        <option value="frustrated">Frustrated</option>
-                        <option value="angry">Angry</option>
-                        <option value="positive">Positive</option>
-                    </select>
-                    <input type="text" id="new-trigger-phrase" placeholder="Add a trigger phrase..." style="flex:1;" onkeydown="if(event.key==='Enter')addTrigger()">
-                    <button class="btn" style="background:#27ae60;font-size:11px;" onclick="addTrigger()"><i class="fa-solid fa-plus"></i> Add</button>
-                </div>
-            </div>
-            <div id="thinking-editor" style="display:none;margin-top:10px;">
-                <h4 style="font-size:12px;color:#8e44ad;margin-bottom:6px;"><i class="fa-solid fa-comment-dots"></i> Thinking Phrases</h4>
-                <span style="font-size:10px;color:#888;">Phrases the AI says while looking up reference documents. Gives RAG time to return results.</span>
-                <div id="thinking-phrases-list" style="font-size:11px;max-height:150px;overflow-y:auto;margin:8px 0;"></div>
-                <div style="display:flex;gap:8px;">
-                    <input type="text" id="new-thinking-phrase" placeholder="Add a thinking phrase..." style="flex:1;" onkeydown="if(event.key==='Enter')addThinkingPhrase()">
-                    <button class="btn" style="background:#8e44ad;font-size:11px;" onclick="addThinkingPhrase()"><i class="fa-solid fa-plus"></i> Add</button>
-                </div>
-            </div>
-        </div>
-    </div>
 
     <!-- Upload Document Modal -->
     <div class="modal-overlay" id="upload-modal">
@@ -2123,7 +2115,8 @@ function showSettingsTab(tab) {
     var tabs = {
         outbound: {body: 'outbound-settings-body', btn: 'btn-tab-outbound', color: '#3498db'},
         inbound: {body: 'inbound-settings-body', btn: 'btn-tab-inbound', color: '#8e44ad'},
-        documents: {body: 'documents-settings-body', btn: 'btn-tab-documents', color: '#27ae60'}
+        documents: {body: 'documents-settings-body', btn: 'btn-tab-documents', color: '#27ae60'},
+        global: {body: 'global-settings-body', btn: 'btn-tab-global', color: '#e67e22'}
     };
     var clicked = tabs[tab];
     if (!clicked) return;
