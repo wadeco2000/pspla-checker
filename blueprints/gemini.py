@@ -326,8 +326,14 @@ def gemini_end_call():
 @gemini_bp.route("/api/gemini/call-history", methods=["GET"])
 def gemini_call_history():
     try:
+        limit = request.args.get("limit", "10")
+        if limit != "all":
+            try:
+                limit = str(min(int(limit), 1000))
+            except ValueError:
+                limit = "10"
         r = _requests.get(f"{SUPABASE_URL}/rest/v1/gemini_call_history",
-            params={"select": "*", "order": "started_at.desc", "limit": "100"},
+            params={"select": "*", "order": "started_at.desc", **({"limit": limit} if limit != "all" else {})},
             headers=_sb_headers(), timeout=10)
         return jsonify({"ok": True, "calls": r.json() if r.ok else []})
     except Exception as e:
@@ -2794,11 +2800,20 @@ function _stopBarge() {
 }
 
 // ── Call History ──
-function loadHistory() {
-    fetch('/api/gemini/call-history').then(r=>r.json()).then(d=>{
+var _historyLimit = 10;
+function loadHistory(limit) {
+    if (limit !== undefined) _historyLimit = limit;
+    fetch('/api/gemini/call-history?limit=' + _historyLimit).then(r=>r.json()).then(d=>{
         if (!d.ok) { document.getElementById('history-container').innerHTML = '<div class="empty-state">Error loading history.</div>'; return; }
         if (!d.calls.length) { document.getElementById('history-container').innerHTML = '<div class="empty-state">No calls yet.</div>'; return; }
-        var html = '<table class="history-table"><thead><tr><th></th><th>Date</th><th>To</th><th>Duration</th><th>Status</th><th>AI</th><th>Cost (NZD)</th><th>KB</th><th>User</th><th>Transcript</th><th>Recording</th></tr></thead><tbody>';
+        var limitBar = '<div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;font-size:11px;">'
+            + '<span style="color:#888;">Show:</span>'
+            + [10,50,100,200,'all'].map(function(n) {
+                var active = String(_historyLimit) === String(n);
+                return '<button style="border:1px solid ' + (active ? '#3498db' : '#ddd') + ';background:' + (active ? '#3498db' : '#fff') + ';color:' + (active ? '#fff' : '#555') + ';padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px;" onclick="loadHistory(\'' + n + '\')">' + n + '</button>';
+            }).join('')
+            + '<span style="color:#888;margin-left:8px;">(' + d.calls.length + ' loaded)</span></div>';
+        var html = limitBar + '<table class="history-table"><thead><tr><th></th><th>Date</th><th>To</th><th>Duration</th><th>Status</th><th>AI</th><th>Cost (NZD)</th><th>KB</th><th>User</th><th>Transcript</th><th>Recording</th></tr></thead><tbody>';
         d.calls.forEach(function(c){
             var date = c.started_at ? new Date(c.started_at).toLocaleString('en-NZ', {day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '-';
             var dur = c.duration_seconds ? Math.floor(c.duration_seconds/60) + 'm ' + (c.duration_seconds%60) + 's' : '-';
