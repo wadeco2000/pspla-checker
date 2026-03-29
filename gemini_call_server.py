@@ -1006,10 +1006,33 @@ async def handle_inbound_call(request: Request):
     if not system_instruction:
         system_instruction = "You are a helpful AI assistant answering phone calls."
 
-    # For inbound, skip pre-computed RAG — rely on mid-call RAG instead.
-    # Pre-computed RAG needs a specific query but we don't know what the caller will ask yet.
-    # Mid-call RAG searches based on each caller utterance which is much more relevant.
-    if kb and kb.get("rag_enabled"):
+    # Pre-load document chunks if enabled — gives AI reference material from the first turn
+    if kb and kb.get("rag_enabled") and config.get("rag_preload"):
+        try:
+            import requests as _req
+            # Get document IDs for this KB
+            r = _req.get(f"{SUPABASE_URL}/rest/v1/rag_kb_documents",
+                params={"select": "document_id", "knowledge_base_id": f"eq.{kb_id}"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                timeout=5)
+            doc_ids = [d["document_id"] for d in r.json()] if r.ok else []
+            if doc_ids:
+                r2 = _req.get(f"{SUPABASE_URL}/rest/v1/rag_chunks",
+                    params={"select": "content", "document_id": f"in.({','.join(str(d) for d in doc_ids)})",
+                             "order": "chunk_index.asc", "limit": "15"},
+                    headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                    timeout=10)
+                if r2.ok and r2.json():
+                    preload_text = "\n\n---\n\n".join(c["content"] for c in r2.json())
+                    system_instruction += (
+                        "\n\n--- REFERENCE DOCUMENTS (pre-loaded) ---\n"
+                        "The following are excerpts from reference documents. Use this information to answer questions accurately.\n\n"
+                        + preload_text
+                    )
+                    _log_error("inbound", f"RAG pre-loaded {len(r2.json())} chunks ({len(preload_text)} chars)")
+        except Exception as e:
+            _log_error("inbound", f"RAG pre-load error: {e}")
+    elif kb and kb.get("rag_enabled"):
         _log_error("inbound", f"RAG enabled for kb {kb_id} — mid-call search will handle document lookups")
 
     # Build settings
@@ -1028,6 +1051,26 @@ async def handle_inbound_call(request: Request):
     # Multi-turn RAG
     if kb and kb.get("rag_enabled"):
         settings["rag_kb_id"] = kb_id
+
+    # Add thinking phrases instruction if enabled
+    if config.get("thinking_phrases"):
+        try:
+            import requests as _req
+            _tp = _req.get(f"{SUPABASE_URL}/rest/v1/gemini_thinking_phrases",
+                params={"select": "phrase", "order": "id.asc"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                timeout=5)
+            if _tp.ok and _tp.json():
+                phrases = [p["phrase"] for p in _tp.json()]
+                system_instruction += (
+                    "\n\nTHINKING BEHAVIOUR: When someone asks a question that requires looking up information, "
+                    "briefly say one of these thinking phrases before answering (pick randomly, don't always use the same one): "
+                    + ", ".join(f'"{p}"' for p in phrases)
+                    + ". This gives you a moment to check your reference materials before responding. "
+                    "After saying the thinking phrase, pause briefly, then give your full answer."
+                )
+        except Exception:
+            pass
 
     # Add greeting instruction
     greeting = config.get("greeting", "").strip()

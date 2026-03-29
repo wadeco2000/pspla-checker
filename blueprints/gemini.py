@@ -216,6 +216,41 @@ def gemini_make_call():
     if kb_id and use_rag:
         settings["rag_kb_id"] = kb_id
 
+    # Pre-load document chunks if enabled
+    if use_rag and kb_id and settings.get("rag_preload"):
+        try:
+            _preload = _requests.get(f"{SUPABASE_URL}/rest/v1/rag_chunks",
+                params={"select": "content", "document_id": f"in.({','.join(str(d) for d in _get_kb_doc_ids(kb_id))})",
+                         "order": "chunk_index.asc", "limit": "15"},
+                headers=_sb_headers(), timeout=10)
+            if _preload.ok and _preload.json():
+                preload_text = "\n\n---\n\n".join(c["content"] for c in _preload.json())
+                system_instruction += (
+                    "\n\n--- REFERENCE DOCUMENTS (pre-loaded) ---\n"
+                    "The following are excerpts from reference documents. Use this information to answer questions accurately.\n\n"
+                    + preload_text
+                )
+        except Exception:
+            pass
+
+    # Add thinking phrases instruction if enabled
+    if settings.get("thinking_phrases"):
+        try:
+            _tp = _requests.get(f"{SUPABASE_URL}/rest/v1/gemini_thinking_phrases",
+                params={"select": "phrase", "order": "id.asc"},
+                headers=_sb_headers(), timeout=5)
+            if _tp.ok and _tp.json():
+                phrases = [p["phrase"] for p in _tp.json()]
+                system_instruction += (
+                    "\n\nTHINKING BEHAVIOUR: When someone asks a question that requires looking up information, "
+                    "briefly say one of these thinking phrases before answering (pick randomly, don't always use the same one): "
+                    + ", ".join(f'"{p}"' for p in phrases)
+                    + ". This gives you a moment to check your reference materials before responding. "
+                    "After saying the thinking phrase, pause briefly, then give your full answer."
+                )
+        except Exception:
+            pass
+
     # Log RAG status for debugging
     _rag_debug = {
         "rag_enabled": use_rag,
@@ -529,6 +564,47 @@ def delete_sentiment_trigger(trigger_id):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  THINKING PHRASES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@gemini_bp.route("/api/gemini/thinking-phrases", methods=["GET"])
+def get_thinking_phrases():
+    try:
+        r = _requests.get(f"{SUPABASE_URL}/rest/v1/gemini_thinking_phrases",
+            params={"select": "id,phrase", "order": "id.asc"},
+            headers=_sb_headers(), timeout=10)
+        return jsonify({"ok": True, "phrases": r.json() if r.ok else []})
+    except Exception as e:
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
+
+
+@gemini_bp.route("/api/gemini/thinking-phrases", methods=["POST"])
+def add_thinking_phrase():
+    data = request.json or {}
+    phrase = data.get("phrase", "").strip()
+    if not phrase:
+        return jsonify({"ok": False, "error": "Phrase required"}), 400
+    try:
+        r = _requests.post(f"{SUPABASE_URL}/rest/v1/gemini_thinking_phrases",
+            json={"phrase": phrase},
+            headers={**_sb_headers(), "Prefer": "return=representation"}, timeout=10)
+        return jsonify({"ok": True, "phrase": r.json()[0] if r.ok and r.json() else None})
+    except Exception as e:
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
+
+
+@gemini_bp.route("/api/gemini/thinking-phrases/<int:phrase_id>", methods=["DELETE"])
+def delete_thinking_phrase(phrase_id):
+    try:
+        _requests.delete(f"{SUPABASE_URL}/rest/v1/gemini_thinking_phrases",
+            params={"id": f"eq.{phrase_id}"},
+            headers={**_sb_headers(), "Prefer": "return=minimal"}, timeout=10)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": _safe_error(e)}), 502
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  ACTIVE CALLS (proxy to call server — adds auth)
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -580,6 +656,8 @@ def save_inbound_config():
         "elevenlabs_rag_source": data.get("elevenlabs_rag_source", "inhouse"),
         "system_prompt": data.get("system_prompt", ""),
         "greeting": data.get("greeting", ""),
+        "rag_preload": data.get("rag_preload", False),
+        "thinking_phrases": data.get("thinking_phrases", False),
         "updated_at": "now()",
     }
     try:
@@ -984,6 +1062,19 @@ def _process_document_bg(doc_id, source_type, source_url=None, file_bytes_b64=No
 
     except Exception as e:
         _update_doc_status(doc_id, "error", error_message=str(e)[:500])
+
+
+def _get_kb_doc_ids(kb_id):
+    """Get document IDs attached to a knowledge base."""
+    try:
+        r = _requests.get(f"{SUPABASE_URL}/rest/v1/rag_kb_documents",
+            params={"select": "document_id", "knowledge_base_id": f"eq.{kb_id}"},
+            headers=_sb_headers(), timeout=5)
+        if r.ok:
+            return [d["document_id"] for d in r.json()]
+    except Exception:
+        pass
+    return []
 
 
 def _rag_search(kb_id, query_text, top_k=5):
@@ -1688,6 +1779,20 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                 </label>
                 <span style="font-size:10px;color:#888;">When enabled, the AI will only use information from the knowledge base and uploaded documents. It will decline to answer questions not covered by your materials.</span>
             </div>
+            <div>
+                <label class="form-label">RAG Pre-load</label>
+                <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;">
+                    <input type="checkbox" id="set-rag-preload"> Pre-load document chunks at call start
+                </label>
+                <span style="font-size:10px;color:#888;">Loads reference material into the AI's context before the call starts, so it can answer from the first question.</span>
+            </div>
+            <div>
+                <label class="form-label">Thinking Phrases</label>
+                <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;">
+                    <input type="checkbox" id="set-thinking-phrases"> AI says filler while searching documents
+                </label>
+                <span style="font-size:10px;color:#888;">The AI says "Let me check that..." while RAG searches run, giving time for results to arrive before answering.</span>
+            </div>
         </div>
         <div data-provider="gemini" style="margin-top:12px;padding:8px;background:#fff3cd;border-radius:6px;font-size:11px;color:#856404;">
             <i class="fa-solid fa-info-circle"></i> <strong>Affective Dialog</strong> and <strong>Proactive Audio</strong> require Gemini 2.5 Flash Live (not available on 3.1). These features will be added when model support is confirmed.
@@ -1727,6 +1832,9 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
             <button class="btn btn-grey" style="font-size:11px;" onclick="document.getElementById('sentiment-editor').style.display=document.getElementById('sentiment-editor').style.display==='none'?'block':'none'">
                 <i class="fa-solid fa-gear"></i> Edit Sentiment Triggers
             </button>
+            <button class="btn btn-grey" style="font-size:11px;margin-left:6px;" onclick="document.getElementById('thinking-editor').style.display=document.getElementById('thinking-editor').style.display==='none'?'block':'none'">
+                <i class="fa-solid fa-comment-dots"></i> Edit Thinking Phrases
+            </button>
             <div id="sentiment-editor" style="display:none;margin-top:10px;">
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
                     <div>
@@ -1750,6 +1858,15 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                     </select>
                     <input type="text" id="new-trigger-phrase" placeholder="Add a trigger phrase..." style="flex:1;" onkeydown="if(event.key==='Enter')addTrigger()">
                     <button class="btn" style="background:#27ae60;font-size:11px;" onclick="addTrigger()"><i class="fa-solid fa-plus"></i> Add</button>
+                </div>
+            </div>
+            <div id="thinking-editor" style="display:none;margin-top:10px;">
+                <h4 style="font-size:12px;color:#8e44ad;margin-bottom:6px;"><i class="fa-solid fa-comment-dots"></i> Thinking Phrases</h4>
+                <span style="font-size:10px;color:#888;">Phrases the AI says while looking up reference documents. Gives RAG time to return results.</span>
+                <div id="thinking-phrases-list" style="font-size:11px;max-height:150px;overflow-y:auto;margin:8px 0;"></div>
+                <div style="display:flex;gap:8px;">
+                    <input type="text" id="new-thinking-phrase" placeholder="Add a thinking phrase..." style="flex:1;" onkeydown="if(event.key==='Enter')addThinkingPhrase()">
+                    <button class="btn" style="background:#8e44ad;font-size:11px;" onclick="addThinkingPhrase()"><i class="fa-solid fa-plus"></i> Add</button>
                 </div>
             </div>
         </div>
@@ -1814,6 +1931,18 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                     <label class="form-label">Strict Mode</label>
                     <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;">
                         <input type="checkbox" id="inbound-strict"> Only answer from reference documents
+                    </label>
+                </div>
+                <div>
+                    <label class="form-label">RAG Pre-load</label>
+                    <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;">
+                        <input type="checkbox" id="inbound-rag-preload"> Pre-load document chunks at call start
+                    </label>
+                </div>
+                <div>
+                    <label class="form-label">Thinking Phrases</label>
+                    <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:4px;">
+                        <input type="checkbox" id="inbound-thinking-phrases"> AI says filler while searching
                     </label>
                 </div>
             </div>
@@ -2150,6 +2279,8 @@ function getCallSettings() {
         end_sensitivity: document.getElementById('set-end-sensitivity').value,
         silence_duration_ms: parseInt(document.getElementById('set-silence-ms').value) || 500,
         strict_mode: document.getElementById('set-strict-mode').checked,
+        rag_preload: document.getElementById('set-rag-preload').checked,
+        thinking_phrases: document.getElementById('set-thinking-phrases').checked,
     };
     // Add ElevenLabs agent ID and prompt source if selected
     if (settings.ai_provider === 'elevenlabs') {
@@ -2252,6 +2383,8 @@ function _savePrefs() {
     localStorage.setItem('gemini_start_sensitivity', document.getElementById('set-start-sensitivity').value);
     localStorage.setItem('gemini_silence_ms', document.getElementById('set-silence-ms').value);
     localStorage.setItem('gemini_strict_mode', document.getElementById('set-strict-mode').checked);
+    localStorage.setItem('gemini_rag_preload', document.getElementById('set-rag-preload').checked);
+    localStorage.setItem('gemini_thinking_phrases', document.getElementById('set-thinking-phrases').checked);
     var ragSource = document.querySelector('input[name="el-rag-source"]:checked');
     if (ragSource) localStorage.setItem('gemini_el_rag_source', ragSource.value);
 }
@@ -2285,6 +2418,8 @@ function _restorePrefs() {
     if (savedSilence) document.getElementById('set-silence-ms').value = savedSilence;
     var savedStrict = localStorage.getItem('gemini_strict_mode');
     if (savedStrict === 'true') document.getElementById('set-strict-mode').checked = true;
+    if (localStorage.getItem('gemini_rag_preload') === 'true') document.getElementById('set-rag-preload').checked = true;
+    if (localStorage.getItem('gemini_thinking_phrases') === 'true') document.getElementById('set-thinking-phrases').checked = true;
 }
 _restorePrefs();
 
@@ -3361,6 +3496,37 @@ function deleteTrigger(id) {
 
 loadTriggers();
 
+// ── Thinking Phrases ──
+function loadThinkingPhrases() {
+    fetch('/api/gemini/thinking-phrases').then(r=>r.json()).then(function(d) {
+        var container = document.getElementById('thinking-phrases-list');
+        if (!d.ok || !d.phrases.length) { container.innerHTML = '<span style="color:#aaa;">No phrases</span>'; return; }
+        container.innerHTML = '';
+        d.phrases.forEach(function(p) {
+            container.innerHTML += '<div style="display:flex;align-items:center;gap:4px;padding:2px 0;">'
+                + '<span style="flex:1;">"' + esc(p.phrase) + '"</span>'
+                + '<button style="border:none;background:none;color:#e74c3c;cursor:pointer;font-size:10px;" onclick="deleteThinkingPhrase(' + p.id + ')"><i class="fa-solid fa-xmark"></i></button>'
+                + '</div>';
+        });
+    });
+}
+function addThinkingPhrase() {
+    var phrase = document.getElementById('new-thinking-phrase').value.trim();
+    if (!phrase) return;
+    fetch('/api/gemini/thinking-phrases', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({phrase: phrase})
+    }).then(r=>r.json()).then(function(d) {
+        if (!d.ok) { alert('Error: ' + (d.error||'Unknown')); return; }
+        document.getElementById('new-thinking-phrase').value = '';
+        loadThinkingPhrases();
+    });
+}
+function deleteThinkingPhrase(id) {
+    fetch('/api/gemini/thinking-phrases/' + id, {method: 'DELETE'}).then(r=>r.json()).then(function() { loadThinkingPhrases(); });
+}
+loadThinkingPhrases();
+
 // Start polling
 _supPollTimer = setInterval(_pollActiveCalls, 3000);
 _pollActiveCalls();
@@ -3398,6 +3564,8 @@ function loadInboundConfig() {
         if (c.language) document.getElementById('inbound-language').value = c.language;
         if (c.end_sensitivity) document.getElementById('inbound-end-sensitivity').value = c.end_sensitivity;
         document.getElementById('inbound-strict').checked = c.strict_mode || false;
+        document.getElementById('inbound-rag-preload').checked = c.rag_preload || false;
+        document.getElementById('inbound-thinking-phrases').checked = c.thinking_phrases || false;
         document.getElementById('inbound-prompt').value = c.system_prompt || '';
         document.getElementById('inbound-greeting').value = c.greeting || '';
         if (c.elevenlabs_agent_id) document.getElementById('inbound-el-agent').value = c.elevenlabs_agent_id;
@@ -3423,6 +3591,8 @@ function saveInboundConfig() {
         language: document.getElementById('inbound-language').value,
         end_sensitivity: document.getElementById('inbound-end-sensitivity').value,
         strict_mode: document.getElementById('inbound-strict').checked,
+        rag_preload: document.getElementById('inbound-rag-preload').checked,
+        thinking_phrases: document.getElementById('inbound-thinking-phrases').checked,
         system_prompt: document.getElementById('inbound-prompt').value,
         greeting: document.getElementById('inbound-greeting').value,
         elevenlabs_agent_id: document.getElementById('inbound-el-agent').value || null,
