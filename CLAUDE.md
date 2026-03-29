@@ -38,28 +38,27 @@ Python (Flask), Supabase (PostgreSQL REST API), Anthropic Claude API (Haiku + So
 - **Partners navbar** — dropdown groups Actuate, Shelly, Club Fitness (permission-gated)
 
 ## Deploy Process
-- **Dashboard:** Include `[deploy]` in commit message to trigger Azure deploy. Omit for code-only pushes.
-- **Workflow:** `.github/workflows/deploy-dashboard.yml` — condition: `contains(commit.message, '[deploy]')`
+- **Dashboard:** Use `gh workflow run deploy-dashboard.yml --repo wadeco2000/pspla-checker --ref main` to trigger. Or include `[deploy]` in commit message (but empty commits often get skipped).
+- **Workflow:** `.github/workflows/deploy-dashboard.yml`
 - **Azure:** `pspla-checker`, Linux, NZ North. Startup: `gunicorn --bind 0.0.0.0:8000 --timeout 600 --workers 1 dashboard:app`
-- **`--preload` removed** — boot takes ~33s without it vs 6+ min with it at 17k lines
 - **Health check:** `GET /health` returns 200 (in `_AUTH_SKIP`)
 - **Custom domain:** `www.psplachecker.co.nz` (redirects from `.azurewebsites.net`)
 - **Public site:** Run `generate_static.py` or click Publish Live. Deploys to `gh-pages` branch.
 - **Call server:** zip + `az webapp deploy` (see `docs/claude/gemini.md`)
-- **Deploy monitor:** `deploy_poll.bat` — 3-phase poll (Actions -> Azure -> custom domain)
+- **Deploy monitor:** `deploy_poll.bat` — uses `_deploy_check.py` helper to skip skipped runs. Launch with: `powershell -Command "Start-Process cmd -ArgumentList '/c C:\Users\WadeAdmin\pspla-checker\deploy_poll.bat'"`
+- **NEVER deploy without Wade's explicit permission.** Always ask first.
+- **NEVER use empty commits** for deploy triggers — they get skipped. Use `gh workflow run` instead.
 
 ## Common Tasks
 
 **Add a new Supabase column:**
-1. Add key to `RECORD_TEMPLATE` in `searcher.py`
-2. Populate in `process_and_save_company`
-3. Add to detail row HTML in `dashboard.py`
-4. User adds column in Supabase manually
+1. Run SQL via Supabase Management API (see memory/reference_supabase_sql.md)
+2. Add key to `RECORD_TEMPLATE` in `searcher.py` (if Companies table)
+3. Populate in `process_and_save_company`
+4. Add to detail row HTML in `dashboard.py`
 5. `check_schema()` auto-detects it
 
 **If LLM keeps rejecting good matches:** Check `lessons.json` for aggressive rules, `corrections.json` for blocked pairs.
-
-**Deploy:** Include `[deploy]` in final commit message only. No `[deploy]` for WIP commits.
 
 ## Detailed Reference Docs
 For full details on specific areas, read these files:
@@ -85,3 +84,24 @@ For full details on specific areas, read these files:
 ## Known Issues
 - Rapid successive deploys can cause Azure 409 Conflict — wait 1-2 min then manual deploy
 - Always verify `wc -l dashboard.py` before committing — local truncation observed during heavy editing
+- `stripe<15.0.0` pinned — v15 has breaking changes
+- Empty git commits don't reliably trigger GitHub Actions — use `gh workflow run` instead
+
+## Club Fitness Page
+- **Quick Weigh In** — full-screen overlay for mobile weight entry
+- **Gym Logos** — uploaded to Supabase Storage `gym-logos` bucket, shown in table + pie chart
+- **Staff View** — `?view=staff` query param hides admin-only buttons (JS must null-check hidden elements)
+- **Weight Protection** — audit log, overwrite confirmation, backup snapshots
+- **Email Templates** — configurable booking reminder via `challenge_email_templates` table
+- **Sentiment Triggers** — `gemini_sentiment_triggers` table, editable from Global settings tab
+
+## Gemini AI Calls
+- **Settings card** — 4 tabs: Outbound | Inbound | Documents | Global
+- **Outbound** — AI waits for person to answer, then introduces itself
+- **Inbound** — AI speaks greeting immediately when call connects
+- **ElevenLabs inbound** — uses `first_message` for greeting, empty for outbound
+- **RAG** — mid-call search (fire-and-forget), pre-load option, thinking phrases option
+- **Sentiment** — keyword-based, sticky (8-turn decay), peak tracked per call
+- **Supervisor** — Active Calls card with live transcript, monitor, barge per call
+- **Security** — Twilio signature validation, WebSocket tokens, admin-only debug
+- **Persistent logs** — `gemini_call_logs` table survives server restarts
