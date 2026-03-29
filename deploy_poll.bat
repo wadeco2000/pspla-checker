@@ -39,16 +39,16 @@ REM ---- PHASE 1: GitHub Actions ----
 echo  [Phase 1/3] Checking GitHub Actions deploy workflow...
 echo.
 
-REM Grab deploy details once
-gh run list --repo wadeco2000/pspla-checker --workflow deploy-dashboard.yml --limit 1 --json displayTitle,headSha,createdAt --jq ".[0].displayTitle" > %TEMP%\pspla_gh_title.txt 2>NUL
+REM Grab deploy details — find latest non-skipped run (in_progress, queued, or success)
+gh run list --repo wadeco2000/pspla-checker --workflow deploy-dashboard.yml --limit 5 --json displayTitle,headSha,createdAt,status,conclusion --jq "[.[] | select(.conclusion != \"skipped\")] | .[0].displayTitle" > %TEMP%\pspla_gh_title.txt 2>NUL
 set GH_TITLE=
 for /f "delims=" %%a in (%TEMP%\pspla_gh_title.txt) do set GH_TITLE=%%a
 
-gh run list --repo wadeco2000/pspla-checker --workflow deploy-dashboard.yml --limit 1 --json headSha --jq ".[0].headSha[0:7]" > %TEMP%\pspla_gh_sha.txt 2>NUL
+gh run list --repo wadeco2000/pspla-checker --workflow deploy-dashboard.yml --limit 5 --json headSha,status,conclusion --jq "[.[] | select(.conclusion != \"skipped\")] | .[0].headSha[0:7]" > %TEMP%\pspla_gh_sha.txt 2>NUL
 set GH_SHA=
 for /f "delims=" %%a in (%TEMP%\pspla_gh_sha.txt) do set GH_SHA=%%a
 
-gh run list --repo wadeco2000/pspla-checker --workflow deploy-dashboard.yml --limit 1 --json createdAt --jq ".[0].createdAt" > %TEMP%\pspla_gh_created.txt 2>NUL
+gh run list --repo wadeco2000/pspla-checker --workflow deploy-dashboard.yml --limit 5 --json createdAt,status,conclusion --jq "[.[] | select(.conclusion != \"skipped\")] | .[0].createdAt" > %TEMP%\pspla_gh_created.txt 2>NUL
 set GH_CREATED=
 for /f "delims=" %%a in (%TEMP%\pspla_gh_created.txt) do set GH_CREATED=%%a
 
@@ -58,7 +58,7 @@ if defined GH_CREATED echo   Started: !GH_CREATED!
 echo.
 
 :gh_loop
-gh run list --repo wadeco2000/pspla-checker --workflow deploy-dashboard.yml --limit 1 --json status,conclusion --jq ".[0].status + \" \" + .[0].conclusion" > %TEMP%\pspla_gh.txt 2>NUL
+gh run list --repo wadeco2000/pspla-checker --workflow deploy-dashboard.yml --limit 5 --json status,conclusion --jq "[.[] | select(.conclusion != \"skipped\")] | .[0].status + \" \" + (.[0].conclusion // \"\")" > %TEMP%\pspla_gh.txt 2>NUL
 set GH_STATUS=
 set GH_CONCLUSION=
 for /f "tokens=1,2" %%a in (%TEMP%\pspla_gh.txt) do (
@@ -68,7 +68,7 @@ for /f "tokens=1,2" %%a in (%TEMP%\pspla_gh.txt) do (
 
 if "!GH_STATUS!"=="" (
     echo  [%time%] GitHub Actions: could not fetch status, retrying...
-    timeout /t 10 /nobreak >NUL
+    ping -n 11 127.0.0.1 >NUL
     goto gh_loop
 )
 
@@ -76,13 +76,13 @@ echo  [%time%] GitHub Actions: !GH_STATUS! / !GH_CONCLUSION!
 
 if "!GH_STATUS!"=="completed" goto gh_done
 
-timeout /t 10 /nobreak >NUL
+ping -n 11 127.0.0.1 >NUL
 goto gh_loop
 
 :gh_done
 
 REM Grab finish time
-gh run list --repo wadeco2000/pspla-checker --workflow deploy-dashboard.yml --limit 1 --json updatedAt --jq ".[0].updatedAt" > %TEMP%\pspla_gh_fin.txt 2>NUL
+gh run list --repo wadeco2000/pspla-checker --workflow deploy-dashboard.yml --limit 5 --json updatedAt,conclusion --jq "[.[] | select(.conclusion != \"skipped\")] | .[0].updatedAt" > %TEMP%\pspla_gh_fin.txt 2>NUL
 set GH_FINISHED=
 for /f "delims=" %%a in (%TEMP%\pspla_gh_fin.txt) do set GH_FINISHED=%%a
 
@@ -128,7 +128,7 @@ if "!AZ_CODE!"=="200" goto azure_done
 if "!AZ_CODE!"=="301" goto azure_done
 if "!AZ_CODE!"=="302" goto azure_done
 
-timeout /t 15 /nobreak >NUL
+ping -n 16 127.0.0.1 >NUL
 goto azure_loop
 
 :azure_done
@@ -162,7 +162,7 @@ if "!SITE_CODE!"=="200" goto site_done
 if "!SITE_CODE!"=="301" goto site_done
 if "!SITE_CODE!"=="302" goto site_done
 
-timeout /t 10 /nobreak >NUL
+ping -n 11 127.0.0.1 >NUL
 goto domain_loop
 
 :site_done
