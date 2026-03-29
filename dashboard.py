@@ -15109,6 +15109,23 @@ def club_fitness_upload_gym_logo():
     file_bytes = f.read()
     if len(file_bytes) > 512000:
         return jsonify({"ok": False, "error": "File too large (max 500KB)"}), 400
+    # Resize to consistent size (80x80 max, maintain aspect ratio, PNG output)
+    try:
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(file_bytes))
+        img.thumbnail((80, 80), Image.LANCZOS)
+        if img.mode in ("RGBA", "P"):
+            pass  # Keep transparency for PNG
+        else:
+            img = img.convert("RGB")
+        buf = io.BytesIO()
+        out_format = "PNG" if img.mode == "RGBA" else "WEBP"
+        img.save(buf, format=out_format, quality=85)
+        file_bytes = buf.getvalue()
+        ext = "png" if out_format == "PNG" else "webp"
+    except Exception:
+        pass  # If resize fails, upload original
     # Sanitize filename from gym name
     import re as _re
     slug = _re.sub(r'[^a-z0-9]+', '-', gym_name.lower()).strip('-')
