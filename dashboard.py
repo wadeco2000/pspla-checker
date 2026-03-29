@@ -16797,6 +16797,30 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
             .ctrl-row select{width:100%;}
             .header-right{flex-wrap:wrap;}
         }
+        /* Quick Entry Overlay */
+        .qe-overlay{display:none;position:fixed;inset:0;background:#f5f5f5;z-index:2000;overflow-y:auto;}
+        .qe-header{background:#1a2332;color:white;padding:12px 16px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:1;}
+        .qe-header h2{font-size:16px;margin:0;flex:1;}
+        .qe-search{padding:12px 16px;}
+        .qe-search input{width:100%;padding:14px 16px;font-size:16px;border:2px solid #ddd;border-radius:10px;outline:none;}
+        .qe-search input:focus{border-color:#3498db;}
+        .qe-results{padding:0 16px;}
+        .qe-card{background:white;border-radius:10px;padding:14px 16px;margin-bottom:8px;box-shadow:0 1px 3px rgba(0,0,0,0.08);cursor:pointer;display:flex;justify-content:space-between;align-items:center;}
+        .qe-card:active{background:#f0f4ff;}
+        .qe-card .qe-name{font-weight:600;font-size:15px;}
+        .qe-card .qe-sub{font-size:12px;color:#888;}
+        .qe-card .qe-weight-status{font-size:11px;text-align:right;}
+        .qe-detail{padding:16px;}
+        .qe-detail .qe-person-name{font-size:22px;font-weight:700;margin-bottom:4px;}
+        .qe-detail .qe-info{font-size:14px;color:#555;margin:4px 0;}
+        .qe-detail .qe-weight-group{background:white;border-radius:10px;padding:16px;margin:12px 0;box-shadow:0 1px 3px rgba(0,0,0,0.08);}
+        .qe-detail .qe-weight-label{font-size:13px;font-weight:600;color:#555;margin-bottom:6px;}
+        .qe-detail .qe-weight-input{width:100%;padding:14px;font-size:20px;border:2px solid #ddd;border-radius:8px;text-align:center;outline:none;}
+        .qe-detail .qe-weight-input:focus{border-color:#3498db;}
+        .qe-btn{width:100%;padding:14px;border:none;border-radius:10px;font-size:16px;font-weight:600;cursor:pointer;margin-top:8px;display:flex;align-items:center;justify-content:center;gap:8px;}
+        .qe-btn-save{background:#27ae60;color:white;}
+        .qe-btn-next{background:#3498db;color:white;}
+        .qe-btn-back{background:#95a5a6;color:white;}
     </style>
 </head>
 <body>
@@ -16827,6 +16851,7 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         <button class="btn btn-del" id="btn-del-link" onclick="deleteLink()" style="display:none"><i class="fa-solid fa-trash"></i></button>{% endif %}
         <div style="flex:1"></div>
         <button class="btn btn-cash" onclick="showCashModal()" title="Add a walk-in cash payment"><i class="fa-solid fa-money-bill-wave"></i> Add Cash Entry</button>
+        <button class="btn" style="background:#3498db;color:white;" onclick="showQuickEntry()"><i class="fa-solid fa-mobile-screen"></i> Quick Entry</button>
         <button class="btn btn-fetch" id="btn-fetch" onclick="fetchSignups()" title="Download latest entries from Stripe"><i class="fa-brands fa-stripe-s"></i> Stripe Download</button>
         {% if is_admin %}<button class="btn btn-export" onclick="exportCSV()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
         <button class="btn btn-clean" onclick="showCleanModal()"><i class="fa-solid fa-broom"></i> Clean Data</button>{% endif %}
@@ -18418,6 +18443,119 @@ function guessGender() {
     });
 }
 
+// ── Quick Entry ──
+function showQuickEntry() {
+    if (!_allRows.length) { alert('Load signups first (select a payment link).'); return; }
+    document.getElementById('qe-overlay').style.display = 'block';
+    document.getElementById('qe-body').innerHTML = '';
+    qeShowSearch();
+}
+function closeQuickEntry() {
+    document.getElementById('qe-overlay').style.display = 'none';
+}
+function qeShowSearch() {
+    var h = '<div class="qe-search"><input type="text" id="qe-search-input" placeholder="Search by name, phone, email..." oninput="qeSearch()" autocomplete="off"></div>';
+    h += '<div class="qe-results" id="qe-results"></div>';
+    document.getElementById('qe-body').innerHTML = h;
+    setTimeout(function(){ document.getElementById('qe-search-input').focus(); }, 100);
+    qeSearch();
+}
+function qeSearch() {
+    var q = (document.getElementById('qe-search-input').value || '').toLowerCase().trim();
+    var rows = _allRows;
+    if (q) {
+        rows = rows.filter(function(r){
+            return (r.card_name||'').toLowerCase().indexOf(q) >= 0 ||
+                   (r.customer_email||'').toLowerCase().indexOf(q) >= 0 ||
+                   (r.customer_phone||'').toLowerCase().indexOf(q) >= 0 ||
+                   (r.custom_field_1||'').toLowerCase().indexOf(q) >= 0 ||
+                   (r.custom_field_2||'').toLowerCase().indexOf(q) >= 0 ||
+                   (r.custom_field_3||'').toLowerCase().indexOf(q) >= 0;
+        });
+    }
+    var html = '';
+    if (!rows.length) {
+        html = '<div style="text-align:center;padding:40px;color:#888;">No matches found</div>';
+    } else {
+        rows.slice(0, 50).forEach(function(r) {
+            var hasStart = r.gym_scales_weight && r.gym_scales_weight.trim();
+            var hasFinal = r.final_weight && r.final_weight.trim();
+            var statusHtml = '';
+            if (hasStart && hasFinal) statusHtml = '<span style="color:#27ae60;">Start: ' + esc(r.gym_scales_weight) + '<br>Final: ' + esc(r.final_weight) + '</span>';
+            else if (hasStart) statusHtml = '<span style="color:#27ae60;">Start: ' + esc(r.gym_scales_weight) + '</span><br><span style="color:#e74c3c;">No final</span>';
+            else statusHtml = '<span style="color:#e74c3c;">No weights</span>';
+            var name = (r.card_name||'').replace('[CASH] ','');
+            html += '<div class="qe-card" onclick="qeSelectPerson(\'' + esc(r.stripe_session_id) + '\')">';
+            html += '<div><div class="qe-name">' + esc(name) + '</div>';
+            html += '<div class="qe-sub">' + esc(r.custom_field_3||'') + (r.custom_field_2 ? ' · ' + esc(r.custom_field_2) : '') + '</div></div>';
+            html += '<div class="qe-weight-status">' + statusHtml + '</div>';
+            html += '</div>';
+        });
+        if (rows.length > 50) html += '<div style="text-align:center;padding:12px;color:#888;font-size:13px;">Showing 50 of ' + rows.length + ' — refine your search</div>';
+    }
+    document.getElementById('qe-results').innerHTML = html;
+}
+function qeSelectPerson(sid) {
+    var r = _allRows.find(function(row){ return row.stripe_session_id === sid; });
+    if (!r) return;
+    var name = (r.card_name||'').replace('[CASH] ','');
+    var h = '<div class="qe-detail">';
+    h += '<div class="qe-person-name">' + esc(name) + '</div>';
+    if (r.customer_phone) h += '<div class="qe-info"><i class="fa-solid fa-phone" style="width:20px;color:#888;"></i> ' + esc(r.customer_phone) + '</div>';
+    if (r.customer_email) h += '<div class="qe-info"><i class="fa-solid fa-envelope" style="width:20px;color:#888;"></i> ' + esc(r.customer_email) + '</div>';
+    if (r.custom_field_3) h += '<div class="qe-info"><i class="fa-solid fa-dumbbell" style="width:20px;color:#888;"></i> ' + esc(r.custom_field_3) + '</div>';
+    if (r.custom_field_2) h += '<div class="qe-info"><i class="fa-solid fa-bullseye" style="width:20px;color:#888;"></i> ' + esc(r.custom_field_2) + '</div>';
+    h += '<div class="qe-weight-group">';
+    h += '<div class="qe-weight-label">Starting Weight (kg)</div>';
+    h += '<input type="text" class="qe-weight-input" id="qe-start-' + esc(sid) + '" value="' + esc(r.gym_scales_weight||'') + '" inputmode="decimal" placeholder="e.g. 85.5">';
+    h += '</div>';
+    h += '<div class="qe-weight-group">';
+    h += '<div class="qe-weight-label">Final Weight (kg)</div>';
+    h += '<input type="text" class="qe-weight-input" id="qe-final-' + esc(sid) + '" value="' + esc(r.final_weight||'') + '" inputmode="decimal" placeholder="e.g. 82.0">';
+    h += '</div>';
+    h += '<button class="qe-btn qe-btn-save" id="qe-save-btn" onclick="qeSave(\'' + esc(sid) + '\')"><i class="fa-solid fa-save"></i> Save</button>';
+    h += '<button class="qe-btn qe-btn-next" onclick="qeShowSearch()"><i class="fa-solid fa-arrow-left"></i> Back to Search</button>';
+    h += '</div>';
+    document.getElementById('qe-body').innerHTML = h;
+}
+function qeSave(sid) {
+    var startEl = document.getElementById('qe-start-' + sid);
+    var finalEl = document.getElementById('qe-final-' + sid);
+    var startVal = startEl.value.trim();
+    var finalVal = finalEl.value.trim();
+    var btn = document.getElementById('qe-save-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
+    var saves = [];
+    var row = _allRows.find(function(r){ return r.stripe_session_id === sid; });
+    if (startVal !== (row.gym_scales_weight||'')) {
+        saves.push(fetch('/api/club-fitness/save-weight', {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({stripe_session_id: sid, field: 'gym_scales_weight', value: startVal})}).then(r=>r.json()));
+    }
+    if (finalVal !== (row.final_weight||'')) {
+        saves.push(fetch('/api/club-fitness/save-weight', {method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({stripe_session_id: sid, field: 'final_weight', value: finalVal})}).then(r=>r.json()));
+    }
+    if (!saves.length) {
+        btn.innerHTML = '<i class="fa-solid fa-check"></i> No changes';
+        setTimeout(function(){ btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-save"></i> Save'; }, 1000);
+        return;
+    }
+    Promise.all(saves).then(function(results) {
+        var allOk = results.every(function(d){ return d.ok; });
+        if (allOk) {
+            if (row) { row.gym_scales_weight = startVal; row.final_weight = finalVal; }
+            btn.innerHTML = '<i class="fa-solid fa-check"></i> Saved!';
+            btn.style.background = '#27ae60';
+            setTimeout(function(){ btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-save"></i> Save'; btn.style.background = '#27ae60'; }, 1500);
+        } else {
+            btn.innerHTML = '<i class="fa-solid fa-times"></i> Error';
+            btn.style.background = '#e74c3c';
+            setTimeout(function(){ btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-save"></i> Save'; btn.style.background = '#27ae60'; }, 2000);
+        }
+    });
+}
+
 // Init
 loadLinks();
 {% if default_payment_link %}
@@ -18437,6 +18575,16 @@ setTimeout(function(){
 }, 500);
 {% endif %}
 </script>
+
+<!-- Quick Entry Overlay -->
+<div class="qe-overlay" id="qe-overlay">
+    <div class="qe-header">
+        <h2><i class="fa-solid fa-weight-scale"></i> Quick Entry</h2>
+        <button style="background:none;border:none;color:white;font-size:20px;cursor:pointer;" onclick="closeQuickEntry()"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div id="qe-body"></div>
+</div>
+
 </body>
 </html>
 """
