@@ -1514,13 +1514,17 @@ async def media_stream(websocket: WebSocket, call_id: str):
 
                 # Check if AI said goodbye — schedule auto-hangup
                 # Check current turn AND last 2 AI transcripts (in case transcription is fragmented)
-                lower = full_text.lower()
+                # Normalize whitespace — Gemini adds double spaces in transcription
+                lower = " ".join(full_text.lower().split())
                 _GOODBYE_PHRASES = ["goodbye", "good bye", "bye bye", "bye!", "bye.",
                     "have a great day", "have a good day", "have a nice day", "have a wonderful day",
                     "take care", "thanks for your time", "thank you for your time",
-                    "talk to you soon", "speak to you soon", "cheers!", "cheers."]
+                    "talk to you soon", "speak to you soon", "speak soon",
+                    "cheers!", "cheers.", "see you later", "see ya",
+                    "thanks for calling", "thank you for calling",
+                    "feel free to call back", "call back anytime"]
                 # Also check recent AI transcript entries in case goodbye was split across turns
-                recent_ai = " ".join(t["text"] for t in call["transcript"][-3:] if t.get("speaker") == "ai").lower()
+                recent_ai = " ".join(" ".join(t["text"].split()) for t in call["transcript"][-3:] if t.get("speaker") == "ai").lower()
                 _log_error(call_id, f"Goodbye check: current='{lower[:80]}' recent='{recent_ai[:80]}'")
                 if any(phrase in lower for phrase in _GOODBYE_PHRASES) or any(phrase in recent_ai for phrase in _GOODBYE_PHRASES):
                     if not _hangup_scheduled["task"]:
