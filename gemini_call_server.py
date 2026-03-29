@@ -1288,21 +1288,36 @@ def _get_sentiment_triggers():
 
 
 def _analyze_sentiment(text, current_sentiment, turns_since_negative):
-    """Keyword-based sentiment analysis. Returns (sentiment, turns_since_negative)."""
+    """Keyword-based sentiment analysis. Returns (sentiment, turns_since_negative).
+
+    Rules:
+    - Angry/frustrated triggers always escalate regardless of current state
+    - Positive phrases DON'T downgrade angry/frustrated — politeness doesn't mean the issue is resolved
+    - Angry decays to frustrated after 8 calm turns, never straight to neutral
+    - Frustrated decays to neutral after 8 calm turns
+    - "Calm turn" = no angry/frustrated/positive trigger detected
+    """
     triggers = _get_sentiment_triggers()
     lower = text.lower().strip()
+    # Check for escalation (always takes priority)
     for phrase in triggers.get("angry", []):
         if phrase in lower:
             return "angry", 0
     for phrase in triggers.get("frustrated", []):
         if phrase in lower:
             return "frustrated", 0
+    # Check for positive — but don't downgrade negative sentiment
     for phrase in triggers.get("positive", []):
         if phrase in lower:
+            if current_sentiment in ("angry", "frustrated"):
+                # Stay at current negative level — being polite doesn't erase frustration
+                return current_sentiment, turns_since_negative + 1
             return "positive", turns_since_negative + 1
-    # Decay: reset to neutral after 3 calm turns
+    # No trigger hit — count as calm turn
     turns = turns_since_negative + 1
-    if current_sentiment in ("frustrated", "angry") and turns >= 3:
+    if current_sentiment == "angry" and turns >= 8:
+        return "frustrated", 0  # Downgrade angry to frustrated, not neutral
+    if current_sentiment == "frustrated" and turns >= 8:
         return "neutral", turns
     return current_sentiment, turns
 
