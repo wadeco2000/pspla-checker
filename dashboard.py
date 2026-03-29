@@ -17100,6 +17100,7 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
                 <label>To:</label> <input type="date" id="chart-to" onchange="updateCharts()">
             </div>
             <canvas id="gym-chart" height="280"></canvas>
+            <div id="gym-chart-legend" style="margin-top:8px;"></div>
         </div>
         <div class="chart-card">
             <h3><i class="fa-solid fa-weight-scale" style="color:#e67e22"></i> How much do they want to lose? <span id="goal-chart-total" style="font-weight:normal;font-size:12px;color:#888;"></span></h3>
@@ -18342,7 +18343,8 @@ function showCleanModal() {
             var existing = gymMap[g.value] || '';
             var suggested = existing || suggestGym(g.value);
             var isMapped = !!existing;
-            html += '<div class="mapping-row' + (isMapped ? ' gym-mapped-row' : '') + '"' + (isMapped ? ' style="display:none"' : '') + '><span class="mr-count">' + g.count + 'x</span><span class="mr-raw">' + esc(g.value) + '</span><span class="mr-arrow">→</span>';
+            var logoHtml = _gymLogos[suggested] ? '<img src="' + esc(_gymLogos[suggested]) + '" style="height:18px;vertical-align:middle;margin-right:4px;border-radius:2px;">' : '';
+            html += '<div class="mapping-row' + (isMapped ? ' gym-mapped-row' : '') + '"' + (isMapped ? ' style="display:none"' : '') + '><span class="mr-count">' + g.count + 'x</span><span class="mr-raw">' + esc(g.value) + '</span><span class="mr-arrow">→</span>' + logoHtml;
             html += '<span class="mr-clean"><input type="text" id="gym-map-' + i + '" data-raw="' + esc(g.value).replace(/"/g,'&quot;') + '" value="' + esc(suggested).replace(/"/g,'&quot;') + '" list="gym-suggestions"' + (isMapped ? ' class="mapped"' : '') + '></span></div>';
         });
         html += '<datalist id="gym-suggestions">';
@@ -18547,6 +18549,20 @@ function updateCharts() {
     document.getElementById('gym-chart-total').textContent = '(' + gymTotal + ' total)';
     document.getElementById('goal-chart-total').textContent = '(' + goalTotal + ' total)';
     renderPie('gym-chart', gymCounts, '_gymChart');
+    // Build custom gym legend with logos
+    var gymLabels = Object.keys(gymCounts).sort(function(a,b){ return gymCounts[b]-gymCounts[a]; });
+    var legendHtml = '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
+    gymLabels.forEach(function(g, i) {
+        var color = _chartColors[i % _chartColors.length];
+        var logo = _gymLogos[g];
+        legendHtml += '<div style="display:flex;align-items:center;gap:4px;font-size:11px;padding:2px 6px;background:#f8f9fa;border-radius:4px;">';
+        legendHtml += '<span style="width:10px;height:10px;border-radius:2px;background:' + color + ';flex-shrink:0;"></span>';
+        if (logo) legendHtml += '<img src="' + esc(logo) + '" style="height:14px;border-radius:2px;">';
+        legendHtml += esc(g) + ' <span style="color:#888;">(' + gymCounts[g] + ')</span>';
+        legendHtml += '</div>';
+    });
+    legendHtml += '</div>';
+    document.getElementById('gym-chart-legend').innerHTML = legendHtml;
     renderPie('goal-chart', goalCounts, '_goalChart');
     // Gender bar chart
     var male = 0, female = 0, unknown = 0;
