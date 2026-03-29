@@ -2264,6 +2264,8 @@ function _savePrefs() {
     localStorage.setItem('gemini_thinking_phrases', document.getElementById('set-thinking-phrases').checked);
     var ragSource = document.querySelector('input[name="el-rag-source"]:checked');
     if (ragSource) localStorage.setItem('gemini_el_rag_source', ragSource.value);
+    var promptSource = document.querySelector('input[name="el-prompt-source"]:checked');
+    if (promptSource) localStorage.setItem('gemini_el_prompt_source', promptSource.value);
 }
 
 function _restorePrefs() {
