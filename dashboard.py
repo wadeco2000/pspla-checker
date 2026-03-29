@@ -17271,7 +17271,7 @@ function showManualMatch(sid, name, email, phone) {
 function showBookingEmail(email, name) {
     var firstName = name.split(' ')[0];
     var defaultSubject = 'Book your Fit3D Scan - Health Challenge';
-    var defaultBody = 'Hey ' + firstName + ',\\n\\nI see you\\'ve signed on for our challenge, but I can\\'t see that you\\'ve booked your first Fit3D Scan. You can do this here: https://clubfitnessnz.bookafy.com/mat-health-challenges?locale=en\\n\\nCheers!';
+    var defaultBody = "Hey " + firstName + ",\n\nI see you have signed on for our challenge, but I cannot see that you have booked your first Fit3D Scan. You can do this here: https://clubfitnessnz.bookafy.com/mat-health-challenges?locale=en\n\nCheers!";
     var html = '<h3><i class="fa-solid fa-envelope" style="color:#3498db"></i> Send Email</h3>';
     html += '<p style="font-size:12px;color:#555;">To: <strong>' + esc(email) + '</strong></p>';
     html += '<div style="margin-bottom:8px;"><label style="font-size:11px;font-weight:600;color:#555;">Subject:</label>';
