@@ -18657,7 +18657,7 @@ function renderPie(canvasId, counts, chartVar, logos) {
                     var drawCtx = chart.ctx;
                     // Draw logo if loaded
                     if (img && img.complete && img.naturalWidth) {
-                        var s = 24;
+                        var s = 36;
                         drawCtx.drawImage(img, cx - s/2, cy - s/2 - 6, s, s);
                     }
                     // Draw % and count below
