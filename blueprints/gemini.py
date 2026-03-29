@@ -3602,6 +3602,24 @@ function onInboundProviderChange() {
     var p = document.getElementById('inbound-provider').value;
     var elRow = document.getElementById('inbound-el-agent-row');
     if (elRow) elRow.style.display = p === 'elevenlabs' ? '' : 'none';
+    // Load ElevenLabs agents if needed
+    if (p === 'elevenlabs') {
+        var agentSel = document.getElementById('inbound-el-agent');
+        if (agentSel && agentSel.options.length <= 1) {
+            agentSel.innerHTML = '<option value="">Loading...</option>';
+            fetch('/api/gemini/elevenlabs-agents').then(r=>r.json()).then(function(d) {
+                agentSel.innerHTML = '<option value="">— None —</option>';
+                if (d.ok && d.agents) {
+                    d.agents.forEach(function(a) {
+                        agentSel.innerHTML += '<option value="' + esc(a.agent_id) + '">' + esc(a.name) + '</option>';
+                    });
+                }
+                // Restore saved value if available
+                var saved = localStorage.getItem('gemini_inbound_el_agent');
+                if (saved) agentSel.value = saved;
+            });
+        }
+    }
     // Update voice options
     var voiceSelect = document.getElementById('inbound-voice');
     var voices = _PROVIDER_VOICES[p] || _PROVIDER_VOICES.gemini;
@@ -3633,7 +3651,12 @@ function loadInboundConfig() {
         document.getElementById('inbound-thinking-phrases').checked = c.thinking_phrases || false;
         document.getElementById('inbound-prompt').value = c.system_prompt || '';
         document.getElementById('inbound-greeting').value = c.greeting || '';
-        if (c.elevenlabs_agent_id) document.getElementById('inbound-el-agent').value = c.elevenlabs_agent_id;
+        if (c.elevenlabs_agent_id) {
+            localStorage.setItem('gemini_inbound_el_agent', c.elevenlabs_agent_id);
+            // Try setting now (may not work if agents not loaded yet — fetch callback will retry)
+            var elSel = document.getElementById('inbound-el-agent');
+            if (elSel) elSel.value = c.elevenlabs_agent_id;
+        }
         // Set KB dropdown (needs KBs to be loaded first)
         if (c.knowledge_base_id) {
             var kbSel = document.getElementById('inbound-kb');
