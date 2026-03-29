@@ -18582,7 +18582,7 @@ function qeSearch() {
             if (hasStart && hasFinal) statusHtml = '<span style="color:#27ae60;">Start: ' + esc(r.gym_scales_weight) + '<br>Final: ' + esc(r.final_weight) + '</span>';
             else if (hasStart) statusHtml = '<span style="color:#27ae60;">Start: ' + esc(r.gym_scales_weight) + '</span><br><span style="color:#e74c3c;">No final</span>';
             else statusHtml = '<span style="color:#e74c3c;">No weights</span>';
-            var name = (r.card_name||'').replace('[CASH] ','');
+            var name = (r.custom_field_1 || r.card_name || '').replace('[CASH] ','');
             html += '<div class="qe-card" onclick="qeSelectPerson(\'' + esc(r.stripe_session_id) + '\')">';
             html += '<div><div class="qe-name">' + esc(name) + '</div>';
             html += '<div class="qe-sub">' + esc(r.custom_field_3||'') + (r.custom_field_2 ? ' · ' + esc(r.custom_field_2) : '') + '</div></div>';
@@ -18596,7 +18596,7 @@ function qeSearch() {
 function qeSelectPerson(sid) {
     var r = _allRows.find(function(row){ return row.stripe_session_id === sid; });
     if (!r) return;
-    var name = (r.card_name||'').replace('[CASH] ','');
+    var name = (r.custom_field_1 || r.card_name || '').replace('[CASH] ','');
     var h = '<div class="qe-detail">';
     h += '<div class="qe-person-name">' + esc(name) + '</div>';
     if (r.customer_phone) h += '<div class="qe-info"><i class="fa-solid fa-phone" style="width:20px;color:#888;"></i> ' + esc(r.customer_phone) + '</div>';
