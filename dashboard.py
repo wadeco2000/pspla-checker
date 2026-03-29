@@ -18543,7 +18543,8 @@ function qeShowSearch() {
 }
 function qeSearch() {
     var q = (document.getElementById('qe-search-input').value || '').toLowerCase().trim();
-    var rows = _allRows;
+    var cutoff = new Date(Date.now() - 8*7*24*60*60*1000).toISOString();
+    var rows = _allRows.filter(function(r){ return r.created_at >= cutoff; });
     if (q) {
         rows = rows.filter(function(r){
             return (r.card_name||'').toLowerCase().indexOf(q) >= 0 ||
