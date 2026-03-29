@@ -15075,6 +15075,40 @@ def _validate_payment_link(pl):
 
 
 @app.route("/api/club-fitness/send-booking-email", methods=["POST"])
+@app.route("/api/club-fitness/email-template", methods=["GET", "POST"])
+def club_fitness_email_template():
+    """GET: fetch email template. POST: update it."""
+    if request.method == "GET":
+        name = request.args.get("name", "booking_reminder")
+        try:
+            r = requests.get(f"{SUPABASE_URL}/rest/v1/challenge_email_templates",
+                params={"select": "*", "name": f"eq.{name}"},
+                headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}"},
+                timeout=10)
+            if r.ok and r.json():
+                return jsonify({"ok": True, "template": r.json()[0]})
+            return jsonify({"ok": True, "template": None})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 502
+    # POST — update
+    data = request.json or {}
+    name = data.get("name", "booking_reminder")
+    subject = data.get("subject", "").strip()
+    body = data.get("body", "").strip()
+    if not subject or not body:
+        return jsonify({"ok": False, "error": "Subject and body required"}), 400
+    try:
+        r = requests.post(f"{SUPABASE_URL}/rest/v1/challenge_email_templates",
+            json={"name": name, "subject": subject, "body": body, "updated_at": "now()"},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                     "Content-Type": "application/json", "Prefer": "resolution=merge-duplicates,return=representation"},
+            timeout=10)
+        return jsonify({"ok": True, "template": r.json()[0] if r.ok and r.json() else None})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@app.route("/api/club-fitness/send-booking-email", methods=["POST"])
 def club_fitness_send_booking_email():
     """Send a booking reminder email to a challenge signup."""
     data = request.json or {}
@@ -17289,19 +17323,63 @@ function showManualMatch(sid, name, email, phone) {
 
 function showBookingEmail(email, name) {
     var firstName = name.split(' ')[0];
-    var defaultSubject = 'Book your Fit3D Scan - Health Challenge';
-    var defaultBody = "Hey " + firstName + ",\n\nI see you have signed on for our challenge, but I cannot see that you have booked your first Fit3D Scan. You can do this here: https://clubfitnessnz.bookafy.com/mat-health-challenges?locale=en\n\nCheers!";
+    // Show loading while fetching template
     var html = '<h3><i class="fa-solid fa-envelope" style="color:#3498db"></i> Send Email</h3>';
-    html += '<p style="font-size:12px;color:#555;">To: <strong>' + esc(email) + '</strong></p>';
-    html += '<div style="margin-bottom:8px;"><label style="font-size:11px;font-weight:600;color:#555;">Subject:</label>';
-    html += '<input type="text" id="booking-email-subject" value="' + esc(defaultSubject) + '" style="width:100%;font-size:12px;"></div>';
-    html += '<div style="margin-bottom:8px;"><label style="font-size:11px;font-weight:600;color:#555;">Message:</label>';
-    html += '<textarea id="booking-email-body" rows="6" style="width:100%;font-size:12px;">' + defaultBody.replace(/\\n/g, '\n') + '</textarea></div>';
-    html += '<div class="modal-btns">';
-    html += '<button class="btn btn-cancel" onclick="closeModal(\'match-modal\')">Cancel</button>';
-    html += '<button class="btn" id="btn-send-booking" style="background:#27ae60;color:white;" onclick="sendBookingEmail(\'' + esc(email).replace(/'/g,"\\'") + '\')"><i class="fa-solid fa-paper-plane"></i> Send</button>';
-    html += '</div>';
+    html += '<p style="font-size:12px;color:#666;"><i class="fa-solid fa-spinner fa-spin"></i> Loading template...</p>';
     document.getElementById('match-modal-content').innerHTML = html;
+    fetch('/api/club-fitness/email-template?name=booking_reminder').then(r=>r.json()).then(function(d) {
+        var tpl = d.template || {};
+        var subject = tpl.subject || 'Book your Fit3D Scan - Health Challenge';
+        var body = (tpl.body || 'Hey {{first_name}},\n\nI see you have signed on for our challenge, but I cannot see that you have booked your first Fit3D Scan. You can do this here: https://clubfitnessnz.bookafy.com/mat-health-challenges?locale=en\n\nCheers!');
+        body = body.replace(/\{\{first_name\}\}/g, firstName);
+        var h = '<h3><i class="fa-solid fa-envelope" style="color:#3498db"></i> Send Email</h3>';
+        h += '<p style="font-size:12px;color:#555;">To: <strong>' + esc(email) + '</strong></p>';
+        h += '<div style="margin-bottom:8px;"><label style="font-size:11px;font-weight:600;color:#555;">Subject:</label>';
+        h += '<input type="text" id="booking-email-subject" value="' + esc(subject).replace(/"/g,'&quot;') + '" style="width:100%;font-size:12px;"></div>';
+        h += '<div style="margin-bottom:8px;"><label style="font-size:11px;font-weight:600;color:#555;">Message:</label>';
+        h += '<textarea id="booking-email-body" rows="6" style="width:100%;font-size:12px;">' + esc(body) + '</textarea></div>';
+        h += '<div class="modal-btns">';
+        h += '<button class="btn btn-cancel" onclick="closeModal(\'match-modal\')">Cancel</button>';
+        h += '<button class="btn" style="background:#3498db;color:white;font-size:11px;" onclick="showEditBookingTemplate()"><i class="fa-solid fa-pen"></i> Edit Template</button>';
+        h += '<button class="btn" id="btn-send-booking" style="background:#27ae60;color:white;" onclick="sendBookingEmail(\'' + esc(email).replace(/'/g,"\\'") + '\')"><i class="fa-solid fa-paper-plane"></i> Send</button>';
+        h += '</div>';
+        document.getElementById('match-modal-content').innerHTML = h;
+    });
+}
+
+function showEditBookingTemplate() {
+    fetch('/api/club-fitness/email-template?name=booking_reminder').then(r=>r.json()).then(function(d) {
+        var tpl = d.template || {};
+        var h = '<h3><i class="fa-solid fa-pen" style="color:#3498db"></i> Edit Email Template</h3>';
+        h += '<p style="font-size:11px;color:#888;">Use <code>{{first_name}}</code> to insert the recipient\'s first name.</p>';
+        h += '<div style="margin-bottom:8px;"><label style="font-size:11px;font-weight:600;color:#555;">Subject:</label>';
+        h += '<input type="text" id="tpl-subject" value="' + esc(tpl.subject||'').replace(/"/g,'&quot;') + '" style="width:100%;font-size:12px;"></div>';
+        h += '<div style="margin-bottom:8px;"><label style="font-size:11px;font-weight:600;color:#555;">Body:</label>';
+        h += '<textarea id="tpl-body" rows="8" style="width:100%;font-size:12px;">' + esc(tpl.body||'') + '</textarea></div>';
+        h += '<div class="modal-btns">';
+        h += '<button class="btn btn-cancel" onclick="closeModal(\'match-modal\')">Cancel</button>';
+        h += '<button class="btn" id="btn-save-tpl" style="background:#27ae60;color:white;" onclick="saveBookingTemplate()"><i class="fa-solid fa-save"></i> Save Template</button>';
+        h += '</div>';
+        document.getElementById('match-modal-content').innerHTML = h;
+    });
+}
+
+function saveBookingTemplate() {
+    var subject = document.getElementById('tpl-subject').value.trim();
+    var body = document.getElementById('tpl-body').value.trim();
+    if (!subject || !body) { alert('Subject and body required.'); return; }
+    var btn = document.getElementById('btn-save-tpl');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
+    fetch('/api/club-fitness/email-template', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: 'booking_reminder', subject: subject, body: body})
+    }).then(r=>r.json()).then(function(d) {
+        if (!d.ok) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-save"></i> Save Template'; alert('Error: ' + (d.error||'Unknown')); return; }
+        btn.innerHTML = '<i class="fa-solid fa-check"></i> Saved!';
+        msg('Email template saved.');
+        setTimeout(function(){ closeModal('match-modal'); }, 1000);
+    });
 }
 
 function sendBookingEmail(email) {
