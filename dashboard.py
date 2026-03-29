@@ -16896,6 +16896,8 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         {% if user_avatar %}<img src="{{ user_avatar }}" class="header-avatar" alt="">{% endif %}
         <span class="header-email">{{ user_email }}</span>
         <a href="/logout" class="header-signout"><i class="fa-solid fa-right-from-bracket"></i> Sign out</a>
+        {% if is_admin or preview_staff %}<a href="{{ '/club-fitness' if preview_staff else '/club-fitness?view=staff' }}" style="font-size:10px;color:#f39c12;margin-left:8px;text-decoration:none;border:1px solid #f39c12;padding:2px 8px;border-radius:4px;" title="Toggle admin/staff view"><i class="fa-solid fa-eye"></i> {{ 'Staff View' if not preview_staff else 'Admin View' }}</a>{% endif %}
+        {% if preview_staff %}<span style="font-size:10px;color:#f39c12;margin-left:4px;background:#fff3cd;padding:2px 8px;border-radius:4px;">Previewing as staff</span>{% endif %}
         <span style="font-size:10px;color:#556;margin-left:4px;"><i class="fa-solid fa-code-branch"></i> {{ git_version }}</span>
     </div>
 </div>
@@ -18694,9 +18696,13 @@ def club_fitness_page():
         (session.get("permissions") or _DEFAULT_PERMISSIONS).get(g)
         for g in ("searches", "database", "history", "utilities")
     )
+    # Allow admins to preview staff view with ?view=staff
+    preview_staff = _is_admin() and request.args.get("view") == "staff"
+    effective_admin = _is_admin() and not preview_staff
     return render_template_string(
         CLUB_FITNESS_TEMPLATE,
-        is_admin=_is_admin(),
+        is_admin=effective_admin,
+        preview_staff=preview_staff,
         has_pspla_access=has_pspla_access,
         user_email=session.get("email", ""),
         user_avatar=session.get("avatar_url", ""),
