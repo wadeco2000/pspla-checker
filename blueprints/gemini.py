@@ -1709,7 +1709,6 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <button class="btn" id="btn-tab-outbound" style="background:#95a5a6;color:white;" onclick="showSettingsTab('outbound')"><i class="fa-solid fa-phone"></i> Outbound</button>
             <button class="btn" id="btn-tab-inbound" style="background:#95a5a6;color:white;" onclick="showSettingsTab('inbound')"><i class="fa-solid fa-phone-flip"></i> Inbound</button>
-            <span id="inbound-status-badge" style="font-size:10px;"></span>
             <button class="btn" id="btn-tab-documents" style="background:#95a5a6;color:white;" onclick="showSettingsTab('documents')"><i class="fa-solid fa-book"></i> Documents</button>
             <button class="btn" id="btn-tab-global" style="background:#95a5a6;color:white;" onclick="showSettingsTab('global')"><i class="fa-solid fa-gear"></i> Global</button>
             <span id="settings-tab-label" style="margin-left:auto;font-size:11px;color:#888;"></span>
@@ -1733,6 +1732,10 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
         </div>
         </div><!-- /outbound-settings-body -->
         <div id="inbound-settings-body" style="display:none;margin-top:12px;">
+        <div id="inbound-status-banner" style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:8px 12px;border-radius:6px;background:#f8f9fa;font-size:12px;">
+            <span id="inbound-status-badge"></span>
+            <span id="inbound-status-text" style="color:#555;"></span>
+        </div>
         <div id="inbound-config-container">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                 <div><label class="form-label">Enabled</label><label style="font-weight:normal;display:flex;align-items:center;gap:6px;font-size:12px;margin-top:4px;"><input type="checkbox" id="inbound-enabled" checked> Accept inbound calls</label></div>
@@ -3461,8 +3464,10 @@ function loadInboundConfig() {
     fetch('/api/gemini/inbound-config').then(r=>r.json()).then(function(d) {
         if (!d.ok) return;
         var badge = document.getElementById('inbound-status-badge');
+        var statusText = document.getElementById('inbound-status-text');
         if (!d.config) {
             badge.innerHTML = '<span class="badge badge-grey">Not configured</span>';
+            statusText.textContent = 'Save inbound settings to enable AI-answered calls';
             onInboundProviderChange();
             return;
         }
@@ -3501,9 +3506,13 @@ function loadInboundConfig() {
                 kbSel.value = c.knowledge_base_id;
             }
         }
-        badge.innerHTML = c.enabled !== false
-            ? '<span class="badge badge-green">Active</span>'
-            : '<span class="badge badge-red">Disabled</span>';
+        if (c.enabled !== false) {
+            badge.innerHTML = '<span class="badge badge-green">Active</span>';
+            statusText.textContent = 'Inbound calls to your Twilio number will be answered by AI';
+        } else {
+            badge.innerHTML = '<span class="badge badge-red">Disabled</span>';
+            statusText.textContent = 'Inbound calls are turned off \u2014 callers will not be connected to AI';
+        }
     });
 }
 
