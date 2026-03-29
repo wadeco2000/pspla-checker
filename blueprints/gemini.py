@@ -1676,8 +1676,9 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
     <!-- Call Settings (Outbound + Inbound) -->
     <div class="card">
         <div style="display:flex;gap:8px;align-items:center;">
-            <button class="btn" id="btn-tab-outbound" style="background:#3498db;color:white;" onclick="showSettingsTab('outbound')"><i class="fa-solid fa-phone"></i> Outbound Settings</button>
-            <button class="btn" id="btn-tab-inbound" style="background:#95a5a6;color:white;" onclick="showSettingsTab('inbound')"><i class="fa-solid fa-phone-flip"></i> Inbound Settings <span id="inbound-status-badge" style="margin-left:4px;"></span></button>
+            <button class="btn" id="btn-tab-outbound" style="background:#95a5a6;color:white;" onclick="showSettingsTab('outbound')"><i class="fa-solid fa-phone"></i> Outbound</button>
+            <button class="btn" id="btn-tab-inbound" style="background:#95a5a6;color:white;" onclick="showSettingsTab('inbound')"><i class="fa-solid fa-phone-flip"></i> Inbound <span id="inbound-status-badge" style="margin-left:4px;"></span></button>
+            <button class="btn" id="btn-tab-documents" style="background:#95a5a6;color:white;" onclick="showSettingsTab('documents')"><i class="fa-solid fa-book"></i> Documents</button>
             <span id="settings-tab-label" style="margin-left:auto;font-size:11px;color:#888;"></span>
         </div>
         <div id="outbound-settings-body" style="display:none;margin-top:12px;">
@@ -1981,19 +1982,17 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
             </div>
         </div>
         </div><!-- /inbound-settings-body -->
+        <div id="documents-settings-body" style="display:none;margin-top:12px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                <span style="font-size:11px;color:#888;flex:1;">Upload documents (PDF, DOCX, TXT) or URLs for RAG. Attach them to knowledge bases so the AI can reference them during calls.</span>
+                <button class="btn" style="font-size:11px;background:#27ae60;" onclick="showUploadModal()"><i class="fa-solid fa-upload"></i> Upload</button>
+                <button class="btn btn-grey" onclick="loadDocuments()" style="font-size:11px;"><i class="fa-solid fa-rotate"></i></button>
+            </div>
+            <div id="doc-library-container">
+                <div class="empty-state">Loading...</div>
+            </div>
+        </div><!-- /documents-settings-body -->
     </div><!-- /combined settings card -->
-
-    <!-- Document Library -->
-    <div class="card">
-        <h2><i class="fa-solid fa-book"></i> Document Library
-            <button class="btn" style="margin-left:auto;font-size:11px;background:#27ae60;" onclick="showUploadModal()"><i class="fa-solid fa-upload"></i> Upload</button>
-            <button class="btn btn-grey" onclick="loadDocuments()" style="font-size:11px;"><i class="fa-solid fa-rotate"></i></button>
-        </h2>
-        <span style="font-size:11px;color:#888;">Upload documents (PDF, DOCX, TXT) or URLs for RAG. Attach them to knowledge bases so the AI can reference them during calls.</span>
-        <div id="doc-library-container" style="margin-top:8px;">
-            <div class="empty-state">Loading...</div>
-        </div>
-    </div>
 
     <!-- Upload Document Modal -->
     <div class="modal-overlay" id="upload-modal">
@@ -2300,23 +2299,28 @@ function deleteKb() {
 
 // ── Call Management ──
 function showSettingsTab(tab) {
-    var outBody = document.getElementById('outbound-settings-body');
-    var inBody = document.getElementById('inbound-settings-body');
-    var outBtn = document.getElementById('btn-tab-outbound');
-    var inBtn = document.getElementById('btn-tab-inbound');
-    if (!outBody || !inBody) return;
-    if (tab === 'outbound') {
-        var isOpen = outBody.style.display !== 'none';
-        outBody.style.display = isOpen ? 'none' : 'block';
-        inBody.style.display = 'none';
-        outBtn.style.background = isOpen ? '#95a5a6' : '#3498db';
-        inBtn.style.background = '#95a5a6';
-    } else {
-        var isOpen = inBody.style.display !== 'none';
-        inBody.style.display = isOpen ? 'none' : 'block';
-        outBody.style.display = 'none';
-        inBtn.style.background = isOpen ? '#95a5a6' : '#8e44ad';
-        outBtn.style.background = '#95a5a6';
+    var tabs = {
+        outbound: {body: 'outbound-settings-body', btn: 'btn-tab-outbound', color: '#3498db'},
+        inbound: {body: 'inbound-settings-body', btn: 'btn-tab-inbound', color: '#8e44ad'},
+        documents: {body: 'documents-settings-body', btn: 'btn-tab-documents', color: '#27ae60'}
+    };
+    var clicked = tabs[tab];
+    if (!clicked) return;
+    var clickedBody = document.getElementById(clicked.body);
+    if (!clickedBody) return;
+    var isOpen = clickedBody.style.display !== 'none';
+    // Close all tabs
+    Object.keys(tabs).forEach(function(t) {
+        var b = document.getElementById(tabs[t].body);
+        var btn = document.getElementById(tabs[t].btn);
+        if (b) b.style.display = 'none';
+        if (btn) btn.style.background = '#95a5a6';
+    });
+    // Toggle clicked tab
+    if (!isOpen) {
+        clickedBody.style.display = 'block';
+        var btn = document.getElementById(clicked.btn);
+        if (btn) btn.style.background = clicked.color;
     }
 }
 
