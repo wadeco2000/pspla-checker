@@ -17299,7 +17299,7 @@ function showBookingEmail(email, name) {
     html += '<textarea id="booking-email-body" rows="6" style="width:100%;font-size:12px;">' + defaultBody.replace(/\\n/g, '\n') + '</textarea></div>';
     html += '<div class="modal-btns">';
     html += '<button class="btn btn-cancel" onclick="closeModal(\'match-modal\')">Cancel</button>';
-    html += '<button class="btn" style="background:#27ae60;color:white;" onclick="sendBookingEmail(\'' + esc(email).replace(/'/g,"\\'") + '\')"><i class="fa-solid fa-paper-plane"></i> Send</button>';
+    html += '<button class="btn" id="btn-send-booking" style="background:#27ae60;color:white;" onclick="sendBookingEmail(\'' + esc(email).replace(/'/g,"\\'") + '\')"><i class="fa-solid fa-paper-plane"></i> Send</button>';
     html += '</div>';
     document.getElementById('match-modal-content').innerHTML = html;
 }
@@ -17308,14 +17308,19 @@ function sendBookingEmail(email) {
     var subject = document.getElementById('booking-email-subject').value;
     var body = document.getElementById('booking-email-body').value;
     if (!subject || !body) { alert('Subject and message required.'); return; }
+    var btn = document.getElementById('btn-send-booking');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Sending...';
     fetch('/api/club-fitness/send-booking-email', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({email: email, subject: subject, body: body})
     }).then(r=>r.json()).then(function(d) {
-        if (!d.ok) { alert('Error: ' + (d.error||'Unknown')); return; }
+        if (!d.ok) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Send'; alert('Error: ' + (d.error||'Unknown')); return; }
+        btn.innerHTML = '<i class="fa-solid fa-check"></i> Sent!';
+        btn.style.background = '#27ae60';
         msg('Email sent to ' + email);
-        closeModal('match-modal');
-    }).catch(function(e) { alert('Failed: ' + e); });
+        setTimeout(function(){ closeModal('match-modal'); }, 1000);
+    }).catch(function(e) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Send'; alert('Failed: ' + e); });
 }
 
 function saveManualMatch(sid, aid, apptDate) {
