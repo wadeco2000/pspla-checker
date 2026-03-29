@@ -17515,7 +17515,10 @@ function showManualMatch(sid, name, email, phone) {
 }
 
 function showBookingEmail(email, name) {
-    var firstName = name.split(' ')[0];
+    // Look up the actual person by email to get correct name
+    var match = _allRows.find(function(r){ return (r.customer_email||'').toLowerCase() === email.toLowerCase(); });
+    var fullName = (match ? (match.custom_field_1 || match.card_name || name) : name).replace('[CASH] ','');
+    var firstName = fullName.split(' ')[0];
     // Show loading while fetching template
     var html = '<h3><i class="fa-solid fa-envelope" style="color:#3498db"></i> Send Email</h3>';
     html += '<p style="font-size:12px;color:#666;"><i class="fa-solid fa-spinner fa-spin"></i> Loading template...</p>';
