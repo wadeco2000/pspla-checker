@@ -1708,7 +1708,8 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
     <div class="card">
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <button class="btn" id="btn-tab-outbound" style="background:#95a5a6;color:white;" onclick="showSettingsTab('outbound')"><i class="fa-solid fa-phone"></i> Outbound</button>
-            <button class="btn" id="btn-tab-inbound" style="background:#95a5a6;color:white;" onclick="showSettingsTab('inbound')"><i class="fa-solid fa-phone-flip"></i> Inbound <span id="inbound-status-badge" style="margin-left:4px;"></span></button>
+            <button class="btn" id="btn-tab-inbound" style="background:#95a5a6;color:white;" onclick="showSettingsTab('inbound')"><i class="fa-solid fa-phone-flip"></i> Inbound</button>
+            <span id="inbound-status-badge" style="font-size:10px;"></span>
             <button class="btn" id="btn-tab-documents" style="background:#95a5a6;color:white;" onclick="showSettingsTab('documents')"><i class="fa-solid fa-book"></i> Documents</button>
             <button class="btn" id="btn-tab-global" style="background:#95a5a6;color:white;" onclick="showSettingsTab('global')"><i class="fa-solid fa-gear"></i> Global</button>
             <span id="settings-tab-label" style="margin-left:auto;font-size:11px;color:#888;"></span>
