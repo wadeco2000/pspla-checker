@@ -1574,6 +1574,13 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
         .modal h3{margin-bottom:16px;font-size:16px;}
         .empty-state{text-align:center;padding:40px;color:#aaa;font-size:14px;}
         .config-warning{background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:16px;margin:16px 24px;color:#856404;}
+        /* Collapsible settings cards */
+        .settings-card .settings-header{cursor:pointer;user-select:none;display:flex;align-items:center;gap:8px;}
+        .settings-card .settings-header:hover{opacity:0.8;}
+        .settings-card .settings-header .collapse-icon{margin-left:auto;font-size:12px;color:#888;transition:transform 0.2s;}
+        .settings-card .settings-header.open .collapse-icon{transform:rotate(180deg);}
+        .settings-card .settings-body{display:none;margin-top:12px;}
+        .settings-card .settings-body.open{display:block;}
         /* Supervisor call cards */
         .sup-card{border:2px solid #e2e8f0;border-radius:10px;padding:12px;background:#fff;transition:border-color 0.3s;}
         .sup-card.sentiment-neutral{border-color:#e2e8f0;}
@@ -1657,15 +1664,16 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
             <button class="btn btn-green btn-lg" onclick="makeCall()" id="btn-call" {% if not gemini_configured %}disabled{% endif %}>
                 <i class="fa-solid fa-phone"></i> Call
             </button>
-            <button class="btn btn-grey" onclick="toggleSettings()" style="margin-left:8px;">
-                <i class="fa-solid fa-sliders"></i> Settings
-            </button>
         </div>
     </div>
 
-    <!-- Settings Panel (collapsible) -->
-    <div class="card" id="settings-panel" style="display:none;">
-        <h2><i class="fa-solid fa-sliders"></i> Call Settings</h2>
+    <!-- Outbound Call Settings -->
+    <div class="card settings-card">
+        <h2 class="settings-header" onclick="toggleSettingsCard('outbound')">
+            <i class="fa-solid fa-phone"></i> Outbound Call Settings
+            <i class="fa-solid fa-chevron-down collapse-icon" id="outbound-collapse-icon"></i>
+        </h2>
+        <div class="settings-body" id="outbound-settings-body">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
             <div>
                 <label class="form-label">AI Provider</label>
@@ -1798,7 +1806,8 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
         <div data-provider="gemini" style="margin-top:12px;padding:8px;background:#fff3cd;border-radius:6px;font-size:11px;color:#856404;">
             <i class="fa-solid fa-info-circle"></i> <strong>Affective Dialog</strong> and <strong>Proactive Audio</strong> require Gemini 2.5 Flash Live (not available on 3.1). These features will be added when model support is confirmed.
         </div>
-    </div>
+        </div><!-- /settings-body -->
+    </div><!-- /settings-card -->
 
     <!-- Active Call Panel (hidden until call active) -->
     <div class="card" id="active-call-panel" style="display:none;">
@@ -1873,11 +1882,14 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- Inbound Calls Config -->
-    <div class="card">
-        <h2><i class="fa-solid fa-phone-flip"></i> Inbound Calls
-            <span id="inbound-status-badge" style="margin-left:auto;"></span>
+    <!-- Inbound Call Settings -->
+    <div class="card settings-card">
+        <h2 class="settings-header" onclick="toggleSettingsCard('inbound')">
+            <i class="fa-solid fa-phone-flip"></i> Inbound Call Settings
+            <span id="inbound-status-badge" style="margin-left:8px;"></span>
+            <i class="fa-solid fa-chevron-down collapse-icon" id="inbound-collapse-icon"></i>
         </h2>
+        <div class="settings-body" id="inbound-settings-body">
         <span style="font-size:11px;color:#888;">Configure how the AI handles incoming phone calls to your Twilio number.</span>
         <div id="inbound-config-container" style="margin-top:12px;">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px;">
@@ -1914,6 +1926,14 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                         <option value="en-AU">English (AU)</option>
                         <option value="en-GB">English (UK)</option>
                         <option value="en-US">English (US)</option>
+                        <option value="mi">Te Reo Māori</option>
+                        <option value="es">Spanish</option>
+                        <option value="fr">French</option>
+                        <option value="de">German</option>
+                        <option value="zh">Chinese</option>
+                        <option value="ja">Japanese</option>
+                        <option value="ko">Korean</option>
+                        <option value="hi">Hindi</option>
                     </select>
                 </div>
                 <div>
@@ -1961,7 +1981,8 @@ GEMINI_TEMPLATE = r"""<!DOCTYPE html>
                 <button class="btn" style="background:#27ae60;" onclick="saveInboundConfig()"><i class="fa-solid fa-save"></i> Save Inbound Config</button>
             </div>
         </div>
-    </div>
+        </div><!-- /settings-body -->
+    </div><!-- /settings-card -->
 
     <!-- Document Library -->
     <div class="card">
@@ -2279,10 +2300,29 @@ function deleteKb() {
 }
 
 // ── Call Management ──
-function toggleSettings() {
-    var panel = document.getElementById('settings-panel');
-    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+function toggleSettingsCard(section) {
+    var body = document.getElementById(section + '-settings-body');
+    var icon = document.getElementById(section + '-collapse-icon');
+    var header = icon.parentElement;
+    var isOpen = body.classList.contains('open');
+    if (isOpen) {
+        body.classList.remove('open');
+        header.classList.remove('open');
+    } else {
+        body.classList.add('open');
+        header.classList.add('open');
+    }
+    localStorage.setItem('gemini_' + section + '_settings_open', !isOpen);
 }
+// Restore collapse state on load
+['outbound', 'inbound'].forEach(function(s) {
+    if (localStorage.getItem('gemini_' + s + '_settings_open') === 'true') {
+        var body = document.getElementById(s + '-settings-body');
+        var icon = document.getElementById(s + '-collapse-icon');
+        if (body) body.classList.add('open');
+        if (icon) icon.parentElement.classList.add('open');
+    }
+});
 
 function getCallSettings() {
     var settings = {
