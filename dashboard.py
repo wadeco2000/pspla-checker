@@ -16829,6 +16829,8 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         <select id="goal-filter" onchange="onFilterChange()" style="min-width:120px;font-size:12px;">
             <option value="">All</option>
         </select>
+        <label class="filter-check"><input type="checkbox" id="no-start-weight" onchange="onFilterChange()"> No starting weight</label>
+        <label class="filter-check"><input type="checkbox" id="no-final-weight" onchange="onFilterChange()"> No final weight</label>
         <label class="filter-check"><input type="checkbox" id="show-charts" onchange="toggleCharts()"> Show Charts</label>
         <span id="filter-count" style="font-size:12px;color:#888;"></span>
         <div style="flex:1"></div>
@@ -17659,6 +17661,13 @@ function applyFiltersAndRender() {
     // Goal filter
     var goalVal = document.getElementById('goal-filter').value;
     if (goalVal) rows = rows.filter(function(r){ return (r.custom_field_2||'').trim() === goalVal; });
+    // Weight filters
+    if (document.getElementById('no-start-weight').checked) {
+        rows = rows.filter(function(r){ return !r.gym_scales_weight || !r.gym_scales_weight.trim(); });
+    }
+    if (document.getElementById('no-final-weight').checked) {
+        rows = rows.filter(function(r){ return !r.final_weight || !r.final_weight.trim(); });
+    }
     // Search filter
     var q = (document.getElementById('search-input').value || '').toLowerCase().trim();
     if (q) {
