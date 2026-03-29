@@ -15074,7 +15074,6 @@ def _validate_payment_link(pl):
     return None
 
 
-@app.route("/api/club-fitness/send-booking-email", methods=["POST"])
 @app.route("/api/club-fitness/email-template", methods=["GET", "POST"])
 def club_fitness_email_template():
     """GET: fetch email template. POST: update it."""
@@ -15098,10 +15097,20 @@ def club_fitness_email_template():
     if not subject or not body:
         return jsonify({"ok": False, "error": "Subject and body required"}), 400
     try:
-        r = requests.post(f"{SUPABASE_URL}/rest/v1/challenge_email_templates",
-            json={"name": name, "subject": subject, "body": body, "updated_at": "now()"},
+        # Try update first, insert if not exists
+        r = requests.patch(f"{SUPABASE_URL}/rest/v1/challenge_email_templates",
+            params={"name": f"eq.{name}"},
+            json={"subject": subject, "body": body},
             headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                     "Content-Type": "application/json", "Prefer": "resolution=merge-duplicates,return=representation"},
+                     "Content-Type": "application/json", "Prefer": "return=representation"},
+            timeout=10)
+        if r.ok and r.json():
+            return jsonify({"ok": True, "template": r.json()[0]})
+        # Insert if no row matched
+        r = requests.post(f"{SUPABASE_URL}/rest/v1/challenge_email_templates",
+            json={"name": name, "subject": subject, "body": body},
+            headers={"apikey": SUPABASE_SERVICE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                     "Content-Type": "application/json", "Prefer": "return=representation"},
             timeout=10)
         return jsonify({"ok": True, "template": r.json()[0] if r.ok and r.json() else None})
     except Exception as e:
