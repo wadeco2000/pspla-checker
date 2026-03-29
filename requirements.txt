@@ -9,7 +9,7 @@ pyotp
 qrcode[pil]
 cryptography
 paho-mqtt
-stripe
+stripe<15.0.0
 twilio
 google-genai
 fastapi
