@@ -16915,8 +16915,8 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         <button class="btn btn-edit" id="btn-edit-link" onclick="showEditModal()" style="display:none"><i class="fa-solid fa-pen"></i></button>
         <button class="btn btn-del" id="btn-del-link" onclick="deleteLink()" style="display:none"><i class="fa-solid fa-trash"></i></button>{% endif %}
         <div style="flex:1"></div>
-        <button class="btn btn-cash" onclick="showCashModal()" title="Add a walk-in cash payment"><i class="fa-solid fa-money-bill-wave"></i> Add Cash Entry</button>
-        <button class="btn" style="background:#3498db;color:white;" onclick="showQuickEntry()"><i class="fa-solid fa-mobile-screen"></i> Quick Entry</button>
+        <button class="btn btn-cash" onclick="showCashModal()" title="Add a walk-in cash payment"><i class="fa-solid fa-money-bill-wave"></i> Cash Sign Up</button>
+        <button class="btn" style="background:#3498db;color:white;" onclick="showQuickEntry()"><i class="fa-solid fa-mobile-screen"></i> Quick Weigh In</button>
         <button class="btn btn-fetch" id="btn-fetch" onclick="fetchSignups()" title="Download latest entries from Stripe"><i class="fa-brands fa-stripe-s"></i> Stripe Download</button>
         {% if is_admin %}<button class="btn" style="background:#2c3e50;color:white;" onclick="snapshotWeights()" title="Backup all weights to database"><i class="fa-solid fa-database"></i> Backup Weights</button>
         <button class="btn btn-export" onclick="exportCSV()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
