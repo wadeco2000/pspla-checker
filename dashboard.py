@@ -17232,7 +17232,7 @@ function loadLinks() {
             sel.appendChild(opt);
         });
         if (cur) sel.value = cur;
-        else if (_links.length === 1) sel.value = _links[0].payment_link_id;
+        else if (_links.length === 1) { sel.value = _links[0].payment_link_id; onLinkChange(); fetchSignups(); return; }
         onLinkChange();
     });
 }
