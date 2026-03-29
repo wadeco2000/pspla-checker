@@ -17230,8 +17230,10 @@ function loadLinks() {
             opt.textContent = lk.label + ' (' + lk.payment_link_id + ')';
             sel.appendChild(opt);
         });
-        if (cur) sel.value = cur;
-        else if (_links.length === 1) { sel.value = _links[0].payment_link_id; onLinkChange(); loadStored(_links[0].payment_link_id); return; }
+        if (cur) { sel.value = cur; }
+        else if (_links.length === 1) { sel.value = _links[0].payment_link_id; }
+        // Auto-load data if a link is selected
+        if (sel.value) { onLinkChange(); loadStored(sel.value); return; }
         onLinkChange();
     });
 }
@@ -18665,22 +18667,7 @@ function qeSave(sid, force) {
 
 // Init
 loadLinks();
-{% if default_payment_link %}
-setTimeout(function(){
-    var sel = document.getElementById('link-select');
-    if (!sel.value) {
-        for (var i = 0; i < sel.options.length; i++) {
-            if (sel.options[i].value === '{{ default_payment_link }}') {
-                sel.value = '{{ default_payment_link }}';
-                onLinkChange();
-                loadStored('{{ default_payment_link }}');
-                return;
-            }
-        }
-        loadStored('{{ default_payment_link }}');
-    }
-}, 500);
-{% endif %}
+// Auto-load handled inside loadLinks() — no separate timeout needed
 </script>
 
 <!-- Quick Entry Overlay -->
