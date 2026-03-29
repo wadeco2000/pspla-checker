@@ -16737,18 +16737,18 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         <select id="link-select" onchange="onLinkChange()">
             <option value="">— Select a link —</option>
         </select>
-        <button class="btn btn-add" onclick="showAddModal()" title="Manually add a payment link by ID"><i class="fa-solid fa-plus"></i> Add Link</button>
+        {% if is_admin %}<button class="btn btn-add" onclick="showAddModal()" title="Manually add a payment link by ID"><i class="fa-solid fa-plus"></i> Add Link</button>
         <button class="btn btn-stripe" onclick="fetchStripeLinks()" title="Browse your Stripe payment links"><i class="fa-brands fa-stripe-s"></i> Browse Stripe Links</button>
         <button class="btn btn-edit" id="btn-edit-link" onclick="showEditModal()" style="display:none"><i class="fa-solid fa-pen"></i></button>
-        <button class="btn btn-del" id="btn-del-link" onclick="deleteLink()" style="display:none"><i class="fa-solid fa-trash"></i></button>
+        <button class="btn btn-del" id="btn-del-link" onclick="deleteLink()" style="display:none"><i class="fa-solid fa-trash"></i></button>{% endif %}
         <div style="flex:1"></div>
         <button class="btn btn-cash" onclick="showCashModal()" title="Add a walk-in cash payment"><i class="fa-solid fa-money-bill-wave"></i> Add Cash Entry</button>
         <button class="btn btn-fetch" id="btn-fetch" onclick="fetchSignups()" title="Download latest entries from Stripe"><i class="fa-brands fa-stripe-s"></i> Stripe Download</button>
-        <button class="btn btn-export" onclick="exportCSV()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
-        <button class="btn btn-clean" onclick="showCleanModal()"><i class="fa-solid fa-broom"></i> Clean Data</button>
+        {% if is_admin %}<button class="btn btn-export" onclick="exportCSV()"><i class="fa-solid fa-file-csv"></i> Export CSV</button>
+        <button class="btn btn-clean" onclick="showCleanModal()"><i class="fa-solid fa-broom"></i> Clean Data</button>{% endif %}
         <button class="btn btn-booking" onclick="checkBookings()"><i class="fa-solid fa-calendar-check"></i> Check Bookings</button>
-        <button class="btn" style="background:#9b59b6;color:white;" onclick="guessGender()"><i class="fa-solid fa-venus-mars"></i> Guess Gender</button>
-        <button class="btn btn-campaign" onclick="toggleCampaign()"><i class="fa-solid fa-envelope"></i> Email Campaign</button>
+        {% if is_admin %}<button class="btn" style="background:#9b59b6;color:white;" onclick="guessGender()"><i class="fa-solid fa-venus-mars"></i> Guess Gender</button>
+        <button class="btn btn-campaign" onclick="toggleCampaign()"><i class="fa-solid fa-envelope"></i> Email Campaign</button>{% endif %}
         <span class="count-badge" id="count-badge" style="display:none">0</span>
         <span class="status-msg" id="status-msg"></span>
     </div>
