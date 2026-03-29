@@ -17242,8 +17242,10 @@ function onLinkChange() {
     var sel = document.getElementById('link-select');
     var pl = sel.value;
     _currentLink = _links.find(function(l){ return l.payment_link_id === pl; }) || null;
-    document.getElementById('btn-edit-link').style.display = _currentLink ? '' : 'none';
-    document.getElementById('btn-del-link').style.display = _currentLink ? '' : 'none';
+    var editBtn = document.getElementById('btn-edit-link');
+    var delBtn = document.getElementById('btn-del-link');
+    if (editBtn) editBtn.style.display = _currentLink ? '' : 'none';
+    if (delBtn) delBtn.style.display = _currentLink ? '' : 'none';
     if (_currentLink) {
         document.getElementById('th-cf1').innerHTML = esc(_currentLink.col_1_name || 'Custom Field 1') + ' <span class="sort-arrow" id="sort-custom_field_1"></span>';
         document.getElementById('th-cf2').innerHTML = esc(_currentLink.col_2_name || 'Custom Field 2') + ' <span class="sort-arrow" id="sort-custom_field_2"></span>';
