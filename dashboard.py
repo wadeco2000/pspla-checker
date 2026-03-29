@@ -16695,6 +16695,8 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
         .btn-row-edit{background:none;border:1px solid #3498db;color:#3498db;padding:3px 6px;border-radius:3px;cursor:pointer;font-size:11px;}
         .btn-row-del{background:none;border:1px solid #e74c3c;color:#e74c3c;padding:3px 6px;border-radius:3px;cursor:pointer;font-size:11px;}
         .btn-row-edit:hover{background:#3498db;color:white;} .btn-row-del:hover{background:#e74c3c;color:white;}
+        .col-actions{position:sticky;right:0;background:#fff;box-shadow:-2px 0 4px rgba(0,0,0,0.05);z-index:1;}
+        .data-row:hover .col-actions{background:#f8f9fa;}
         .btn-campaign{background:#c0392b;color:white;}
         .campaign-panel{display:none;background:white;border-radius:8px;box-shadow:0 2px 4px rgba(0,0,0,0.08);padding:18px;margin-bottom:18px;}
         .campaign-panel.active{display:block;}
@@ -16842,7 +16844,7 @@ CLUB_FITNESS_TEMPLATE = r"""<!DOCTYPE html>
                     <th data-col="gym_scales_weight" onclick="sortBy('gym_scales_weight')">Gym Scales Weight <span class="sort-arrow" id="sort-gym_scales_weight"></span></th>
                     <th data-col="final_weight" onclick="sortBy('final_weight')">Final Weight <span class="sort-arrow" id="sort-final_weight"></span></th>
                     <th data-col="bookafy_appointment_date" onclick="sortBy('bookafy_appointment_date')">Appointment <span class="sort-arrow" id="sort-bookafy_appointment_date"></span></th>
-                    <th></th>
+                    <th class="col-actions"></th>
                 </tr></thead>
                 <tbody id="signups-body"></tbody>
             </table>
@@ -17730,7 +17732,7 @@ function renderTable(rows) {
             '<td><input type="text" class="wt-input" value="' + esc(r.gym_scales_weight||'') + '" data-sid="' + esc(sid) + '" data-field="gym_scales_weight" onchange="saveWeight(this)" onclick="event.stopPropagation()"></td>' +
             '<td><input type="text" class="wt-input" value="' + esc(r.final_weight||'') + '" data-sid="' + esc(sid) + '" data-field="final_weight" onchange="saveWeight(this)" onclick="event.stopPropagation()"></td>' +
             '<td>' + renderApptCell(r) + '</td>' +
-            '<td style="white-space:nowrap"><button class="btn-row-edit" onclick="event.stopPropagation();showEditEntry(\'' + esc(sid) + '\')"><i class="fa-solid fa-pen"></i></button> <button class="btn-row-del" onclick="event.stopPropagation();deleteEntry(\'' + esc(sid) + '\',\'' + esc(r.card_name||'').replace(/'/g,"\\'") + '\')"><i class="fa-solid fa-trash"></i></button></td>';
+            '<td class="col-actions" style="white-space:nowrap"><button class="btn-row-edit" onclick="event.stopPropagation();showEditEntry(\'' + esc(sid) + '\')"><i class="fa-solid fa-pen"></i></button> <button class="btn-row-del" onclick="event.stopPropagation();deleteEntry(\'' + esc(sid) + '\',\'' + esc(r.card_name||'').replace(/'/g,"\\'") + '\')"><i class="fa-solid fa-trash"></i></button></td>';
         tr.onclick = function(){ toggleDetail(sid, this); };
         tb.appendChild(tr);
     });
