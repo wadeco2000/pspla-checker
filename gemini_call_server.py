@@ -1425,6 +1425,7 @@ async def media_stream(websocket: WebSocket, call_id: str):
         _last_rag_query = {"text": ""}  # avoid duplicate searches
         _sentiment_state = {"turns_since_negative": 0}
         call["sentiment"] = "neutral"
+        call["peak_sentiment"] = "neutral"  # Track worst sentiment reached
 
         async def on_caller_transcript(text: str):
             """Caller transcript — flush immediately, trigger RAG search if enabled."""
@@ -1464,6 +1465,10 @@ async def media_stream(websocket: WebSocket, call_id: str):
             )
             if new_sentiment != call.get("sentiment"):
                 call["sentiment"] = new_sentiment
+                # Track peak (worst) sentiment: angry > frustrated > neutral/positive
+                _severity = {"neutral": 0, "positive": 0, "frustrated": 1, "angry": 2}
+                if _severity.get(new_sentiment, 0) > _severity.get(call.get("peak_sentiment", "neutral"), 0):
+                    call["peak_sentiment"] = new_sentiment
                 await _broadcast_transcript(call_id, {
                     "type": "sentiment", "value": new_sentiment,
                     "timestamp": datetime.now(timezone.utc).isoformat()
@@ -1881,6 +1886,7 @@ async def _save_call_history(call_id: str):
                 "transcript": call.get("transcript", []),
                 "recording_url": call.get("recording_url"),
                 "ended_at": datetime.now(timezone.utc).isoformat(),
+                "peak_sentiment": call.get("peak_sentiment", "neutral"),
                 "notes": json.dumps(notes_data),
             },
             headers={

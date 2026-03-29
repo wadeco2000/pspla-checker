@@ -2610,7 +2610,7 @@ function loadHistory() {
     fetch('/api/gemini/call-history').then(r=>r.json()).then(d=>{
         if (!d.ok) { document.getElementById('history-container').innerHTML = '<div class="empty-state">Error loading history.</div>'; return; }
         if (!d.calls.length) { document.getElementById('history-container').innerHTML = '<div class="empty-state">No calls yet.</div>'; return; }
-        var html = '<table class="history-table"><thead><tr><th>Date</th><th>To</th><th>Duration</th><th>Status</th><th>AI</th><th>Cost (NZD)</th><th>KB</th><th>User</th><th>Transcript</th><th>Recording</th></tr></thead><tbody>';
+        var html = '<table class="history-table"><thead><tr><th></th><th>Date</th><th>To</th><th>Duration</th><th>Status</th><th>AI</th><th>Cost (NZD)</th><th>KB</th><th>User</th><th>Transcript</th><th>Recording</th></tr></thead><tbody>';
         d.calls.forEach(function(c){
             var date = c.started_at ? new Date(c.started_at).toLocaleString('en-NZ', {day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '-';
             var dur = c.duration_seconds ? Math.floor(c.duration_seconds/60) + 'm ' + (c.duration_seconds%60) + 's' : '-';
@@ -2629,7 +2629,11 @@ function loadHistory() {
                 recordingBtns = '<button class="btn" style="font-size:10px;padding:2px 8px;background:#27ae60;" onclick="playRecording(\'' + esc(c.call_sid) + '\', this)"><i class="fa-solid fa-play"></i></button> '
                     + '<a href="/api/gemini/recording/' + esc(c.call_sid) + '" class="btn btn-grey" style="font-size:10px;padding:2px 8px;text-decoration:none;" download><i class="fa-solid fa-download"></i></a>';
             }
-            html += '<tr><td>' + date + '</td><td>' + esc(c.to_number||'') + '</td><td>' + dur + '</td>';
+            var peakSent = c.peak_sentiment || 'neutral';
+            var sentIcon = peakSent === 'angry' ? '<span title="Caller was angry" style="color:#e74c3c;font-size:16px;">&#x26A0;</span>'
+                : peakSent === 'frustrated' ? '<span title="Caller was frustrated" style="color:#f39c12;font-size:16px;">&#x26A0;</span>'
+                : '';
+            html += '<tr><td style="text-align:center;">' + sentIcon + '</td><td>' + date + '</td><td>' + esc(c.to_number||'') + '</td><td>' + dur + '</td>';
             html += '<td><span class="badge ' + statusCls + '">' + esc(c.status||'unknown') + '</span></td>';
             html += '<td>' + aiBadge + '</td>';
             html += '<td title="' + costTitle + '" style="cursor:help;">' + costDisplay + '</td>';
@@ -2641,28 +2645,64 @@ function loadHistory() {
     });
 }
 
+var _sentimentTriggerCache = null;
+function _getSentimentTriggers() {
+    if (_sentimentTriggerCache) return Promise.resolve(_sentimentTriggerCache);
+    return fetch('/api/gemini/sentiment-triggers').then(r=>r.json()).then(function(d) {
+        if (d.ok) {
+            _sentimentTriggerCache = {angry: [], frustrated: []};
+            d.triggers.forEach(function(t) {
+                if (t.level === 'angry' || t.level === 'frustrated') _sentimentTriggerCache[t.level].push(t.phrase);
+            });
+        }
+        return _sentimentTriggerCache || {angry: [], frustrated: []};
+    });
+}
+
+function _checkLineSentiment(text, triggers) {
+    var lower = (text || '').toLowerCase();
+    for (var i = 0; i < triggers.angry.length; i++) {
+        if (lower.indexOf(triggers.angry[i]) >= 0) return 'angry';
+    }
+    for (var i = 0; i < triggers.frustrated.length; i++) {
+        if (lower.indexOf(triggers.frustrated[i]) >= 0) return 'frustrated';
+    }
+    return null;
+}
+
 function showTranscript(callSid) {
     fetch('/api/gemini/call/' + callSid).then(r=>r.json()).then(d=>{
         if (!d.ok) { alert('Error loading transcript.'); return; }
         var transcript = d.call.transcript || [];
-        var html = '';
         if (typeof transcript === 'string') { try { transcript = JSON.parse(transcript); } catch(e) { transcript = []; } }
-        if (Array.isArray(transcript) && transcript.length) {
-            // Sort by timestamp (oldest first)
-            transcript.sort(function(a, b) {
-                return (a.timestamp || '').localeCompare(b.timestamp || '');
-            });
-            transcript.forEach(function(t){
-                var cls = t.speaker === 'ai' ? 'ai' : 'caller';
-                var label = t.speaker === 'ai' ? '🤖 AI' : '👤 Caller';
-                var time = t.timestamp ? new Date(t.timestamp).toLocaleTimeString('en-NZ', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '';
-                html += '<div class="transcript-line ' + cls + '"><span class="time">' + time + '</span><span class="speaker">' + label + ':</span>' + esc(t.text||'') + '</div>';
-            });
-        } else {
-            html = '<div class="empty-state" style="color:#666;">No transcript available.</div>';
-        }
-        document.getElementById('transcript-modal-content').innerHTML = html;
-        document.getElementById('transcript-modal').classList.add('active');
+        _getSentimentTriggers().then(function(triggers) {
+            var html = '';
+            if (Array.isArray(transcript) && transcript.length) {
+                transcript.sort(function(a, b) { return (a.timestamp || '').localeCompare(b.timestamp || ''); });
+                transcript.forEach(function(t){
+                    var cls = t.speaker === 'ai' ? 'ai' : 'caller';
+                    var label = t.speaker === 'ai' ? '🤖 AI' : '👤 Caller';
+                    var time = t.timestamp ? new Date(t.timestamp).toLocaleTimeString('en-NZ', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '';
+                    var sentimentStyle = '';
+                    var sentimentTag = '';
+                    if (t.speaker === 'caller') {
+                        var lineSentiment = _checkLineSentiment(t.text, triggers);
+                        if (lineSentiment === 'angry') {
+                            sentimentStyle = 'background:rgba(231,76,60,0.15);border-left:3px solid #e74c3c;padding-left:8px;';
+                            sentimentTag = ' <span style="color:#e74c3c;font-size:9px;font-weight:bold;">ANGRY</span>';
+                        } else if (lineSentiment === 'frustrated') {
+                            sentimentStyle = 'background:rgba(243,156,18,0.15);border-left:3px solid #f39c12;padding-left:8px;';
+                            sentimentTag = ' <span style="color:#f39c12;font-size:9px;font-weight:bold;">FRUSTRATED</span>';
+                        }
+                    }
+                    html += '<div class="transcript-line ' + cls + '" style="' + sentimentStyle + '"><span class="time">' + time + '</span><span class="speaker">' + label + ':</span>' + esc(t.text||'') + sentimentTag + '</div>';
+                });
+            } else {
+                html = '<div class="empty-state" style="color:#666;">No transcript available.</div>';
+            }
+            document.getElementById('transcript-modal-content').innerHTML = html;
+            document.getElementById('transcript-modal').classList.add('active');
+        });
     });
 }
 
