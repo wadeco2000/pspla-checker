@@ -189,7 +189,7 @@ class GeminiProvider:
             response_modalities=[types.Modality.AUDIO],
             system_instruction=types.Content(
                 parts=[types.Part(text=self._call.get("system_instruction", "You are a helpful AI assistant.")
-                       + "\n\nIMPORTANT: You are on a live phone call. Start speaking immediately — introduce yourself right away without waiting for the other person to speak first."
+                       + ("\n\nIMPORTANT: You are receiving an inbound phone call. Start speaking immediately with your greeting." if self._call.get("is_inbound") else "\n\nIMPORTANT: You are making an outbound phone call. Wait for the person to answer and speak first (e.g. 'Hello?'), then introduce yourself.")
                        + "\n\nCRITICAL TRANSCRIPTION RULES: This is a phone call over 8kHz telephony audio. ALL transcription MUST be in English/Latin script only — NEVER output Chinese, Japanese, Korean, Arabic, or other non-Latin characters in transcriptions. If audio is unclear, transcribe your best guess in English or mark as [inaudible]. Prefer common English names and words over unusual interpretations (e.g. 'John' not 'jump', 'Tuesday' not random syllables)."
                        + lang_hint
                        + strict_hint)]
@@ -355,7 +355,7 @@ class OpenAIProvider:
             "type": "session.update",
             "session": {
                 "instructions": self._call.get("system_instruction", "You are a helpful AI assistant.")
-                    + f"\n\nIMPORTANT: You are on a live phone call. You MUST speak in {lang_name} only. Start speaking immediately — introduce yourself right away without waiting for the other person to speak first."
+                    + (f"\n\nIMPORTANT: You are receiving an inbound phone call. You MUST speak in {lang_name} only. Start speaking immediately with your greeting." if self._call.get("is_inbound") else f"\n\nIMPORTANT: You are making an outbound phone call. You MUST speak in {lang_name} only. Wait for the person to answer and speak first, then introduce yourself.")
                     + "\n\nALL transcription MUST be in English/Latin script only — NEVER output non-Latin characters."
                     + strict_hint,
                 "modalities": ["audio", "text"],
