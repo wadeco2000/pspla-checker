@@ -18318,7 +18318,7 @@ function deleteLink() {
 }
 
 /* ── Clean Data ── */
-var _knownGyms = ['Club Fitness','City Fitness','City Gym','Jetts','Iron Alley','Wanganui Bootcamp','Rivercity Boxing','F45','The Zone','Her Fitness','Home Gym','No Gym'];
+var _knownGyms = ['Club Fitness','City Fitness','City Gym','Jetts','Iron Alley','Wanganui Bootcamp','Rivercity Boxing','F45','The Zone','Her Fitness','Home Gym','No Gym','Primal HQ','Group Fitness','Forme Pilates','Other','Did not state'];
 var _storedMappings = [];
 
 function showCleanModal() {
@@ -18662,8 +18662,18 @@ function loadGymLogos() {
 loadGymLogos();
 
 function showGymLogosModal() {
+    // Build complete gym list: _knownGyms + any unique gyms from actual data
+    var allGyms = _knownGyms.slice();
+    _allRows.forEach(function(r) {
+        var g = (r.custom_field_3||'').trim();
+        if (g && allGyms.indexOf(g) < 0) allGyms.push(g);
+    });
+    // Also include any gyms that already have logos
+    Object.keys(_gymLogos).forEach(function(g) {
+        if (allGyms.indexOf(g) < 0) allGyms.push(g);
+    });
     var html = '';
-    _knownGyms.forEach(function(gym) {
+    allGyms.forEach(function(gym) {
         var logo = _gymLogos[gym];
         html += '<div style="display:flex;align-items:center;gap:12px;padding:8px;border-bottom:1px solid #eee;">';
         html += '<div style="width:40px;height:40px;border-radius:6px;background:#f5f5f5;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;">';
